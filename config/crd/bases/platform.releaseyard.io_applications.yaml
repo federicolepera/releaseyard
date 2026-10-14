@@ -1,0 +1,816 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.22.0
+  name: applications.platform.releaseyard.io
+spec:
+  group: platform.releaseyard.io
+  names:
+    kind: Application
+    listKind: ApplicationList
+    plural: applications
+    singular: application
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: Application is the Schema for the applications API
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: spec defines the desired state of Application
+            properties:
+              applicationDefinitionRef:
+                description: |-
+                  applicationDefinitionRef identifies a cluster-scoped ApplicationDefinition.
+                  Its name cannot be changed after creation.
+                properties:
+                  name:
+                    description: name identifies the referenced resource.
+                    maxLength: 253
+                    minLength: 1
+                    pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
+                    type: string
+                required:
+                - name
+                type: object
+                x-kubernetes-validations:
+                - message: applicationDefinitionRef is immutable
+                  rule: self.name == oldSelf.name
+              clusterRef:
+                description: |-
+                  clusterRef identifies the target cluster-scoped Cluster resource.
+                  Its name cannot be changed after creation.
+                properties:
+                  name:
+                    description: name identifies the referenced resource.
+                    maxLength: 253
+                    minLength: 1
+                    pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
+                    type: string
+                required:
+                - name
+                type: object
+              environment:
+                description: |-
+                  environment selects a fixed snapshot of matching Cluster names and UIDs.
+                  The snapshot is immutable after Application creation.
+                properties:
+                  name:
+                    description: name is the environment label value selected at creation.
+                    maxLength: 63
+                    minLength: 1
+                    pattern: ^[A-Za-z0-9]([-A-Za-z0-9_.]*[A-Za-z0-9])?$
+                    type: string
+                  targets:
+                    description: targets contains the fixed set of Cluster identities
+                      selected for this Application.
+                    items:
+                      description: ApplicationEnvironmentTarget fixes one Cluster
+                        identity in an environment snapshot.
+                      properties:
+                        name:
+                          description: name is the DNS subdomain name of the target
+                            Cluster.
+                          maxLength: 253
+                          minLength: 1
+                          pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
+                          type: string
+                        uid:
+                          description: uid identifies the exact target Cluster object.
+                          type: string
+                      required:
+                      - name
+                      - uid
+                      type: object
+                      x-kubernetes-validations:
+                      - message: uid must contain between 1 and 128 characters
+                        rule: size(self.uid) >= 1 && size(self.uid) <= 128
+                    maxItems: 32
+                    minItems: 1
+                    type: array
+                    x-kubernetes-list-map-keys:
+                    - name
+                    x-kubernetes-list-type: map
+                required:
+                - name
+                - targets
+                type: object
+              releaseNamespace:
+                description: |-
+                  releaseNamespace selects an existing namespace on the target workload cluster.
+                  When omitted, the ApplicationDefinition's release.namespace is used.
+                  This value cannot be changed after the Application is created.
+                maxLength: 63
+                minLength: 1
+                pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                type: string
+              values:
+                description: |-
+                  values contains user-supplied overrides for paths exposed by the referenced definition.
+                  Chart defaults are not read here.
+                type: object
+                x-kubernetes-preserve-unknown-fields: true
+            required:
+            - applicationDefinitionRef
+            type: object
+            x-kubernetes-validations:
+            - message: releaseNamespace is immutable
+              rule: (!has(self.releaseNamespace) && !has(oldSelf.releaseNamespace))
+                || (has(self.releaseNamespace) && has(oldSelf.releaseNamespace) &&
+                self.releaseNamespace == oldSelf.releaseNamespace)
+            - message: exactly one of clusterRef or environment must be set
+              rule: has(self.clusterRef) != has(self.environment)
+            - message: the Application target selector is immutable
+              rule: (has(oldSelf.clusterRef) && has(self.clusterRef) && self.clusterRef
+                == oldSelf.clusterRef && !has(self.environment) && !has(oldSelf.environment))
+                || (has(oldSelf.environment) && has(self.environment) && self.environment
+                == oldSelf.environment && !has(self.clusterRef) && !has(oldSelf.clusterRef))
+          status:
+            description: status defines the observed state of Application
+            properties:
+              applied:
+                description: applied records the identities of the last successful
+                  Helm action.
+                properties:
+                  applicationDefinitionGeneration:
+                    description: applicationDefinitionGeneration is the definition
+                      generation used for the action.
+                    format: int64
+                    type: integer
+                  applicationGeneration:
+                    description: applicationGeneration is the Application generation
+                      used for the action.
+                    format: int64
+                    type: integer
+                  chart:
+                    description: chart records the full chart coordinate and verified
+                      archive digest successfully applied.
+                    properties:
+                      digest:
+                        description: digest is the SHA-256 digest of the verified
+                          archive bytes.
+                        pattern: ^sha256:[a-f0-9]{64}$
+                        type: string
+                      name:
+                        description: name is the chart name.
+                        type: string
+                      repository:
+                        description: repository is the configured ChartMuseum-compatible
+                          repository URL.
+                        type: string
+                      version:
+                        description: version is the pinned chart version.
+                        type: string
+                    required:
+                    - digest
+                    - name
+                    - repository
+                    - version
+                    type: object
+                  desiredInputIdentity:
+                    description: desiredInputIdentity identifies the complete desired
+                      chart and values input.
+                    type: string
+                  helmRevision:
+                    description: helmRevision is the resulting Helm release revision.
+                    format: int64
+                    type: integer
+                required:
+                - applicationDefinitionGeneration
+                - applicationGeneration
+                - chart
+                - desiredInputIdentity
+                - helmRevision
+                type: object
+              binding:
+                description: binding records immutable target and remote ownership
+                  identities.
+                properties:
+                  applicationDefinitionUID:
+                    description: applicationDefinitionUID identifies the exact bound
+                      definition object.
+                    type: string
+                  clusterUID:
+                    description: clusterUID identifies the exact bound Cluster object.
+                    type: string
+                  releaseName:
+                    description: releaseName is the Helm release name derived from
+                      Application metadata.name.
+                    type: string
+                  releaseNamespace:
+                    description: releaseNamespace is the pre-existing target namespace
+                      for the Helm release.
+                    type: string
+                  remoteClaimUID:
+                    description: remoteClaimUID identifies the remote per-release
+                      ownership claim, when created.
+                    type: string
+                  targetAPIServer:
+                    description: targetAPIServer is the immutable target API server
+                      URL.
+                    type: string
+                  targetTrustHash:
+                    description: targetTrustHash is the SHA-256 hash of the target
+                      cluster's TLS trust material.
+                    type: string
+                required:
+                - applicationDefinitionUID
+                - clusterUID
+                - releaseName
+                - releaseNamespace
+                - targetAPIServer
+                - targetTrustHash
+                type: object
+              chartPins:
+                description: chartPins permanently records the first verified digest
+                  for every encountered chart coordinate.
+                items:
+                  description: ApplicationChartIdentity records the chart coordinate
+                    and verified archive digest.
+                  properties:
+                    digest:
+                      description: digest is the SHA-256 digest of the verified archive
+                        bytes.
+                      pattern: ^sha256:[a-f0-9]{64}$
+                      type: string
+                    name:
+                      description: name is the chart name.
+                      type: string
+                    repository:
+                      description: repository is the configured ChartMuseum-compatible
+                        repository URL.
+                      type: string
+                    version:
+                      description: version is the pinned chart version.
+                      type: string
+                  required:
+                  - digest
+                  - name
+                  - repository
+                  - version
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - repository
+                - name
+                - version
+                x-kubernetes-list-type: map
+              conditions:
+                description: conditions represent the current state of the Application
+                  resource.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              environmentBinding:
+                description: environmentBinding records shared environment-mode identity,
+                  without changing legacy singular fields.
+                properties:
+                  applicationDefinitionUID:
+                    description: |-
+                      UID is a type that holds unique ID values, including UUIDs.  Because we
+                      don't ONLY use UUIDs, this is an alias to string.  Being a type captures
+                      intent and helps make sure that UIDs and names do not get conflated.
+                    type: string
+                  releaseNamespace:
+                    type: string
+                required:
+                - applicationDefinitionUID
+                - releaseNamespace
+                type: object
+              instances:
+                description: instances contains one independent status entry per snapshotted
+                  Cluster UID.
+                items:
+                  description: ApplicationInstanceStatus records the independent state
+                    of one environment target.
+                  properties:
+                    applied:
+                      description: ApplicationAppliedIdentity records the inputs applied
+                        by a successful Helm action.
+                      properties:
+                        applicationDefinitionGeneration:
+                          description: applicationDefinitionGeneration is the definition
+                            generation used for the action.
+                          format: int64
+                          type: integer
+                        applicationGeneration:
+                          description: applicationGeneration is the Application generation
+                            used for the action.
+                          format: int64
+                          type: integer
+                        chart:
+                          description: chart records the full chart coordinate and
+                            verified archive digest successfully applied.
+                          properties:
+                            digest:
+                              description: digest is the SHA-256 digest of the verified
+                                archive bytes.
+                              pattern: ^sha256:[a-f0-9]{64}$
+                              type: string
+                            name:
+                              description: name is the chart name.
+                              type: string
+                            repository:
+                              description: repository is the configured ChartMuseum-compatible
+                                repository URL.
+                              type: string
+                            version:
+                              description: version is the pinned chart version.
+                              type: string
+                          required:
+                          - digest
+                          - name
+                          - repository
+                          - version
+                          type: object
+                        desiredInputIdentity:
+                          description: desiredInputIdentity identifies the complete
+                            desired chart and values input.
+                          type: string
+                        helmRevision:
+                          description: helmRevision is the resulting Helm release
+                            revision.
+                          format: int64
+                          type: integer
+                      required:
+                      - applicationDefinitionGeneration
+                      - applicationGeneration
+                      - chart
+                      - desiredInputIdentity
+                      - helmRevision
+                      type: object
+                    binding:
+                      description: ApplicationBinding records target and ownership
+                        identities fixed before remote side effects.
+                      properties:
+                        applicationDefinitionUID:
+                          description: applicationDefinitionUID identifies the exact
+                            bound definition object.
+                          type: string
+                        clusterUID:
+                          description: clusterUID identifies the exact bound Cluster
+                            object.
+                          type: string
+                        releaseName:
+                          description: releaseName is the Helm release name derived
+                            from Application metadata.name.
+                          type: string
+                        releaseNamespace:
+                          description: releaseNamespace is the pre-existing target
+                            namespace for the Helm release.
+                          type: string
+                        remoteClaimUID:
+                          description: remoteClaimUID identifies the remote per-release
+                            ownership claim, when created.
+                          type: string
+                        targetAPIServer:
+                          description: targetAPIServer is the immutable target API
+                            server URL.
+                          type: string
+                        targetTrustHash:
+                          description: targetTrustHash is the SHA-256 hash of the
+                            target cluster's TLS trust material.
+                          type: string
+                      required:
+                      - applicationDefinitionUID
+                      - clusterUID
+                      - releaseName
+                      - releaseNamespace
+                      - targetAPIServer
+                      - targetTrustHash
+                      type: object
+                    cleanupComplete:
+                      type: boolean
+                    clusterName:
+                      type: string
+                    clusterUID:
+                      description: |-
+                        UID is a type that holds unique ID values, including UUIDs.  Because we
+                        don't ONLY use UUIDs, this is an alias to string.  Being a type captures
+                        intent and helps make sure that UIDs and names do not get conflated.
+                      type: string
+                    conditions:
+                      items:
+                        description: Condition contains details for one aspect of
+                          the current state of this API Resource.
+                        properties:
+                          lastTransitionTime:
+                            description: |-
+                              lastTransitionTime is the last time the condition transitioned from one status to another.
+                              This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                            format: date-time
+                            type: string
+                          message:
+                            description: |-
+                              message is a human readable message indicating details about the transition.
+                              This may be an empty string.
+                            maxLength: 32768
+                            type: string
+                          observedGeneration:
+                            description: |-
+                              observedGeneration represents the .metadata.generation that the condition was set based upon.
+                              For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                              with respect to the current state of the instance.
+                            format: int64
+                            minimum: 0
+                            type: integer
+                          reason:
+                            description: |-
+                              reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                              Producers of specific condition types may define expected values and meanings for this field,
+                              and whether the values are considered a guaranteed API.
+                              The value should be a CamelCase string.
+                              This field may not be empty.
+                            maxLength: 1024
+                            minLength: 1
+                            pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                            type: string
+                          status:
+                            description: status of the condition, one of True, False,
+                              Unknown.
+                            enum:
+                            - "True"
+                            - "False"
+                            - Unknown
+                            type: string
+                          type:
+                            description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                            maxLength: 316
+                            pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                            type: string
+                        required:
+                        - lastTransitionTime
+                        - message
+                        - reason
+                        - status
+                        - type
+                        type: object
+                      type: array
+                      x-kubernetes-list-map-keys:
+                      - type
+                      x-kubernetes-list-type: map
+                    lastAttemptedIdentity:
+                      type: string
+                    observedGeneration:
+                      format: int64
+                      type: integer
+                    resources:
+                      items:
+                        description: |-
+                          ApplicationResource records metadata for a resource rendered by the chart or one of its descendants.
+                          It deliberately excludes resource specifications and Secret data.
+                        properties:
+                          apiVersion:
+                            description: apiVersion is the API version of the observed
+                              resource.
+                            type: string
+                          daemonSet:
+                            description: daemonSet summarizes health for an observed
+                              DaemonSet.
+                            properties:
+                              desiredNumberScheduled:
+                                format: int32
+                                type: integer
+                              numberReady:
+                                format: int32
+                                type: integer
+                              reason:
+                                type: string
+                              state:
+                                type: string
+                            required:
+                            - state
+                            type: object
+                          deployment:
+                            description: deployment contains safe health details for
+                              an observed Deployment.
+                            properties:
+                              desiredReplicas:
+                                format: int32
+                                type: integer
+                              readyReplicas:
+                                format: int32
+                                type: integer
+                              reason:
+                                type: string
+                              state:
+                                type: string
+                            required:
+                            - desiredReplicas
+                            - readyReplicas
+                            - state
+                            type: object
+                          job:
+                            description: job summarizes health for an observed Job.
+                            properties:
+                              active:
+                                format: int32
+                                type: integer
+                              completions:
+                                format: int32
+                                type: integer
+                              failed:
+                                format: int32
+                                type: integer
+                              reason:
+                                type: string
+                              state:
+                                type: string
+                              succeeded:
+                                format: int32
+                                type: integer
+                            required:
+                            - state
+                            type: object
+                          kind:
+                            description: kind is the kind of the observed resource.
+                            type: string
+                          name:
+                            description: name is the name of the observed resource.
+                            type: string
+                          namespace:
+                            description: namespace is the namespace of the observed
+                              resource, when namespaced.
+                            type: string
+                          parentUID:
+                            description: parentUID identifies the observed parent
+                              resource, when this resource is a descendant.
+                            type: string
+                          pod:
+                            description: pod contains safe health details for an observed
+                              Pod.
+                            properties:
+                              message:
+                                type: string
+                              ready:
+                                type: string
+                              reason:
+                                type: string
+                              state:
+                                type: string
+                            required:
+                            - ready
+                            - state
+                            type: object
+                          statefulSet:
+                            description: statefulSet summarizes health for an observed
+                              StatefulSet.
+                            properties:
+                              desiredReplicas:
+                                format: int32
+                                type: integer
+                              readyReplicas:
+                                format: int32
+                                type: integer
+                              reason:
+                                type: string
+                              state:
+                                type: string
+                            required:
+                            - state
+                            type: object
+                          uid:
+                            description: uid is the UID of the observed resource,
+                              when available.
+                            type: string
+                        required:
+                        - apiVersion
+                        - kind
+                        - name
+                        type: object
+                      type: array
+                    workloadObservedAt:
+                      format: date-time
+                      type: string
+                  required:
+                  - clusterName
+                  - clusterUID
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - clusterUID
+                x-kubernetes-list-type: map
+              lastAttemptedIdentity:
+                description: lastAttemptedIdentity identifies the last desired input
+                  attempted by reconciliation.
+                type: string
+              observedGeneration:
+                description: observedGeneration is the Application generation represented
+                  by this status.
+                format: int64
+                type: integer
+              resources:
+                description: resources contains observed chart resources and descendant
+                  metadata only; it excludes specs and Secret data.
+                items:
+                  description: |-
+                    ApplicationResource records metadata for a resource rendered by the chart or one of its descendants.
+                    It deliberately excludes resource specifications and Secret data.
+                  properties:
+                    apiVersion:
+                      description: apiVersion is the API version of the observed resource.
+                      type: string
+                    daemonSet:
+                      description: daemonSet summarizes health for an observed DaemonSet.
+                      properties:
+                        desiredNumberScheduled:
+                          format: int32
+                          type: integer
+                        numberReady:
+                          format: int32
+                          type: integer
+                        reason:
+                          type: string
+                        state:
+                          type: string
+                      required:
+                      - state
+                      type: object
+                    deployment:
+                      description: deployment contains safe health details for an
+                        observed Deployment.
+                      properties:
+                        desiredReplicas:
+                          format: int32
+                          type: integer
+                        readyReplicas:
+                          format: int32
+                          type: integer
+                        reason:
+                          type: string
+                        state:
+                          type: string
+                      required:
+                      - desiredReplicas
+                      - readyReplicas
+                      - state
+                      type: object
+                    job:
+                      description: job summarizes health for an observed Job.
+                      properties:
+                        active:
+                          format: int32
+                          type: integer
+                        completions:
+                          format: int32
+                          type: integer
+                        failed:
+                          format: int32
+                          type: integer
+                        reason:
+                          type: string
+                        state:
+                          type: string
+                        succeeded:
+                          format: int32
+                          type: integer
+                      required:
+                      - state
+                      type: object
+                    kind:
+                      description: kind is the kind of the observed resource.
+                      type: string
+                    name:
+                      description: name is the name of the observed resource.
+                      type: string
+                    namespace:
+                      description: namespace is the namespace of the observed resource,
+                        when namespaced.
+                      type: string
+                    parentUID:
+                      description: parentUID identifies the observed parent resource,
+                        when this resource is a descendant.
+                      type: string
+                    pod:
+                      description: pod contains safe health details for an observed
+                        Pod.
+                      properties:
+                        message:
+                          type: string
+                        ready:
+                          type: string
+                        reason:
+                          type: string
+                        state:
+                          type: string
+                      required:
+                      - ready
+                      - state
+                      type: object
+                    statefulSet:
+                      description: statefulSet summarizes health for an observed StatefulSet.
+                      properties:
+                        desiredReplicas:
+                          format: int32
+                          type: integer
+                        readyReplicas:
+                          format: int32
+                          type: integer
+                        reason:
+                          type: string
+                        state:
+                          type: string
+                      required:
+                      - state
+                      type: object
+                    uid:
+                      description: uid is the UID of the observed resource, when available.
+                      type: string
+                  required:
+                  - apiVersion
+                  - kind
+                  - name
+                  type: object
+                type: array
+              workloadObservedAt:
+                description: workloadObservedAt is the time of the last successful
+                  workload health observation.
+                format: date-time
+                type: string
+            type: object
+        required:
+        - spec
+        type: object
+        x-kubernetes-validations:
+        - message: Application name must be a DNS label of at most 53 characters for
+            Helm release naming
+          rule: size(self.metadata.name) <= 53 && self.metadata.name.matches('^[a-z0-9]([-a-z0-9]*[a-z0-9])?$')
+    served: true
+    storage: true
+    subresources:
+      status: {}

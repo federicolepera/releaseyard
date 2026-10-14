@@ -1,0 +1,41 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: releaseyard-dashboard
+  namespace: idp-system
+spec:
+  template:
+    spec:
+      hostAliases:
+        - ip: 127.0.0.1
+          hostnames:
+            - keycloak.localhost
+      containers:
+        - name: dashboard
+          env:
+            - name: OIDC_ISSUER_URL
+              value: http://keycloak.localhost:18080/realms/releaseyard
+            - name: OIDC_CLIENT_ID
+              value: releaseyard-dashboard
+            - name: OIDC_REDIRECT_URL
+              value: http://dashboard.localhost:18080/auth/callback
+            - name: OIDC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: releaseyard-dashboard-oidc
+                  key: client-secret
+        - name: keycloak-oidc-loopback
+          image: releaseyard-kind-socat:dev
+          imagePullPolicy: IfNotPresent
+          args:
+            - TCP-LISTEN:18080,bind=127.0.0.1,reuseaddr,fork
+            - TCP:releaseyard-keycloak-service.keycloak-operator.svc.cluster.local:8080
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65532
+            runAsGroup: 65532
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL

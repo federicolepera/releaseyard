@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <script src="./theme-init.js"></script>
+  <title>Sign in · IDP</title>
+  <link rel="stylesheet" href="./style.css">
+  <script src="./login.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="./" aria-label="IDP home"><svg class="brand-mark" viewBox="0 0 36 36" aria-hidden="true"><path d="M7 25C8 13 17 6 29 7c-1 12-8 21-20 22"/><path d="M10 28c4-7 9-12 16-16"/></svg><span>IDP</span></a>
+  </header>
+  <main class="auth-login" aria-labelledby="login-title">
+    <p class="eyebrow">Dashboard access</p>
+    <h1 id="login-title">Sign in</h1>
+    <div id="login-oidc" class="auth-login-oidc" hidden>
+      <a class="button button-secondary auth-login-oidc-button" href="/auth/login">Sign in with identity provider</a>
+      <p class="auth-login-divider"><span>or</span></p>
+    </div>
+    <p class="auth-login-hint">Use the administrator password generated at installation. Read it from the <code>dashboard-local-admin</code> Secret in the management namespace.</p>
+    <form id="login-form" class="auth-login-form" method="post" action="/auth/local" novalidate>
+      <label class="field" for="login-username">Username
+        <input id="login-username" name="username" value="admin" readonly autocomplete="username">
+      </label>
+      <label class="field" for="login-password">Password
+        <input id="login-password" name="password" type="password" required autocomplete="current-password" autofocus>
+      </label>
+      <p id="login-error" class="auth-login-error" role="alert" hidden></p>
+      <button class="button button-primary auth-login-submit" type="submit">Sign in</button>
+    </form>
+  </main>
+</body>
+</html>

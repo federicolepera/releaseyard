@@ -1,0 +1,34 @@
+apiVersion: platform.releaseyard.io/v1alpha1
+kind: ApplicationDefinition
+metadata:
+  labels:
+    app.kubernetes.io/name: idp
+    app.kubernetes.io/managed-by: kustomize
+    platform.releaseyard.io/type: template
+  name: applicationdefinition-sample
+spec:
+  description: Sample application definition
+  chart:
+    repository: http://chartmuseum.chartmuseum.svc.cluster.local:8080
+    name: releaseyard-demo
+    version: 0.2.0
+  release:
+    namespace: applications
+    allowNamespaceOverride: true
+  defaults:
+    replicaCount: 1
+    message: Hello from ReleaseYard
+    image:
+      repository: nginx
+      tag: 1.27-alpine
+  configurableValues:
+    - path: image.repository
+      type: string
+    - path: image.tag
+      type: string
+    - path: replicaCount
+      type: integer
+      minimum: 1
+      maximum: 10
+    - path: message
+      type: string

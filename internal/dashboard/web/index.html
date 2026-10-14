@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <script src="./theme-init.js"></script>
+  <title>Catalog · IDP</title>
+  <link rel="stylesheet" href="./style.css">
+  <script src="./app.js" defer></script>
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar" id="app-sidebar">
+      <a class="brand" href="./" aria-label="IDP home"><svg class="brand-mark" viewBox="0 0 36 36" aria-hidden="true"><path d="M7 25C8 13 17 6 29 7c-1 12-8 21-20 22"/><path d="M10 28c4-7 9-12 16-16"/></svg><span>IDP</span></a>
+      <nav class="side-nav" aria-label="Main navigation">
+        <a class="side-link" href="./" aria-current="page"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 4h5v5H3zM12 4h5v5h-5zM3 12h5v5H3zM12 12h5v5h-5z"/></svg><span>Catalog</span></a>
+        <a class="side-link" href="./applications.html"><svg viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="3" width="14" height="14" rx="2"/><path d="M7 7h6M7 10h6M7 13h3"/></svg><span>Applications</span></a>
+        <a class="side-link" href="./clusters.html"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="4" r="2"/><circle cx="5" cy="15" r="2"/><circle cx="15" cy="15" r="2"/><path d="M9 6 6 13m5-7 3 7M7 15h6"/></svg><span>Clusters</span></a>
+                <div id="admin-nav" hidden>
+          <details class="nav-details nav-root" open>
+            <summary class="nav-summary"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="2.4"/><path d="M10 2.6v2.1M10 15.3v2.1M3.4 3.4 5 5M15 15l1.6 1.6M2.6 10h2.1M15.3 10h2.1M3.4 16.6 5 15M15 5l1.6-1.6"/></svg><span>Administration</span><svg class="nav-chevron" viewBox="0 0 20 20" aria-hidden="true"><path d="m6 8 4 4 4-4"/></svg></summary>
+            <div class="nav-children">
+              <details class="nav-details" open>
+                <summary class="nav-summary"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2.5l6 2.5v4c0 3.9-2.5 6.8-6 8.5-3.5-1.7-6-4.6-6-8.5V5z"/><path d="M7.6 10l1.7 1.7 3-3.2"/></svg><span>Authentication</span><svg class="nav-chevron" viewBox="0 0 20 20" aria-hidden="true"><path d="m6 8 4 4 4-4"/></svg></summary>
+                <a class="side-link side-sub" href="./identity-provider.html"><span>Identity provider</span></a>
+              </details>
+              <details class="nav-details" open>
+                <summary class="nav-summary"><svg viewBox="0 0 20 20" aria-hidden="true"><rect x="4" y="9" width="12" height="8" rx="1.6"/><path d="M7 9V7a3 3 0 0 1 6 0v2"/></svg><span>Authorization</span><svg class="nav-chevron" viewBox="0 0 20 20" aria-hidden="true"><path d="m6 8 4 4 4-4"/></svg></summary>
+                <a class="side-link side-sub" href="./access-definitions.html"><span>Access definitions</span></a>
+                <a class="side-link side-sub" href="./cluster-access.html"><span>Cluster access</span></a>
+                <a class="side-link side-sub" href="./access-applications.html"><span>Access applications</span></a>
+              </details>
+            </div>
+          </details>
+        </div>
+      </nav>
+      <div class="side-footer"><span class="side-dot" aria-hidden="true"></span><span class="side-footer-text"><strong>Internal platform</strong><small>Online</small></span></div>
+    </aside>
+    <div class="shell-main">
+      <header class="topbar">
+        <button id="sidebar-toggle" class="sidebar-toggle" type="button" aria-label="Hide navigation" aria-controls="app-sidebar" aria-expanded="true"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 5h14M3 10h14M3 15h14"/></svg></button>
+        <nav class="breadcrumb" aria-label="Breadcrumb">Catalog</nav>
+        <div class="topbar-tools"><button class="theme-toggle" type="button" aria-label="Switch to dark theme" aria-pressed="false"><svg class="theme-icon" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="3.5"/><path d="M10 1.8v2m0 12.4v2M1.8 10h2m12.4 0h2M4.2 4.2l1.4 1.4m8.8 8.8 1.4 1.4m0-11.6-1.4 1.4m-8.8 8.8-1.4 1.4"/></svg><span class="theme-label">Light</span></button><label class="team-select" id="team-select-wrap" hidden><span class="team-select-label">Team</span><select id="team-select" aria-label="Team"></select></label><span class="user-chip" id="user-chip" hidden><span class="user-avatar" id="user-avatar">–</span><span class="user-name" id="user-name"></span></span><button id="auth-logout" class="auth-action" type="button">Sign out</button><span id="auth-status" class="auth-status" role="status" aria-live="polite" hidden></span><a id="auth-login" class="auth-action" href="/login" hidden>Sign in again</a></div>
+      </header>
+  <section id="auth-signed-out" class="auth-signed-out" aria-labelledby="auth-signed-out-title" hidden>
+    <p class="eyebrow">Dashboard session</p>
+    <h1 id="auth-signed-out-title">You’re signed out</h1>
+    <p>Your dashboard session has ended. Sign in again to continue.</p>
+  </section>
+  <main class="page">
+    <section class="intro hero" aria-labelledby="page-title">
+      <div class="hero-copy"><p class="eyebrow">Platform</p><h1 id="page-title">Catalog</h1><p class="lede">Create an application from an available definition and choose where to run it.</p></div>
+      <div class="hero-art" aria-hidden="true"><img class="platform-art" src="./platform-infrastructure.png" alt=""></div>
+    </section>
+    <div id="notice" class="notice" role="status" aria-live="polite" hidden></div>
+    <section id="catalog-view" class="catalog-section" aria-labelledby="defs-title">
+      <div class="catalog-topline"><div class="catalog-head"><div class="catalog-heading"><p class="eyebrow"><svg class="eyebrow-icon" viewBox="0 0 20 20" aria-hidden="true"><rect x="2.5" y="2.5" width="6" height="6" rx="1.4"/><rect x="11.5" y="2.5" width="6" height="6" rx="1.4"/><rect x="2.5" y="11.5" width="6" height="6" rx="1.4"/><rect x="11.5" y="11.5" width="6" height="6" rx="1.4"/></svg> Catalog</p><h2 id="defs-title">Choose a definition</h2><p class="helper">Open a validated Application Definition to configure a new application.</p></div><span id="definition-count" class="count" aria-label="Definition count">—</span></div>
+      <div class="catalog-toolbar" role="search"><label class="search-field"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.8" cy="8.8" r="5.5"/><path d="m13 13 4 4"/></svg><span class="visually-hidden">Search definitions</span><input id="definition-search" type="search" placeholder="Search definitions…" autocomplete="off" aria-controls="definitions"></label><label class="type-filter"><span>Type</span><select id="definition-type" aria-label="Filter definitions by type"><option value="">All types</option></select></label><label class="sort-field"><span>Sort by</span><select id="definition-sort" aria-label="Sort definitions"><option value="name">Name</option><option value="chart">Chart</option></select></label><button id="refresh" class="button button-secondary refresh-button" type="button"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M16 8a6.5 6.5 0 0 0-11-3L3 7m0-4v4h4m-3 5a6.5 6.5 0 0 0 11 3l2-2m0 4v-4h-4"/></svg>Refresh data</button></div></div>
+      <div id="definitions" class="definition-grid list-state" aria-live="polite">Loading definitions…</div>
+    </section>
+    <section id="create-view" class="panel create-panel" aria-labelledby="create-title" hidden>
+      <div class="panel-heading"><div><button id="back-to-catalog" class="back-button" type="button">← Back to Catalog</button><p class="eyebrow">New resource</p><h2 id="create-title">Create application</h2></div><div class="create-panel-tools"><button id="refresh-create" class="button button-secondary refresh-button" type="button">Refresh data</button><span class="step-mark" aria-hidden="true">＋</span></div></div>
+      <div id="definition-detail" class="definition-detail"></div>
+      <form id="create-form" novalidate>
+        <div class="form-grid">
+          <label class="field"><span>Application name</span><input id="app-name" name="name" autocomplete="off" required maxlength="53" pattern="[a-z0-9]([-a-z0-9]*[a-z0-9])?" placeholder="e.g. customer-portal"><small>Lowercase letters, numbers, and hyphens · 53 characters max</small></label>
+        </div>
+        <fieldset class="destination-picker"><legend>Where should it run?</legend><div class="destination-modes"><label><input type="radio" name="destination-mode" value="cluster" checked><span>One cluster</span></label><label><input type="radio" name="destination-mode" value="environment"><span>All clusters in an environment</span></label></div><div class="form-grid"><label id="cluster-destination" class="field"><span>Cluster</span><select id="cluster" required><option value="">Select a cluster</option></select><small id="cluster-hint">Cluster status is informational.</small></label><label id="environment-destination" class="field" hidden><span>Environment</span><select id="environment-select"><option value="">Select an environment</option></select><small>Creates a fixed snapshot across matching clusters.</small></label></div><div id="environment-preview" class="environment-preview" role="status" aria-live="polite" hidden></div></fieldset>
+        <div id="release-namespace-info" class="namespace-note" hidden></div>
+        <label id="release-namespace-field" class="field namespace-field" hidden><span>Target namespace</span><input id="release-namespace" name="releaseNamespace" type="text" autocomplete="off" maxlength="63" pattern="[a-z0-9]([-a-z0-9]*[a-z0-9])?" aria-describedby="release-namespace-hint"><small id="release-namespace-hint"></small></label>
+        <fieldset id="values-fields" class="values-fields" hidden><legend>Configurable values</legend><p class="helper">Defaults apply automatically. Enter required values here.</p><div id="dynamic-fields" class="form-grid"></div></fieldset>
+        <div class="form-actions"><p id="form-hint" class="helper">Choose a cluster to get started.</p><button id="submit" class="button button-primary" type="submit" disabled>Create application</button></div>
+      </form>
+    </section>
+    <footer>Management namespace: <code>idp-system</code></footer>
+  </main>
+    </div>
+  </div>
+</body>
+</html>

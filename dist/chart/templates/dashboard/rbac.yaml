@@ -1,0 +1,154 @@
+{{- if .Values.dashboard.enabled }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "idp.resourceName" (dict "suffix" "dashboard" "context" $) }}
+  namespace: {{ .Release.Namespace }}
+rules:
+  - apiGroups:
+      - platform.releaseyard.io
+    resources:
+      - applications
+    verbs:
+      - get
+      - list
+      - create
+      - update
+      - delete
+  - apiGroups:
+      - ""
+    resources:
+      - secrets
+    resourceNames:
+      - {{ include "idp.resourceName" (dict "suffix" "dashboard-identity-provider" "context" $) }}
+    verbs:
+      - get
+      - update
+      - patch
+      - delete
+  - apiGroups:
+      - ""
+    resources:
+      - secrets
+    verbs:
+      - create
+  - apiGroups:
+      - ""
+    resources:
+      - events
+    verbs:
+      - get
+      - list
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "idp.resourceName" (dict "suffix" "dashboard" "context" $) }}
+  namespace: {{ .Release.Namespace }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "idp.resourceName" (dict "suffix" "dashboard" "context" $) }}
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "idp.resourceName" (dict "suffix" "dashboard" "context" $) }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "idp.resourceName" (dict "suffix" "dashboard" "context" $) }}
+rules:
+  - apiGroups:
+      - platform.releaseyard.io
+    resources:
+      - clusters
+    verbs:
+      - get
+      - list
+      - patch
+  - apiGroups:
+      - platform.releaseyard.io
+    resources:
+      - applicationdefinitions
+    verbs:
+      - get
+      - list
+  # The dashboard manages definition-access ClusterRoles and bindings on behalf
+  # of the local administrator (Administration panel).
+  - apiGroups:
+      - rbac.authorization.k8s.io
+    resources:
+      - clusterroles
+      - clusterrolebindings
+    verbs:
+      - get
+      - list
+      - create
+      - update
+      - patch
+      - delete
+  # The dashboard provisions per-team namespaces and binds the team group to the
+  # helper editor ClusterRole on behalf of the local administrator ("Access
+  # applications" panel). Binding a role requires the "bind" verb on it.
+  - apiGroups:
+      - ""
+    resources:
+      - namespaces
+    verbs:
+      - get
+      - list
+      - create
+  - apiGroups:
+      - rbac.authorization.k8s.io
+    resources:
+      - rolebindings
+    verbs:
+      - get
+      - list
+      - create
+      - update
+      - patch
+      - delete
+  - apiGroups:
+      - rbac.authorization.k8s.io
+    resources:
+      - clusterroles
+    resourceNames:
+      - {{ include "idp.resourceName" (dict "suffix" "application-editor-role" "context" $) }}
+    verbs:
+      - bind
+  # The dashboard reads Events to render an object's Activity. Events live in the
+  # object's namespace (including per-team namespaces), so this must be
+  # cluster-wide; visibility still follows the object read permission above.
+  - apiGroups:
+      - ""
+    resources:
+      - events
+    verbs:
+      - get
+      - list
+  # The dashboard impersonates the logged-in user so the management cluster's
+  # RBAC authorizes writes. Impersonation is powerful: consider restricting it
+  # with resourceNames or constrained impersonation in production.
+  - apiGroups:
+      - ""
+    resources:
+      - users
+      - groups
+    verbs:
+      - impersonate
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "idp.resourceName" (dict "suffix" "dashboard" "context" $) }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "idp.resourceName" (dict "suffix" "dashboard" "context" $) }}
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "idp.resourceName" (dict "suffix" "dashboard" "context" $) }}
+{{- end }}

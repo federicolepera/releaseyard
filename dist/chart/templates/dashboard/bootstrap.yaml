@@ -1,0 +1,112 @@
+{{- if and .Values.dashboard.enabled .Values.dashboard.bootstrap.enabled }}
+{{- $imageRepository := required "dashboard.image.repository is required when dashboard.enabled=true" .Values.dashboard.image.repository }}
+{{- $imageTag := required "dashboard.image.tag is required when dashboard.enabled=true" .Values.dashboard.image.tag }}
+{{- $pullPolicy := required "dashboard.image.pullPolicy is required when dashboard.enabled=true" .Values.dashboard.image.pullPolicy }}
+{{- $bootstrapName := include "idp.resourceName" (dict "suffix" "dashboard-bootstrap" "context" .) }}
+{{- $localAdminSecretName := include "idp.resourceName" (dict "suffix" "dashboard-local-admin" "context" .) }}
+{{- /*
+    The bootstrap runs as a pre-install/pre-upgrade hook so the local
+    administrator Secret exists before the dashboard Deployment that mounts it.
+    Helm hook weights order the ServiceAccount and RBAC before the Job.
+*/}}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $bootstrapName }}
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-20"
+    "helm.sh/hook-delete-policy": before-hook-creation
+automountServiceAccountToken: true
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $bootstrapName }}
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-20"
+    "helm.sh/hook-delete-policy": before-hook-creation
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - secrets
+    resourceNames:
+      - {{ $localAdminSecretName | quote }}
+    verbs:
+      - get
+  - apiGroups:
+      - ""
+    resources:
+      - secrets
+    verbs:
+      - create
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $bootstrapName }}
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-20"
+    "helm.sh/hook-delete-policy": before-hook-creation
+subjects:
+  - kind: ServiceAccount
+    name: {{ $bootstrapName }}
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $bootstrapName }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $bootstrapName }}
+  namespace: {{ .Release.Namespace }}
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-10"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 2
+  activeDeadlineSeconds: 120
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ $bootstrapName }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      serviceAccountName: {{ $bootstrapName }}
+      automountServiceAccountToken: true
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: bootstrap
+          image: {{ printf "%s:%s" $imageRepository $imageTag | quote }}
+          imagePullPolicy: {{ $pullPolicy }}
+          command:
+            - /bootstrapadmin
+          env:
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: LOCAL_ADMIN_SECRET_NAME
+              value: {{ $localAdminSecretName | quote }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+{{- end }}

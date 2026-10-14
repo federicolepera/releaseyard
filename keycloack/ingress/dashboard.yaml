@@ -1,0 +1,18 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: releaseyard-dashboard
+  namespace: idp-system
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: dashboard.localhost
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: releaseyard-dashboard
+                port:
+                  number: 8080

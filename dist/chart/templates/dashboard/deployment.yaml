@@ -1,0 +1,110 @@
+{{- if .Values.dashboard.enabled }}
+{{- $imageRepository := required "dashboard.image.repository is required when dashboard.enabled=true" .Values.dashboard.image.repository }}
+{{- $imageTag := required "dashboard.image.tag is required when dashboard.enabled=true" .Values.dashboard.image.tag }}
+{{- $pullPolicy := required "dashboard.image.pullPolicy is required when dashboard.enabled=true" .Values.dashboard.image.pullPolicy }}
+{{- $publicURL := required "dashboard.publicURL is required when dashboard.enabled=true" .Values.dashboard.publicURL }}
+{{- $localAdminSecretName := include "idp.resourceName" (dict "suffix" "dashboard-local-admin" "context" .) }}
+{{- $loopback := .Values.dashboard.oidcLoopback }}
+{{- $loopbackRepo := "" }}
+{{- $loopbackTag := "" }}
+{{- $loopbackTarget := "" }}
+{{- if $loopback.enabled }}
+{{- $loopbackRepo = required "dashboard.oidcLoopback.image.repository is required when dashboard.oidcLoopback.enabled=true" $loopback.image.repository }}
+{{- $loopbackTag = required "dashboard.oidcLoopback.image.tag is required when dashboard.oidcLoopback.enabled=true" $loopback.image.tag }}
+{{- $loopbackTarget = required "dashboard.oidcLoopback.targetHost is required when dashboard.oidcLoopback.enabled=true" $loopback.targetHost }}
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "idp.resourceName" (dict "suffix" "dashboard" "context" .) }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: {{ include "idp.resourceName" (dict "suffix" "dashboard" "context" .) }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "idp.resourceName" (dict "suffix" "dashboard" "context" .) }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "idp.resourceName" (dict "suffix" "dashboard" "context" .) }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      serviceAccountName: {{ include "idp.resourceName" (dict "suffix" "dashboard" "context" .) }}
+      automountServiceAccountToken: true
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      {{- if $loopback.enabled }}
+      hostAliases:
+        {{- range $loopback.hostnames }}
+        - ip: 127.0.0.1
+          hostnames:
+            - {{ . | quote }}
+        {{- end }}
+      {{- end }}
+      containers:
+        - name: dashboard
+          image: {{ printf "%s:%s" $imageRepository $imageTag | quote }}
+          imagePullPolicy: {{ $pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: DASHBOARD_PUBLIC_URL
+              value: {{ $publicURL | quote }}
+            - name: LOCAL_ADMIN_HASH_PATH
+              value: /etc/dashboard/local-admin/password-hash
+            - name: IDENTITY_PROVIDER_SECRET_NAME
+              value: {{ include "idp.resourceName" (dict "suffix" "dashboard-identity-provider" "context" .) | quote }}
+            - name: TEAM_NAMESPACE_PREFIX
+              value: {{ .Values.dashboard.teamNamespacePrefix | quote }}
+            - name: APPLICATION_EDITOR_ROLE
+              value: {{ include "idp.resourceName" (dict "suffix" "application-editor-role" "context" .) | quote }}
+          volumeMounts:
+            - name: local-admin
+              mountPath: /etc/dashboard/local-admin
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+        {{- if $loopback.enabled }}
+        - name: oidc-loopback
+          image: {{ printf "%s:%s" $loopbackRepo $loopbackTag | quote }}
+          imagePullPolicy: {{ $loopback.image.pullPolicy }}
+          args:
+            - "TCP-LISTEN:{{ $loopback.listenPort }},bind=127.0.0.1,reuseaddr,fork"
+            - "TCP:{{ $loopbackTarget }}:{{ $loopback.targetPort }}"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+        {{- end }}
+      volumes:
+        - name: local-admin
+          secret:
+            secretName: {{ $localAdminSecretName }}
+            optional: true
+            items:
+              - key: password-hash
+                path: password-hash
+{{- end }}

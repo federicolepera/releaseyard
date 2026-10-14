@@ -1,0 +1,16 @@
+apiVersion: platform.releaseyard.io/v1alpha1
+kind: Application
+metadata:
+  labels:
+    app.kubernetes.io/name: idp
+    app.kubernetes.io/managed-by: kustomize
+  name: releaseyard-demo-sample
+  namespace: idp-system
+spec:
+  applicationDefinitionRef:
+    name: applicationdefinition-sample
+  clusterRef:
+    name: releaseyard-managed-a
+  values:
+    replicaCount: 2
+    message: Hello from the ReleaseYard Application sample

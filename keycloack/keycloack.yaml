@@ -1,0 +1,22 @@
+apiVersion: k8s.keycloak.org/v2beta1
+kind: Keycloak
+metadata:
+  name: releaseyard-keycloak
+  namespace: keycloak-operator
+spec:
+  instances: 1
+  ingress:
+    enabled: false
+  db:
+    vendor: postgres
+    host: postgres-db
+    usernameSecret:
+      name: keycloak-db-credentials
+      key: username
+    passwordSecret:
+      name: keycloak-db-credentials
+      key: password
+  http:
+    httpEnabled: true
+  hostname:
+    strict: false

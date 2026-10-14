@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 320" fill="none">
+  <defs>
+    <linearGradient id="sheet" x1="220" y1="45" x2="385" y2="285" gradientUnits="userSpaceOnUse"><stop stop-color="#fff"/><stop offset="1" stop-color="#f7faf8"/></linearGradient>
+    <linearGradient id="cubeTop" x1="300" y1="68" x2="353" y2="106" gradientUnits="userSpaceOnUse"><stop stop-color="#53c3ae"/><stop offset="1" stop-color="#2d9f8e"/></linearGradient>
+    <linearGradient id="cubeLeft" x1="259" y1="98" x2="300" y2="159" gradientUnits="userSpaceOnUse"><stop stop-color="#198b7d"/><stop offset="1" stop-color="#117568"/></linearGradient>
+    <linearGradient id="cubeRight" x1="300" y1="98" x2="342" y2="159" gradientUnits="userSpaceOnUse"><stop stop-color="#2aa996"/><stop offset="1" stop-color="#188b7d"/></linearGradient>
+    <filter id="shadow" x="150" y="15" width="300" height="300" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse"><feGaussianBlur in="SourceAlpha" stdDeviation="10"/><feOffset dy="11"/><feComponentTransfer><feFuncA type="linear" slope=".17"/></feComponentTransfer><feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+    <filter id="tileShadow" x="35" y="35" width="540" height="280" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse"><feGaussianBlur in="SourceAlpha" stdDeviation="5"/><feOffset dy="5"/><feComponentTransfer><feFuncA type="linear" slope=".13"/></feComponentTransfer><feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+  </defs>
+  <path d="M34 213c60-75 147-128 242-132 106-4 186 51 280 117" stroke="#a9cec1" stroke-width="1.5" stroke-linecap="round" stroke-dasharray="2 8"/>
+  <path d="M48 251c94 25 152 12 230-21 89-38 165-44 270-13" stroke="#d0e4dc" stroke-width="1.2" stroke-linecap="round" stroke-dasharray="2 9"/>
+  <circle cx="67" cy="92" r="3.5" fill="#78b8a7"/><circle cx="515" cy="112" r="3" fill="#7ebcab"/><circle cx="529" cy="243" r="4" fill="#91c8b9"/><circle cx="154" cy="271" r="2.5" fill="#8dbfaf"/>
+
+  <g opacity=".58" filter="url(#tileShadow)" transform="rotate(-8 180 174)">
+    <rect x="111" y="119" width="126" height="106" rx="15" fill="#fff" stroke="#e0e9e5"/>
+    <path d="M145 183c-9 0-16-7-16-16 0-8 6-15 14-16 3-14 15-24 30-24 13 0 24 7 29 18 10 1 17 9 17 19 0 11-9 19-20 19h-54Z" stroke="#9aa9a9" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+
+  <g opacity=".64" filter="url(#tileShadow)" transform="rotate(8 416 163)">
+    <rect x="371" y="109" width="103" height="116" rx="15" fill="#fff" stroke="#dfe8e4"/>
+    <path d="M392 143h59M392 159h46M392 175h54M392 191h38" stroke="#d4dfdb" stroke-width="5" stroke-linecap="round"/>
+  </g>
+
+  <g filter="url(#shadow)" transform="rotate(9 300 160)">
+    <rect x="221" y="40" width="158" height="239" rx="17" fill="url(#sheet)" stroke="#e3eae7"/>
+    <rect x="235" y="54" width="130" height="111" rx="10" fill="#f2f8f5"/>
+    <path d="m300 70 38 22-38 22-38-22 38-22Z" fill="url(#cubeTop)"/>
+    <path d="M262 92v43l38 23v-44l-38-22Z" fill="url(#cubeLeft)"/>
+    <path d="M338 92v43l-38 23v-44l38-22Z" fill="url(#cubeRight)"/>
+    <path d="m300 114 38-22M300 114v44" stroke="#d0f0e8" stroke-opacity=".7" stroke-width="1.2"/>
+    <rect x="239" y="179" width="80" height="7" rx="3.5" fill="#becbc7"/>
+    <rect x="239" y="195" width="121" height="6" rx="3" fill="#e0e7e4"/>
+    <rect x="239" y="209" width="107" height="6" rx="3" fill="#e0e7e4"/>
+    <rect x="239" y="231" width="38" height="17" rx="8.5" fill="#e7f4ef"/>
+    <circle cx="249" cy="239.5" r="3" fill="#2e9b83"/><rect x="256" y="237" width="14" height="5" rx="2.5" fill="#80bca9"/>
+  </g>
+
+  <g filter="url(#tileShadow)">
+    <rect x="52" y="87" width="59" height="59" rx="15" fill="#fff" stroke="#e2eae7"/>
+    <path d="M68 122h28a8 8 0 0 0 0-16 12 12 0 0 0-23-3 9 9 0 0 0-5 17Z" stroke="#829398" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+
+  <g filter="url(#tileShadow)">
+    <rect x="478" y="61" width="65" height="65" rx="17" fill="#fff" stroke="#e0e9e5"/>
+    <circle cx="510.5" cy="93.5" r="20" fill="#eaf3ff"/>
+    <path d="M510 79v29m-12-22 24 14m0-14-24 14" stroke="#5b8bc7" stroke-width="3" stroke-linecap="round"/>
+    <circle cx="510" cy="93" r="5" fill="#fff" stroke="#5b8bc7" stroke-width="2"/>
+  </g>
+
+  <g filter="url(#tileShadow)">
+    <rect x="478" y="214" width="70" height="70" rx="17" fill="#fff" stroke="#e0e9e5"/>
+    <rect x="495" y="230" width="36" height="12" rx="4" fill="#edf2ef" stroke="#b8c6c1"/>
+    <rect x="495" y="247" width="36" height="12" rx="4" fill="#edf2ef" stroke="#b8c6c1"/>
+    <circle cx="502" cy="236" r="2" fill="#53a68f"/><circle cx="502" cy="253" r="2" fill="#53a68f"/>
+    <path d="M509 236h15m-15 17h15" stroke="#a5b5b0" stroke-width="2" stroke-linecap="round"/>
+  </g>
+</svg>

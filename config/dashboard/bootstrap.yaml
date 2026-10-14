@@ -1,0 +1,75 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: releaseyard-dashboard-bootstrap
+  namespace: idp-system
+automountServiceAccountToken: true
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: releaseyard-dashboard-bootstrap
+  namespace: idp-system
+rules:
+  - apiGroups: [""]
+    resources: [secrets]
+    resourceNames: [releaseyard-dashboard-local-admin]
+    verbs: [get]
+  - apiGroups: [""]
+    resources: [secrets]
+    verbs: [create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: releaseyard-dashboard-bootstrap
+  namespace: idp-system
+subjects:
+  - kind: ServiceAccount
+    name: releaseyard-dashboard-bootstrap
+    namespace: idp-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: releaseyard-dashboard-bootstrap
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: releaseyard-dashboard-bootstrap
+  namespace: idp-system
+spec:
+  backoffLimit: 4
+  activeDeadlineSeconds: 120
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: releaseyard-dashboard-bootstrap
+    spec:
+      serviceAccountName: releaseyard-dashboard-bootstrap
+      automountServiceAccountToken: true
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: bootstrap
+          image: releaseyard-dashboard:dev
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bootstrapadmin
+          env:
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: LOCAL_ADMIN_SECRET_NAME
+              value: releaseyard-dashboard-local-admin
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]

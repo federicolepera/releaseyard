@@ -1,0 +1,50 @@
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: manager-role
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - events
+  verbs:
+  - create
+  - patch
+- apiGroups:
+  - platform.releaseyard.io
+  resources:
+  - applicationdefinitions
+  - clusters
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - platform.releaseyard.io
+  resources:
+  - applicationdefinitions/status
+  - applications/status
+  - clusters/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - platform.releaseyard.io
+  resources:
+  - applications
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - platform.releaseyard.io
+  resources:
+  - applications/finalizers
+  verbs:
+  - update

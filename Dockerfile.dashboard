@@ -1,0 +1,14 @@
+FROM golang:1.26 AS builder
+
+WORKDIR /workspace
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 GOOS=linux go build -o /dashboard ./cmd/dashboard
+RUN CGO_ENABLED=0 GOOS=linux go build -o /bootstrapadmin ./cmd/bootstrapadmin
+
+FROM gcr.io/distroless/static:nonroot
+COPY --from=builder /dashboard /dashboard
+COPY --from=builder /bootstrapadmin /bootstrapadmin
+USER 65532:65532
+ENTRYPOINT ["/dashboard"]

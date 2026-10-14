@@ -1,0 +1,29 @@
+Thank you for installing {{ .Chart.Name }}.
+
+Your release is named {{ .Release.Name }}.
+
+The controller and CRDs have been installed in namespace {{ .Release.Namespace }}.
+
+To verify the installation:
+
+  kubectl get pods -n {{ .Release.Namespace }}
+  kubectl get customresourcedefinitions
+
+To learn more about the release, try:
+
+  $ helm status {{ .Release.Name }} -n {{ .Release.Namespace }}
+  $ helm get all {{ .Release.Name }} -n {{ .Release.Namespace }}
+{{- if .Values.dashboard.enabled }}
+{{- if .Values.dashboard.bootstrap.enabled }}
+
+The dashboard is available at {{ .Values.dashboard.publicURL }} and starts with
+local administrator authentication only (no OIDC provider is required).
+
+Read the generated administrator password with:
+
+  kubectl get secret {{ include "idp.resourceName" (dict "suffix" "dashboard-local-admin" "context" .) }} -n {{ .Release.Namespace }} -o jsonpath='{.data.initial-password}' | base64 -d
+
+Sign in as user "admin" with that password. The Secret is created once and is
+never overwritten on upgrade.
+{{- end }}
+{{- end }}

@@ -1,0 +1,15 @@
+# More info: https://docs.docker.com/engine/reference/builder/#dockerignore-file
+# Ignore everything by default and re-include only needed files
+**
+
+# Keep Go sources for both the manager and the dashboard.
+!**/*.go
+!go.mod
+!go.sum
+
+# The dashboard embeds these static files in its Go binary.
+!internal/
+!internal/dashboard/
+!internal/dashboard/web/
+!internal/dashboard/web/*
+**/*_test.go

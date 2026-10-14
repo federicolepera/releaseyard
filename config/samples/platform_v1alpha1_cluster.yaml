@@ -1,0 +1,12 @@
+apiVersion: platform.releaseyard.io/v1alpha1
+kind: Cluster
+metadata:
+  labels:
+    app.kubernetes.io/name: idp
+    app.kubernetes.io/managed-by: kustomize
+  name: releaseyard-managed-a
+spec:
+  # The Secret must be in the controller manager's credentials namespace and
+  # contain the target kubeconfig under data.kubeconfig.
+  kubeconfigSecretRef:
+    name: releaseyard-managed-a-kubeconfig
