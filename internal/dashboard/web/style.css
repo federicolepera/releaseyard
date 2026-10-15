@@ -673,3 +673,19 @@ html[data-theme="dark"] .sidebar-toggle:hover { border-color: #2de0c0; backgroun
 .team-select select { padding: 6px 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--ink); font-size: 13px; font-weight: 600; cursor: pointer; }
 .team-select select:focus { outline: 2px solid var(--accent); outline-offset: 1px; border-color: var(--accent); }
 html[data-theme="dark"] .team-select select { border-color: #30434c; background: #172a32; color: #d7e5e8; }
+
+.observability-section { margin-top: 26px; }
+.observability-section > .values-title { margin-top: 0; }
+.observability-section > .helper { margin: 0 0 12px; }
+.observability-block { border: 1px solid var(--line); border-radius: 10px; padding: 16px; margin-top: 14px; background: var(--surface); }
+.observability-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.observability-controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.observability-body { margin-top: 10px; }
+.resource-yaml { border: 1px solid var(--line); border-radius: 8px; margin-top: 8px; }
+.resource-yaml > summary { cursor: pointer; padding: 8px 12px; font-weight: 600; }
+.resource-yaml > .values-json, .resource-yaml > .empty { margin: 0; border-radius: 0 0 8px 8px; max-height: 40vh; }
+.obs-pod-select { max-width: 100%; }
+.obs-logs { max-height: 26rem; }
+.metrics-table { border-collapse: collapse; width: 100%; margin-top: 8px; }
+.metrics-table th, .metrics-table td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--line); }
+.metrics-table tr:last-child td { font-weight: 600; }

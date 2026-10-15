@@ -18,6 +18,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 
 	platformv1alpha1 "github.com/federicolepera/idp/api/v1alpha1"
 	"github.com/federicolepera/idp/internal/contract"
@@ -47,6 +48,9 @@ type server struct {
 	client    client.Client
 	namespace string
 	static    http.Handler
+
+	// targets caches read-only clients to managed clusters, keyed by cluster name.
+	targets sync.Map
 }
 
 // NewHandler returns the dashboard HTTP handler. Resources managed by this
@@ -68,6 +72,9 @@ func NewHandler(k8s client.Client, namespace string) http.Handler {
 	mux.HandleFunc("POST /api/applications", s.createApplication)
 	mux.HandleFunc("PATCH /api/applications/{name}", s.updateApplicationValues)
 	mux.HandleFunc("DELETE /api/applications/{name}", s.deleteApplication)
+	mux.HandleFunc("GET /api/applications/{name}/resources", s.listApplicationResources)
+	mux.HandleFunc("GET /api/applications/{name}/pods/{pod}/logs", s.applicationPodLogs)
+	mux.HandleFunc("GET /api/applications/{name}/metrics", s.applicationPodMetrics)
 	mux.Handle("/", s.static)
 	return securityHeaders(mux)
 }

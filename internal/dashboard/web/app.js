@@ -655,6 +655,7 @@
     appendValuesEditor(root, app);
     if (!selection || instanceView) appendResourceGraph(root, instanceView || app, selectedHealth?.workload || null);
     appendActivity(root, app);
+    appendObservability(root, app);
     const actions = element('div', 'detail-actions');
     const pending = state.deletionPending.has(app.metadata?.name);
     const remove = element('button', 'button button-danger', pending ? 'Deletion in progress' : state.deleting ? 'Deleting…' : 'Delete application');
@@ -844,6 +845,146 @@
     head.append(element('time', 'activity-time', formatObservedTime(entry.lastSeen)));
     row.append(head, element('p', 'activity-message', safe(entry.message || '')));
     return row;
+  }
+
+  function observabilityPods(app) {
+    const resources = Array.isArray(app.status?.resources) ? app.status.resources : [];
+    return resources.filter((resource) => resource.kind === 'Pod' && resource.name).map((resource) => resource.name).sort();
+  }
+
+  function appendObservability(root, app) {
+    const name = app.metadata?.name;
+    if (!name) return;
+    const section = element('section', 'observability-section');
+    section.setAttribute('aria-labelledby', 'application-observability-title');
+    const heading = element('h3', 'values-title', 'Observability'); heading.id = 'application-observability-title';
+    section.append(heading, element('p', 'helper', 'Live data read from the target cluster.'));
+    section.append(observabilityResourcesBlock(name));
+    section.append(observabilityMetricsBlock(name));
+    section.append(observabilityLogsBlock(name, observabilityPods(app)));
+    root.append(section);
+  }
+
+  function observabilityBlock(title, description) {
+    const block = element('div', 'observability-block');
+    const head = element('div', 'observability-head');
+    head.append(element('strong', '', title));
+    block.append(head);
+    if (description) block.append(element('p', 'helper', description));
+    const body = element('div', 'observability-body');
+    block.append(body);
+    return { block, head, body };
+  }
+
+  function observabilityResourcesBlock(name) {
+    const { block, head, body } = observabilityBlock('Resources (live YAML & status)', 'Every resource of the release, read live from the target cluster. Secrets are excluded.');
+    const button = element('button', 'button button-secondary', 'Load resources'); button.type = 'button';
+    body.append(element('p', 'helper', 'Not loaded yet.'));
+    button.addEventListener('click', async () => {
+      button.disabled = true; body.replaceChildren(element('p', 'helper', 'Loading…'));
+      try {
+        const response = await apiFetch(withTeam(`/api/applications/${encodeURIComponent(name)}/resources`));
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || `Request failed (${response.status})`);
+        renderLiveResources(body, data);
+      } catch (error) { body.replaceChildren(element('p', 'empty', error.message || 'Could not load resources.')); }
+      finally { button.disabled = false; }
+    });
+    head.append(button);
+    return block;
+  }
+
+  function renderLiveResources(body, data) {
+    const items = Array.isArray(data.items) ? data.items : [];
+    body.replaceChildren();
+    if (data.release) body.append(element('p', 'resource-meta', `Release ${safe(data.release)} in ${safe(data.namespace)} on ${safe(data.clusterName)}`));
+    if (!items.length) { body.append(element('p', 'helper', 'No resources reported yet.')); return; }
+    for (const item of items) {
+      const details = element('details', 'resource-yaml');
+      details.append(element('summary', '', `${safe(item.kind)} / ${safe(item.name)}`));
+      if (item.error) details.append(element('p', 'empty', safe(item.error)));
+      else details.append(element('pre', 'values-json', safe(item.yaml || '')));
+      body.append(details);
+    }
+    if (data.truncated) body.append(element('p', 'helper', 'Output truncated to the first resources.'));
+  }
+
+  function observabilityMetricsBlock(name) {
+    const { block, head, body } = observabilityBlock('Resource usage (CPU / memory)', 'CPU and memory currently used by the release Pods, from metrics-server.');
+    const button = element('button', 'button button-secondary', 'Load usage'); button.type = 'button';
+    body.append(element('p', 'helper', 'Not loaded yet.'));
+    button.addEventListener('click', async () => {
+      button.disabled = true; body.replaceChildren(element('p', 'helper', 'Loading…'));
+      try {
+        const response = await apiFetch(withTeam(`/api/applications/${encodeURIComponent(name)}/metrics`));
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || `Request failed (${response.status})`);
+        renderPodMetrics(body, data);
+      } catch (error) { body.replaceChildren(element('p', 'empty', error.message || 'Could not load usage.')); }
+      finally { button.disabled = false; }
+    });
+    head.append(button);
+    return block;
+  }
+
+  function formatCPUmilli(milli) {
+    const value = Number(milli) || 0;
+    return value >= 1000 ? `${(value / 1000).toFixed(2)} cores` : `${value}m`;
+  }
+
+  function formatBytes(bytes) {
+    const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
+    let value = Number(bytes) || 0; let index = 0;
+    while (value >= 1024 && index < units.length - 1) { value /= 1024; index += 1; }
+    return `${value.toFixed(index === 0 ? 0 : 1)} ${units[index]}`;
+  }
+
+  function renderPodMetrics(body, data) {
+    body.replaceChildren();
+    if (!data.available) { body.append(element('p', 'helper', safe(data.reason || 'Metrics are not available.'))); return; }
+    const pods = Array.isArray(data.pods) ? data.pods : [];
+    if (!pods.length) { body.append(element('p', 'helper', 'No Pod metrics reported yet.')); return; }
+    const table = element('table', 'metrics-table');
+    const head = document.createElement('thead'); const headRow = document.createElement('tr');
+    for (const label of ['Pod', 'CPU', 'Memory']) headRow.append(element('th', '', label));
+    head.append(headRow); table.append(head);
+    const tbody = document.createElement('tbody');
+    for (const pod of pods) {
+      const tr = document.createElement('tr');
+      tr.append(element('td', '', safe(pod.pod)), element('td', '', formatCPUmilli(pod.cpuMilli)), element('td', '', formatBytes(pod.memoryBytes)));
+      tbody.append(tr);
+    }
+    const total = document.createElement('tr');
+    total.append(element('td', '', 'Total'), element('td', '', formatCPUmilli(data.totalCpuMilli)), element('td', '', formatBytes(data.totalMemoryBytes)));
+    tbody.append(total);
+    table.append(tbody); body.append(table);
+  }
+
+  function observabilityLogsBlock(name, pods) {
+    const { block, head, body } = observabilityBlock('Pod logs', 'Recent log lines from a Pod of the release.');
+    const select = document.createElement('select'); select.className = 'obs-pod-select';
+    if (pods.length) select.append(...pods.map((pod) => new Option(pod, pod)));
+    else select.append(new Option('No pods reported', ''));
+    select.disabled = !pods.length;
+    const button = element('button', 'button button-secondary', 'Load logs'); button.type = 'button';
+    button.disabled = !pods.length;
+    const controls = element('div', 'observability-controls'); controls.append(select, button);
+    head.append(controls);
+    const output = element('pre', 'values-json obs-logs', 'Not loaded yet.');
+    body.append(output);
+    button.addEventListener('click', async () => {
+      const pod = select.value; if (!pod) return;
+      button.disabled = true; output.textContent = 'Loading…';
+      try {
+        const response = await apiFetch(withTeam(`/api/applications/${encodeURIComponent(name)}/pods/${encodeURIComponent(pod)}/logs`));
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || `Request failed (${response.status})`);
+        output.textContent = (data.logs && data.logs.length) ? data.logs : 'No log output.';
+        if (data.truncated) output.textContent += '\n… (truncated)';
+      } catch (error) { output.textContent = error.message || 'Could not load logs.'; }
+      finally { button.disabled = !pods.length; }
+    });
+    return block;
   }
 
   function appendResourceGraph(root, app, authoritativeHealth = null) {

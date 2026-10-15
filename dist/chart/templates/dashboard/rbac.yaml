@@ -32,6 +32,16 @@ rules:
       - secrets
     verbs:
       - create
+  # The dashboard reads the managed clusters' kubeconfig Secrets to show live
+  # resources, logs and metrics for the Applications a user can see. This grants
+  # read access to every Secret in the release namespace; in production use a
+  # dedicated namespace and a read-only credential.
+  - apiGroups:
+      - ""
+    resources:
+      - secrets
+    verbs:
+      - get
   - apiGroups:
       - ""
     resources:

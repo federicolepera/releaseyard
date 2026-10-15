@@ -140,6 +140,17 @@ dashboard:
     - releaseyard:administrators
 ```
 
+### Observability
+
+The Application detail page can show live resources (YAML with status), Pod logs
+and Pod CPU/memory read from the managed cluster. This requires two things:
+
+- the dashboard ServiceAccount may `get` the managed clusters' kubeconfig
+  Secrets (the chart grants `get` on Secrets in the release namespace); and
+- `metrics-server` runs on the managed clusters for the CPU/memory section.
+  `hack/setup-managed-metrics.sh` installs it on the Kind workload clusters. When
+  metrics-server is absent the dashboard reports it instead of failing.
+
 The controller keeps using its own kubeconfig (`Cluster.spec.kubeconfigSecretRef`)
 to install into managed clusters; there is no per-user authorization on the
 target clusters.
