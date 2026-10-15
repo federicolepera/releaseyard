@@ -5,13 +5,15 @@
 {{- $publicURL := required "dashboard.publicURL is required when dashboard.enabled=true" .Values.dashboard.publicURL }}
 {{- $localAdminSecretName := include "idp.resourceName" (dict "suffix" "dashboard-local-admin" "context" .) }}
 {{- $loopback := .Values.dashboard.oidcLoopback }}
+{{- $loopbackSidecar := $loopback.sidecar | default dict }}
+{{- $loopbackSidecarEnabled := and $loopback.enabled (dig "sidecar" "enabled" true $loopback) }}
 {{- $loopbackRepo := "" }}
 {{- $loopbackTag := "" }}
 {{- $loopbackTarget := "" }}
-{{- if $loopback.enabled }}
-{{- $loopbackRepo = required "dashboard.oidcLoopback.image.repository is required when dashboard.oidcLoopback.enabled=true" $loopback.image.repository }}
-{{- $loopbackTag = required "dashboard.oidcLoopback.image.tag is required when dashboard.oidcLoopback.enabled=true" $loopback.image.tag }}
-{{- $loopbackTarget = required "dashboard.oidcLoopback.targetHost is required when dashboard.oidcLoopback.enabled=true" $loopback.targetHost }}
+{{- if $loopbackSidecarEnabled }}
+{{- $loopbackRepo = required "dashboard.oidcLoopback.sidecar.image.repository is required when dashboard.oidcLoopback.sidecar.enabled=true" $loopbackSidecar.image.repository }}
+{{- $loopbackTag = required "dashboard.oidcLoopback.sidecar.image.tag is required when dashboard.oidcLoopback.sidecar.enabled=true" $loopbackSidecar.image.tag }}
+{{- $loopbackTarget = required "dashboard.oidcLoopback.sidecar.targetHost is required when dashboard.oidcLoopback.sidecar.enabled=true" $loopbackSidecar.targetHost }}
 {{- end }}
 apiVersion: apps/v1
 kind: Deployment
@@ -43,7 +45,7 @@ spec:
       {{- if $loopback.enabled }}
       hostAliases:
         {{- range $loopback.hostnames }}
-        - ip: 127.0.0.1
+        - ip: {{ $loopback.hostAliasIP | default "127.0.0.1" | quote }}
           hostnames:
             - {{ . | quote }}
         {{- end }}
@@ -85,13 +87,13 @@ spec:
             capabilities:
               drop:
                 - ALL
-        {{- if $loopback.enabled }}
+        {{- if $loopbackSidecarEnabled }}
         - name: oidc-loopback
           image: {{ printf "%s:%s" $loopbackRepo $loopbackTag | quote }}
-          imagePullPolicy: {{ $loopback.image.pullPolicy }}
+          imagePullPolicy: {{ $loopbackSidecar.image.pullPolicy }}
           args:
             - "TCP-LISTEN:{{ $loopback.listenPort }},bind=127.0.0.1,reuseaddr,fork"
-            - "TCP:{{ $loopbackTarget }}:{{ $loopback.targetPort }}"
+            - "TCP:{{ $loopbackTarget }}:{{ $loopbackSidecar.targetPort }}"
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true

@@ -257,24 +257,32 @@ dashboard:
   ## Development-only reachability to an identity provider that is exposed only
   ## on a localhost hostname (for example Keycloak behind a local Traefik).
   ## When enabled, the dashboard Pod gets hostAliases pointing the given
-  ## hostnames at 127.0.0.1 and a socat-style loopback sidecar that forwards the
-  ## listen port to the target service inside the cluster. Never enable this in
-  ## production.
+  ## hostnames at `hostAliasIP`. Point it at the in-cluster ingress ClusterIP and
+  ## disable the sidecar, or keep 127.0.0.1 and run the socat-style sidecar that
+  ## forwards the listen port to the target service inside the cluster. Never
+  ## enable this in production.
   oidcLoopback:
     enabled: false
-    image:
-      ## Required when dashboard.oidcLoopback.enabled=true.
-      repository: ""
-      tag: ""
-      pullPolicy: IfNotPresent
-    ## Hostnames resolved to 127.0.0.1 inside the Pod.
+    ## Hostnames resolved inside the Pod through hostAliases.
     hostnames:
       - keycloak.localhost
-    ## Port the sidecar listens on; must match the port in the OIDC issuer URL.
+    ## IP the hostnames resolve to inside the Pod. Use the in-cluster ingress
+    ## (its ClusterIP) to reach it directly, or keep 127.0.0.1 with the sidecar.
+    hostAliasIP: 127.0.0.1
+    ## Port the identity provider issuer URL uses.
     listenPort: 18080
-    ## Upstream address the sidecar forwards to, reachable from the cluster.
-    targetHost: ""
-    targetPort: 8080
+    ## Optional socat-style TCP bridge. Required only when hostAliasIP is
+    ## 127.0.0.1 and listenPort is not served inside the cluster already.
+    sidecar:
+      enabled: true
+      image:
+        ## Required when dashboard.oidcLoopback.sidecar.enabled=true.
+        repository: ""
+        tag: ""
+        pullPolicy: IfNotPresent
+      ## Upstream address the sidecar forwards to, reachable from the cluster.
+      targetHost: ""
+      targetPort: 8080
 
   ingress:
     ## Keep disabled unless HTTPS termination is configured.
