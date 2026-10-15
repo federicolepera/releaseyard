@@ -32,6 +32,7 @@ import (
 const (
 	observabilityTimeout  = 30 * time.Second
 	maxObservableResource = 200
+	maxObservableEvents   = 100
 	maxLogBytes           = 1 << 20
 	maxLogTailLines       = 2000
 	defaultLogTailLines   = 200
@@ -178,17 +179,30 @@ func (s *server) loadApplication(w http.ResponseWriter, r *http.Request, name st
 }
 
 type applicationResourceView struct {
-	APIVersion string `json:"apiVersion"`
-	Kind       string `json:"kind"`
-	Namespace  string `json:"namespace,omitempty"`
-	Name       string `json:"name"`
-	UID        string `json:"uid,omitempty"`
-	CreatedAt  string `json:"createdAt,omitempty"`
-	Status     string `json:"status,omitempty"`
-	StatusTone string `json:"statusTone,omitempty"`
-	Ready      string `json:"ready,omitempty"`
-	YAML       string `json:"yaml,omitempty"`
-	Error      string `json:"error,omitempty"`
+	APIVersion string              `json:"apiVersion"`
+	Kind       string              `json:"kind"`
+	Namespace  string              `json:"namespace,omitempty"`
+	Name       string              `json:"name"`
+	UID        string              `json:"uid,omitempty"`
+	CreatedAt  string              `json:"createdAt,omitempty"`
+	Status     string              `json:"status,omitempty"`
+	StatusTone string              `json:"statusTone,omitempty"`
+	Ready      string              `json:"ready,omitempty"`
+	Owner      string              `json:"owner,omitempty"`
+	Node       string              `json:"node,omitempty"`
+	PodIP      string              `json:"podIP,omitempty"`
+	Phase      string              `json:"phase,omitempty"`
+	Restarts   int64               `json:"restarts,omitempty"`
+	QoSClass   string              `json:"qosClass,omitempty"`
+	Conditions []resourceCondition `json:"conditions,omitempty"`
+	YAML       string              `json:"yaml,omitempty"`
+	Error      string              `json:"error,omitempty"`
+}
+
+type resourceCondition struct {
+	Type   string `json:"type"`
+	Status string `json:"status"`
+	Reason string `json:"reason,omitempty"`
 }
 
 type applicationResourcesResponse struct {
@@ -256,6 +270,21 @@ func (s *server) listApplicationResources(w http.ResponseWriter, r *http.Request
 			view.CreatedAt = created.UTC().Format(time.RFC3339)
 		}
 		view.Status, view.StatusTone, view.Ready = summarizeResource(object)
+		view.Owner = ownerString(object)
+		if node, _, _ := unstructured.NestedString(object.Object, "spec", "nodeName"); node != "" {
+			view.Node = node
+		}
+		if ip, _, _ := unstructured.NestedString(object.Object, "status", "podIP"); ip != "" {
+			view.PodIP = ip
+		}
+		if phase, _, _ := unstructured.NestedString(object.Object, "status", "phase"); phase != "" {
+			view.Phase = phase
+		}
+		if qos, _, _ := unstructured.NestedString(object.Object, "status", "qosClass"); qos != "" {
+			view.QoSClass = qos
+		}
+		view.Restarts = podRestarts(object)
+		view.Conditions = conditionsOf(object)
 		if encoded, err := yaml.Marshal(object.Object); err == nil {
 			view.YAML = string(encoded)
 		}
@@ -540,7 +569,137 @@ func int64Field(obj *unstructured.Unstructured, fallback int64, fields ...string
 	return value
 }
 
-func sumMetricsContainers(item *unstructured.Unstructured) (resource.Quantity, resource.Quantity) {	var cpu, memory resource.Quantity
+func ownerString(obj *unstructured.Unstructured) string {
+	refs := obj.GetOwnerReferences()
+	if len(refs) == 0 {
+		return ""
+	}
+	ref := refs[0]
+	for i := range refs {
+		if refs[i].Controller != nil && *refs[i].Controller {
+			ref = refs[i]
+			break
+		}
+	}
+	return fmt.Sprintf("%s/%s", ref.Kind, ref.Name)
+}
+
+func podRestarts(obj *unstructured.Unstructured) int64 {
+	statuses, _, _ := unstructured.NestedSlice(obj.Object, "status", "containerStatuses")
+	var total int64
+	for _, raw := range statuses {
+		container, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		if value, ok := container["restartCount"].(int64); ok {
+			total += value
+		}
+	}
+	return total
+}
+
+func conditionsOf(obj *unstructured.Unstructured) []resourceCondition {
+	raw, _, _ := unstructured.NestedSlice(obj.Object, "status", "conditions")
+	conditions := make([]resourceCondition, 0, len(raw))
+	for _, item := range raw {
+		condition, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		entry := resourceCondition{}
+		if value, ok := condition["type"].(string); ok {
+			entry.Type = value
+		}
+		if value, ok := condition["status"].(string); ok {
+			entry.Status = value
+		}
+		if value, ok := condition["reason"].(string); ok {
+			entry.Reason = value
+		}
+		if entry.Type != "" {
+			conditions = append(conditions, entry)
+		}
+	}
+	return conditions
+}
+
+// applicationResourceEvents returns Kubernetes Events for a single resource of
+// the Application's release, matched by the object's UID.
+func (s *server) applicationResourceEvents(w http.ResponseWriter, r *http.Request) {
+	app, ok := s.loadApplication(w, r, r.PathValue("name"))
+	if !ok {
+		return
+	}
+	scope, err := applicationScopeOf(app)
+	if err != nil {
+		writeError(w, http.StatusServiceUnavailable, "The application has no observed target yet")
+		return
+	}
+	uid := strings.TrimSpace(r.URL.Query().Get("uid"))
+	if uid == "" {
+		writeError(w, http.StatusBadRequest, "A resource uid is required")
+		return
+	}
+	namespace := strings.TrimSpace(r.URL.Query().Get("namespace"))
+	belongs := false
+	for _, item := range scope.resources {
+		if string(item.UID) == uid {
+			belongs = true
+			if namespace == "" {
+				namespace = item.Namespace
+			}
+			break
+		}
+	}
+	if !belongs {
+		writeError(w, http.StatusNotFound, "Resource does not belong to this application")
+		return
+	}
+	conn, err := s.targetFor(r.Context(), scope.clusterName)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "Could not reach the target cluster")
+		return
+	}
+	list, err := conn.core.CoreV1().Events(namespace).List(r.Context(), metav1.ListOptions{FieldSelector: "involvedObject.uid=" + uid})
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "Could not read Events from the target cluster")
+		return
+	}
+	events := make([]resourceEvent, 0, len(list.Items))
+	for i := range list.Items {
+		event := &list.Items[i]
+		lastSeen := event.LastTimestamp.Time
+		if event.LastTimestamp.IsZero() && !event.EventTime.IsZero() {
+			lastSeen = event.EventTime.Time
+		}
+		entry := resourceEvent{Type: event.Type, Reason: event.Reason, Message: event.Message, Count: event.Count}
+		if !lastSeen.IsZero() {
+			entry.LastSeen = lastSeen.UTC().Format(time.RFC3339)
+		}
+		events = append(events, entry)
+	}
+	sort.Slice(events, func(i, j int) bool { return events[i].LastSeen > events[j].LastSeen })
+	if len(events) > maxObservableEvents {
+		events = events[:maxObservableEvents]
+	}
+	writeJSON(w, http.StatusOK, applicationEventsResponse{Items: events})
+}
+
+type resourceEvent struct {
+	Type     string `json:"type,omitempty"`
+	Reason   string `json:"reason,omitempty"`
+	Message  string `json:"message,omitempty"`
+	Count    int32  `json:"count,omitempty"`
+	LastSeen string `json:"lastSeen,omitempty"`
+}
+
+type applicationEventsResponse struct {
+	Items []resourceEvent `json:"items"`
+}
+
+func sumMetricsContainers(item *unstructured.Unstructured) (resource.Quantity, resource.Quantity) {
+	var cpu, memory resource.Quantity
 	containers, _, _ := unstructured.NestedSlice(item.Object, "containers")
 	for _, raw := range containers {
 		container, ok := raw.(map[string]any)

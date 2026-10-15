@@ -35,7 +35,7 @@
       try { localStorage.setItem('idp-sidebar', next ? 'collapsed' : 'open'); } catch (_) { /* Storage can be unavailable. */ }
     });
   }
-  const state = { definitions: [], applications: [], clusters: [], selectedApplication: null, selectedCluster: null, selectedInstanceUID: '', detailTab: 'overview', deleting: false, deletionPending: new Set(), editingValues: false, valuesDraft: Object.create(null), savingValues: false, definitionQuery: '', definitionSort: 'name', definitionType: '', destinationMode: 'cluster', preview: null, previewController: null, previewSequence: 0, previewLoading: false, savingEnvironment: false, creating: false, teams: [], team: '', resourcesQuery: '', resourcesKind: '', resourcesStatus: '', resourcesExpanded: new Set(), resourcesLive: null, resourcesLiveKey: '' };
+  const state = { definitions: [], applications: [], clusters: [], selectedApplication: null, selectedCluster: null, selectedInstanceUID: '', detailTab: 'overview', deleting: false, deletionPending: new Set(), editingValues: false, valuesDraft: Object.create(null), savingValues: false, definitionQuery: '', definitionSort: 'name', definitionType: '', destinationMode: 'cluster', preview: null, previewController: null, previewSequence: 0, previewLoading: false, savingEnvironment: false, creating: false, teams: [], team: '', resourcesQuery: '', resourcesKind: '', resourcesStatus: '', resourcesExpanded: new Set(), resourcesLive: null, resourcesLiveKey: '', selectedResourceUID: '', resourcePanelTab: 'overview' };
   state.selectedDefinition = null;
   state.canCreateApps = false;
   state.canDeleteApps = false;
@@ -612,7 +612,7 @@
     const page = $('#application-detail')?.closest('.page');
     if (page) page.classList.toggle('is-detail-open', open);
   }
-  function openApplication(app) { state.selectedApplication = app; state.selectedInstanceUID = ''; state.detailTab = 'overview'; state.editingValues = false; state.valuesDraft = Object.create(null); state.resourcesQuery = ''; state.resourcesKind = ''; state.resourcesStatus = ''; state.resourcesExpanded = new Set(); state.resourcesLive = null; state.resourcesLiveKey = ''; $('#applications-list-view').hidden = true; setDetailChrome(true); renderApplicationDetail(); $('#application-detail .back-button').focus(); }
+  function openApplication(app) { state.selectedApplication = app; state.selectedInstanceUID = ''; state.detailTab = 'overview'; state.editingValues = false; state.valuesDraft = Object.create(null); state.resourcesQuery = ''; state.resourcesKind = ''; state.resourcesStatus = ''; state.resourcesExpanded = new Set(); state.resourcesLive = null; state.resourcesLiveKey = ''; state.selectedResourceUID = ''; state.resourcePanelTab = 'overview'; $('#applications-list-view').hidden = true; setDetailChrome(true); renderApplicationDetail(); $('#application-detail .back-button').focus(); }
   function closeApplication() {
     const name = state.selectedApplication?.metadata?.name;
     state.selectedApplication = null; state.editingValues = false; state.valuesDraft = Object.create(null); $('#application-detail').hidden = true; $('#applications-list-view').hidden = false; setDetailChrome(false);
@@ -1416,6 +1416,7 @@
     const { app, view, selectedHealth } = ctx;
     const nodes = resourceNodes(view);
     const fresh = Boolean(selectedHealth?.workload?.fresh ?? workloadHealth(view).fresh);
+    const layout = element('div', 'res-layout');
     const section = element('section', 'res-section');
 
     const head = element('div', 'res-head');
@@ -1437,7 +1438,13 @@
 
     if (selectedHealth && !selectedHealth.fresh) section.append(element('p', 'warning', 'Showing last-known resources. Instance health and replica counts are not current.'));
     if (condition(app, 'InventoryReady')?.status === 'False') section.append(element('p', 'warning', 'Resource inventory is not current and may be incomplete or outdated.'));
-    if (!nodes.length) { section.append(element('p', 'empty', 'No resources recorded.')); panel.append(section); return; }
+    if (!nodes.length) {
+      section.append(element('p', 'empty', 'No resources recorded.'));
+      layout.append(section); panel.append(layout); return;
+    }
+
+    const selectedNode = nodes.find((node) => node.resource?.uid && node.resource.uid === state.selectedResourceUID) || null;
+    if (!selectedNode) state.selectedResourceUID = '';
 
     kindSelect.append(new Option('All kinds', ''));
     [...new Set(nodes.map((node) => node.resource.kind).filter(Boolean))].sort().forEach((kind) => kindSelect.add(new Option(kind, kind)));
@@ -1457,7 +1464,8 @@
 
     const renderRows = (list, depth) => list.forEach((node) => {
       const resource = node.resource || {};
-      const row = document.createElement('tr'); row.className = 'res-row';
+      const row = document.createElement('tr');
+      row.className = `res-row${resource.uid && resource.uid === state.selectedResourceUID ? ' is-selected' : ''}`;
       if (resource.uid) row.dataset.uid = resource.uid;
 
       const kindCell = element('td', 'res-td-kind');
@@ -1488,6 +1496,13 @@
       row.append(element('td', 'res-td-age', live?.createdAt ? ageText(live.createdAt) : '—'));
 
       const actionsCell = element('td', 'res-td-actions'); actionsCell.append(resourceRowMenu(resource)); row.append(actionsCell);
+
+      row.addEventListener('click', (event) => {
+        if (!resource.uid || event.target.closest('.res-chevron, .detail-menu')) return;
+        state.selectedResourceUID = state.selectedResourceUID === resource.uid ? '' : resource.uid;
+        state.resourcePanelTab = 'overview';
+        renderApplicationDetail();
+      });
 
       tbody.append(row);
       rows.push({ row, node, parentUid: node.parent?.resource.uid || '' });
@@ -1528,7 +1543,201 @@
 
     applyVisibility();
     loadResourceAges(app);
-    panel.append(section);
+    layout.append(section);
+    if (selectedNode) { layout.classList.add('is-open'); layout.append(resourcePanel(app, selectedNode, fresh)); }
+    panel.append(layout);
+  }
+
+  function resourcePanel(app, node, fresh) {
+    const resource = node.resource || {};
+    const live = state.resourcesLive?.get(resource.uid) || null;
+    const clusterName = app.spec?.clusterRef?.name || app.spec?.environment?.name || '';
+    const aside = element('aside', 'res-panel');
+    aside.setAttribute('aria-label', 'Resource details');
+
+    const header = element('div', 'res-panel-head');
+    const icon = element('span', 'res-panel-icon'); icon.append(resourceKindIcon());
+    const titles = element('div', 'res-panel-titles');
+    titles.append(element('span', 'res-panel-kind', safe(resource.kind || 'Resource')));
+    titles.append(element('strong', 'res-panel-name', safe(resource.name || '—')));
+    titles.append(live ? badge(live.status || '—', live.statusTone || 'neutral') : inventoryResourceBadge(resource, fresh));
+    const close = element('button', 'res-panel-close', '×'); close.type = 'button'; close.setAttribute('aria-label', 'Close details');
+    close.addEventListener('click', () => { state.selectedResourceUID = ''; renderApplicationDetail(); });
+    header.append(icon, titles, close);
+    aside.append(header);
+
+    const tabLabels = { overview: 'Overview', yaml: 'YAML', events: 'Events', logs: 'Logs' };
+    const available = resource.kind === 'Pod' ? ['overview', 'yaml', 'events', 'logs'] : ['overview', 'yaml', 'events'];
+    if (!available.includes(state.resourcePanelTab)) state.resourcePanelTab = 'overview';
+    const nav = element('nav', 'res-panel-tabs'); nav.setAttribute('role', 'tablist');
+    available.forEach((id) => {
+      const button = element('button', `res-panel-tab${state.resourcePanelTab === id ? ' is-active' : ''}`, tabLabels[id]);
+      button.type = 'button'; button.setAttribute('role', 'tab'); button.setAttribute('aria-selected', state.resourcePanelTab === id ? 'true' : 'false');
+      button.addEventListener('click', () => { state.resourcePanelTab = id; renderApplicationDetail(); });
+      nav.append(button);
+    });
+    aside.append(nav);
+
+    const body = element('div', 'res-panel-body');
+    aside.append(body);
+    if (state.resourcePanelTab === 'yaml') resourcePanelYAML(body, live);
+    else if (state.resourcePanelTab === 'events') resourcePanelEvents(body, app, resource);
+    else if (state.resourcePanelTab === 'logs') resourcePanelLogs(body, app, resource);
+    else resourcePanelOverview(body, resource, live, clusterName);
+    return aside;
+  }
+
+  function panelInfoRow(label, value, copyable) {
+    if (value == null || value === '') return null;
+    const row = element('div', 'res-panel-info-row');
+    row.append(element('dt', '', label));
+    const dd = element('dd', '');
+    dd.append(element('span', 'res-panel-value', String(value)));
+    if (copyable) dd.append(copyIconButton(String(value)));
+    row.append(dd);
+    return row;
+  }
+
+  function panelValueRow(label, node) {
+    const row = element('div', 'res-panel-info-row');
+    row.append(element('dt', '', label));
+    const dd = element('dd', ''); dd.append(node); row.append(dd);
+    return row;
+  }
+
+  function resourcePanelOverview(body, resource, live, clusterName) {
+    const details = element('section', 'res-panel-card');
+    details.append(element('h4', 'res-panel-card-title', 'Details'));
+    const list = element('dl', 'res-panel-info');
+    if (!live) list.append(element('p', 'helper', 'Live details are unavailable for this resource.'));
+    else {
+      [
+        panelInfoRow('Name', live.name || resource.name, true),
+        panelInfoRow('Namespace', live.namespace || resource.namespace, true),
+        panelInfoRow('Cluster', clusterName, false),
+        panelInfoRow('Controlled by', live.owner, true),
+        panelInfoRow('Node', live.node, true),
+        panelInfoRow('IP address', live.podIP, true),
+        panelInfoRow('Created', live.createdAt ? formatObservedTime(live.createdAt) : '', false),
+        panelInfoRow('Age', live.createdAt ? ageText(live.createdAt) : '', false),
+      ].forEach((row) => { if (row) list.append(row); });
+    }
+    details.append(list); body.append(details);
+
+    const statusCard = element('section', 'res-panel-card');
+    statusCard.append(element('h4', 'res-panel-card-title', 'Status'));
+    const statusList = element('dl', 'res-panel-info');
+    if (live) {
+      if (live.status) statusList.append(panelValueRow('Phase', badge(live.status, live.statusTone || 'neutral')));
+      if (live.ready && live.ready !== '—') statusList.append(panelValueRow('Ready', element('span', 'res-panel-value', live.ready)));
+      if (resource.kind === 'Pod') statusList.append(panelValueRow('Restarts', element('span', 'res-panel-value', String(live.restarts || 0))));
+      if (live.qosClass) statusList.append(panelValueRow('QoS Class', element('span', 'res-panel-value', live.qosClass)));
+      if (Array.isArray(live.conditions) && live.conditions.length) {
+        const conditions = element('div', 'res-conditions');
+        live.conditions.forEach((condition) => {
+          const line = element('div', 'res-condition');
+          line.append(element('span', `res-cond-dot ${condition.status === 'True' ? 'is-true' : condition.status === 'False' ? 'is-false' : ''}`));
+          line.append(element('span', 'res-cond-type', safe(condition.type)));
+          line.append(element('span', 'res-cond-status', safe(condition.status || 'Unknown')));
+          conditions.append(line);
+        });
+        statusList.append(panelValueRow('Conditions', conditions));
+      }
+    } else {
+      statusList.append(element('p', 'helper', 'Live status is unavailable for this resource.'));
+    }
+    statusCard.append(statusList); body.append(statusCard);
+  }
+
+  function resourcePanelYAML(body, live) {
+    const card = element('section', 'res-panel-card');
+    const head = element('div', 'res-panel-card-head');
+    head.append(element('h4', 'res-panel-card-title', 'YAML'));
+    if (live?.yaml) {
+      const copy = element('button', 'button button-secondary res-mini-btn', 'Copy'); copy.type = 'button';
+      copy.addEventListener('click', () => copyText(live.yaml));
+      head.append(copy);
+    }
+    card.append(head);
+    card.append(element('pre', 'res-yaml', live?.yaml || 'No YAML available.'));
+    body.append(card);
+  }
+
+  function resourcePanelEvents(body, app, resource) {
+    const card = element('section', 'res-panel-card');
+    const head = element('div', 'res-panel-card-head');
+    head.append(element('h4', 'res-panel-card-title', 'Events'));
+    const list = element('div', 'res-events'); list.append(element('p', 'helper', 'Loading…'));
+    const refresh = element('button', 'button button-secondary res-mini-btn', 'Refresh'); refresh.type = 'button';
+    refresh.addEventListener('click', () => { list.replaceChildren(element('p', 'helper', 'Loading…')); loadResourceEvents(app, resource, list); });
+    head.append(refresh);
+    card.append(head, list); body.append(card);
+    loadResourceEvents(app, resource, list);
+  }
+
+  async function loadResourceEvents(app, resource, container) {
+    try {
+      const params = new URLSearchParams({ uid: resource.uid || '' });
+      if (resource.namespace) params.set('namespace', resource.namespace);
+      const response = await apiFetch(withTeam(`/api/applications/${encodeURIComponent(app.metadata?.name)}/events?${params.toString()}`));
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || `Request failed (${response.status})`);
+      const items = Array.isArray(data.items) ? data.items : [];
+      if (!container.isConnected) return;
+      if (!items.length) { container.replaceChildren(element('p', 'helper', 'No events recorded for this resource.')); return; }
+      container.replaceChildren();
+      items.forEach((entry) => {
+        const row = element('div', 'res-event');
+        const top = element('div', 'res-event-top');
+        top.append(badge(entry.type || 'Normal', (entry.type || '').toLowerCase() === 'warning' ? 'error' : 'neutral'));
+        top.append(element('span', 'res-event-reason', safe(entry.reason || '')));
+        top.append(element('span', 'res-event-time', entry.lastSeen ? `${ageText(entry.lastSeen)} ago` : ''));
+        row.append(top, element('p', 'res-event-message', safe(entry.message || '')));
+        if (entry.count && entry.count > 1) row.append(element('span', 'res-event-count', `${entry.count}×`));
+        container.append(row);
+      });
+    } catch (error) {
+      if (container.isConnected) container.replaceChildren(element('p', 'helper', error.message || 'Could not load events.'));
+    }
+  }
+
+  function resourcePanelLogs(body, app, resource) {
+    const card = element('section', 'res-panel-card');
+    const head = element('div', 'res-panel-card-head');
+    head.append(element('h4', 'res-panel-card-title', 'Logs'));
+    const output = element('pre', 'res-logs'); output.textContent = 'Loading…';
+    const refresh = element('button', 'button button-secondary res-mini-btn', 'Refresh'); refresh.type = 'button';
+    const load = () => { output.textContent = 'Loading…'; loadResourceLogs(app, resource.name, output); };
+    refresh.addEventListener('click', load);
+    head.append(refresh);
+    card.append(head, output); body.append(card);
+    loadResourceLogs(app, resource.name, output);
+  }
+
+  async function loadResourceLogs(app, pod, output) {
+    try {
+      const response = await apiFetch(withTeam(`/api/applications/${encodeURIComponent(app.metadata?.name)}/pods/${encodeURIComponent(pod)}/logs`));
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || `Request failed (${response.status})`);
+      if (!output.isConnected) return;
+      output.textContent = (data.logs && data.logs.length) ? data.logs : 'No log output.';
+      if (data.truncated) output.textContent += '\n… (truncated)';
+    } catch (error) {
+      if (output.isConnected) output.textContent = error.message || 'Could not load logs.';
+    }
+  }
+
+  function copyIconButton(value) {
+    const button = element('button', 'res-copy'); button.type = 'button'; button.setAttribute('aria-label', 'Copy to clipboard');
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('aria-hidden', 'true');
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', 'M9 9V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-4M5 9h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2z');
+    path.setAttribute('fill', 'none'); path.setAttribute('stroke', 'currentColor');
+    path.setAttribute('stroke-width', '1.6'); path.setAttribute('stroke-linecap', 'round'); path.setAttribute('stroke-linejoin', 'round');
+    svg.append(path); button.append(svg);
+    button.addEventListener('click', () => copyText(value));
+    return button;
   }
 
   async function loadResourceAges(app) {

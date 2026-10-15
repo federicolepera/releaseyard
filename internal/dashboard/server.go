@@ -75,6 +75,7 @@ func NewHandler(k8s client.Client, namespace string) http.Handler {
 	mux.HandleFunc("GET /api/applications/{name}/resources", s.listApplicationResources)
 	mux.HandleFunc("GET /api/applications/{name}/pods/{pod}/logs", s.applicationPodLogs)
 	mux.HandleFunc("GET /api/applications/{name}/metrics", s.applicationPodMetrics)
+	mux.HandleFunc("GET /api/applications/{name}/events", s.applicationResourceEvents)
 	mux.Handle("/", s.static)
 	return securityHeaders(mux)
 }

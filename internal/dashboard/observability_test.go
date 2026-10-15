@@ -98,3 +98,30 @@ func TestSummarizeResource(t *testing.T) {
 		t.Fatalf("pvc summary = %q/%q/%q, want Bound/good/—", status, tone, ready)
 	}
 }
+
+func TestResourceDetailHelpers(t *testing.T) {
+	pod := &unstructured.Unstructured{Object: map[string]any{
+		"kind":     "Pod",
+		"spec":     map[string]any{"nodeName": "node-a"},
+		"metadata": map[string]any{"ownerReferences": []any{map[string]any{"kind": "ReplicaSet", "name": "web-abc", "controller": true}}},
+		"status": map[string]any{
+			"podIP":    "10.0.0.5",
+			"qosClass": "Burstable",
+			"containerStatuses": []any{
+				map[string]any{"ready": true, "restartCount": int64(1)},
+				map[string]any{"ready": false, "restartCount": int64(2)},
+			},
+			"conditions": []any{map[string]any{"type": "Ready", "status": "True"}},
+		},
+	}}
+	if got := ownerString(pod); got != "ReplicaSet/web-abc" {
+		t.Fatalf("ownerString = %q", got)
+	}
+	if got := podRestarts(pod); got != 3 {
+		t.Fatalf("podRestarts = %d, want 3", got)
+	}
+	conditions := conditionsOf(pod)
+	if len(conditions) != 1 || conditions[0].Type != "Ready" || conditions[0].Status != "True" {
+		t.Fatalf("conditionsOf = %#v", conditions)
+	}
+}
