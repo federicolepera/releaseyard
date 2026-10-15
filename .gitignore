@@ -33,3 +33,4 @@ go.work
 /keycloack/client-secret
 /.local/
 .slim/deepwork/
+.dev/
