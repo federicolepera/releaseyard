@@ -49,27 +49,48 @@ other Secrets in the namespace.
 The dashboard Pod must be able to reach the issuer's discovery and token
 endpoints, and the browser must be able to reach the authorization endpoint. For
 a Keycloak that is only exposed on a localhost hostname, enable the
-development-only loopback bridge (never in production):
+development-only loopback aid (never in production).
+
+Recommended: point the hostAliases at the in-cluster ingress ClusterIP so no
+sidecar is needed. `hack/setup-oidc-loopback.sh` wires this up automatically (it
+also adds the matching port to the ingress Service):
 
 ```yaml
 dashboard:
   oidcLoopback:
     enabled: true
-    image:
-      repository: releaseyard-kind-socat
-      tag: dev
-      pullPolicy: IfNotPresent
     hostnames:
       - keycloak.localhost
+    hostAliasIP: <ingress ClusterIP>
     listenPort: 18080
-    targetHost: releaseyard-keycloak-service.keycloak-operator.svc.cluster.local
-    targetPort: 8080
+    sidecar:
+      enabled: false
 ```
 
-When enabled, the dashboard Pod gets a `hostAliases` entry pointing the given
-hostnames at `127.0.0.1` and a socat-style sidecar that forwards `listenPort` to
-`targetHost:targetPort`. Configure the OIDC issuer with the same hostname and
-port, for example `http://keycloak.localhost:18080/realms/releaseyard`.
+If the Pod cannot reach the ingress directly, keep `hostAliasIP: 127.0.0.1` and
+enable the socat-style sidecar that forwards `listenPort` to an in-cluster
+service:
+
+```yaml
+dashboard:
+  oidcLoopback:
+    enabled: true
+    hostnames:
+      - keycloak.localhost
+    hostAliasIP: 127.0.0.1
+    listenPort: 18080
+    sidecar:
+      enabled: true
+      image:
+        repository: releaseyard-kind-socat
+        tag: dev
+        pullPolicy: IfNotPresent
+      targetHost: releaseyard-keycloak-service.keycloak-operator.svc.cluster.local
+      targetPort: 8080
+```
+
+Configure the OIDC issuer with the same hostname and port, for example
+`http://keycloak.localhost:18080/realms/releaseyard`.
 
 ## Authorization (management cluster RBAC)
 
