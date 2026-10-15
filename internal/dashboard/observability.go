@@ -345,11 +345,13 @@ type podUsage struct {
 }
 
 type applicationMetricsResponse struct {
-	Available    bool       `json:"available"`
-	Reason       string     `json:"reason,omitempty"`
-	Pods         []podUsage `json:"pods,omitempty"`
-	TotalCPUmil  int64      `json:"totalCpuMilli,omitempty"`
-	TotalMemByte int64      `json:"totalMemoryBytes,omitempty"`
+	Available        bool       `json:"available"`
+	Reason           string     `json:"reason,omitempty"`
+	Pods             []podUsage `json:"pods,omitempty"`
+	TotalCPUmil      int64      `json:"totalCpuMilli,omitempty"`
+	TotalMemByte     int64      `json:"totalMemoryBytes,omitempty"`
+	RequestedCPUmil  int64      `json:"requestedCpuMilli,omitempty"`
+	RequestedMemByte int64      `json:"requestedMemoryBytes,omitempty"`
 }
 
 // applicationPodMetrics returns CPU/memory usage per Pod from the target
@@ -370,21 +372,47 @@ func (s *server) applicationPodMetrics(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, "Could not reach the target cluster")
 		return
 	}
-	if _, err := conn.discovery.ServerResourcesForGroupVersion(metricsAPIGroupVer); err != nil {
-		writeJSON(w, http.StatusOK, applicationMetricsResponse{Available: false, Reason: "Metrics are not available: metrics-server is not installed on the target cluster."})
-		return
-	}
-	gvr := schema.GroupVersionResource{Group: "metrics.k8s.io", Version: "v1beta1", Resource: "pods"}
-	list, err := conn.dynamic.Resource(gvr).Namespace(scope.namespace).List(r.Context(), metav1.ListOptions{})
-	if err != nil {
-		writeJSON(w, http.StatusOK, applicationMetricsResponse{Available: false, Reason: "Metrics are not available on the target cluster."})
-		return
-	}
 
 	releasePods := make(map[string]struct{})
 	for _, name := range scope.podNames() {
 		releasePods[name] = struct{}{}
 	}
+	// Requested resources come from the Pod specs and are available even when
+	// metrics-server is not installed.
+	var requestedCPU, requestedMem resource.Quantity
+	if pods, err := conn.core.CoreV1().Pods(scope.namespace).List(r.Context(), metav1.ListOptions{}); err == nil {
+		for i := range pods.Items {
+			pod := &pods.Items[i]
+			if _, ok := releasePods[pod.Name]; !ok {
+				continue
+			}
+			for j := range pod.Spec.Containers {
+				if quantity, ok := pod.Spec.Containers[j].Resources.Requests[corev1.ResourceCPU]; ok {
+					requestedCPU.Add(quantity)
+				}
+				if quantity, ok := pod.Spec.Containers[j].Resources.Requests[corev1.ResourceMemory]; ok {
+					requestedMem.Add(quantity)
+				}
+			}
+		}
+	}
+	requested := applicationMetricsResponse{RequestedCPUmil: requestedCPU.MilliValue(), RequestedMemByte: requestedMem.Value()}
+
+	if _, err := conn.discovery.ServerResourcesForGroupVersion(metricsAPIGroupVer); err != nil {
+		requested.Available = false
+		requested.Reason = "Metrics are not available: metrics-server is not installed on the target cluster."
+		writeJSON(w, http.StatusOK, requested)
+		return
+	}
+	gvr := schema.GroupVersionResource{Group: "metrics.k8s.io", Version: "v1beta1", Resource: "pods"}
+	list, err := conn.dynamic.Resource(gvr).Namespace(scope.namespace).List(r.Context(), metav1.ListOptions{})
+	if err != nil {
+		requested.Available = false
+		requested.Reason = "Metrics are not available on the target cluster."
+		writeJSON(w, http.StatusOK, requested)
+		return
+	}
+
 	usage := make([]podUsage, 0, len(list.Items))
 	var totalCPU, totalMem resource.Quantity
 	for i := range list.Items {
@@ -400,12 +428,11 @@ func (s *server) applicationPodMetrics(w http.ResponseWriter, r *http.Request) {
 		usage = append(usage, entry)
 	}
 	sort.Slice(usage, func(i, j int) bool { return usage[i].Pod < usage[j].Pod })
-	writeJSON(w, http.StatusOK, applicationMetricsResponse{
-		Available:    true,
-		Pods:         usage,
-		TotalCPUmil:  totalCPU.MilliValue(),
-		TotalMemByte: totalMem.Value(),
-	})
+	requested.Available = true
+	requested.Pods = usage
+	requested.TotalCPUmil = totalCPU.MilliValue()
+	requested.TotalMemByte = totalMem.Value()
+	writeJSON(w, http.StatusOK, requested)
 }
 
 func sumMetricsContainers(item *unstructured.Unstructured) (resource.Quantity, resource.Quantity) {

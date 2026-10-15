@@ -35,7 +35,7 @@
       try { localStorage.setItem('idp-sidebar', next ? 'collapsed' : 'open'); } catch (_) { /* Storage can be unavailable. */ }
     });
   }
-  const state = { definitions: [], applications: [], clusters: [], selectedApplication: null, selectedCluster: null, selectedInstanceUID: '', deleting: false, deletionPending: new Set(), editingValues: false, valuesDraft: Object.create(null), savingValues: false, definitionQuery: '', definitionSort: 'name', definitionType: '', destinationMode: 'cluster', preview: null, previewController: null, previewSequence: 0, previewLoading: false, savingEnvironment: false, creating: false, teams: [], team: '' };
+  const state = { definitions: [], applications: [], clusters: [], selectedApplication: null, selectedCluster: null, selectedInstanceUID: '', detailTab: 'overview', deleting: false, deletionPending: new Set(), editingValues: false, valuesDraft: Object.create(null), savingValues: false, definitionQuery: '', definitionSort: 'name', definitionType: '', destinationMode: 'cluster', preview: null, previewController: null, previewSequence: 0, previewLoading: false, savingEnvironment: false, creating: false, teams: [], team: '' };
   state.selectedDefinition = null;
   state.canCreateApps = false;
   state.canDeleteApps = false;
@@ -608,65 +608,388 @@
     return state.definitions.find((def) => def.metadata?.name === ref)?.spec?.release?.namespace || '';
   }
 
-  function openApplication(app) { state.selectedApplication = app; state.selectedInstanceUID = ''; state.editingValues = false; state.valuesDraft = Object.create(null); $('#applications-list-view').hidden = true; renderApplicationDetail(); $('#application-detail .back-button').focus(); }
+  function setDetailChrome(open) {
+    const page = $('#application-detail')?.closest('.page');
+    if (page) page.classList.toggle('is-detail-open', open);
+  }
+  function openApplication(app) { state.selectedApplication = app; state.selectedInstanceUID = ''; state.detailTab = 'overview'; state.editingValues = false; state.valuesDraft = Object.create(null); $('#applications-list-view').hidden = true; setDetailChrome(true); renderApplicationDetail(); $('#application-detail .back-button').focus(); }
   function closeApplication() {
     const name = state.selectedApplication?.metadata?.name;
-    state.selectedApplication = null; state.editingValues = false; state.valuesDraft = Object.create(null); $('#application-detail').hidden = true; $('#applications-list-view').hidden = false;
+    state.selectedApplication = null; state.editingValues = false; state.valuesDraft = Object.create(null); $('#application-detail').hidden = true; $('#applications-list-view').hidden = false; setDetailChrome(false);
     const links = [...$('#applications').querySelectorAll('.application-link')];
     (links.find((button) => button.textContent === name) || links[0] || $('#refresh-applications'))?.focus();
   }
+  const APPLICATION_TABS = [
+    { id: 'overview', label: 'Overview' },
+    { id: 'resources', label: 'Resources' },
+    { id: 'configuration', label: 'Configuration' },
+    { id: 'observability', label: 'Observability' },
+    { id: 'activity', label: 'Activity' },
+  ];
+
+  function applicationReadyBadge(app) {
+    const ready = (app?.status?.conditions || []).find((item) => item.type === 'Ready');
+    if (ready?.status === 'True') return badge('Healthy', 'good');
+    if (ready?.status === 'False') return badge(ready.reason || 'Unhealthy', 'error');
+    return badge('Progressing', 'muted');
+  }
+
   function renderApplicationDetail() {
     const app = state.selectedApplication; if (!app) return;
     const root = $('#application-detail'); root.replaceChildren(); root.hidden = false;
-    const back = element('button', 'back-button', '← Back to applications'); back.type = 'button'; back.addEventListener('click', closeApplication);
-    root.append(back, element('p', 'eyebrow', 'Application details'));
-    const title = element('h2', '', safe(app.metadata?.name)); title.id = 'application-detail-title'; root.append(title);
     const selection = selectedApplicationInstance(app);
     const instanceView = selection?.instance ? {
       ...app,
       status: { ...app.status, conditions: selection.instance.conditions || [], observedGeneration: selection.instance.observedGeneration, workloadObservedAt: selection.instance.workloadObservedAt, resources: selection.instance.resources || [], binding: selection.instance.binding, applied: selection.instance.applied }
     } : null;
     const selectedHealth = selection?.instance ? instanceFreshness(app, selection.instance) : null;
-    if (selection) {
-      const targetPicker = element('label', 'field instance-picker'); targetPicker.append(element('span', '', 'Cluster instance'));
-      const select = document.createElement('select'); select.setAttribute('aria-label', 'Select cluster instance');
-      selectionTargets(app).forEach((target) => select.add(new Option(target.name, target.uid)));
-      select.value = selection.target.uid;
-      select.addEventListener('change', () => { state.selectedInstanceUID = select.value; renderApplicationDetail(); });
-      targetPicker.append(select); root.append(targetPicker);
-      const targets = applicationTargets(app) || [];
-      root.append(element('p', 'resource-meta', `Environment: ${safe(app.spec.environment.name)} · fixed target set of ${targets.length} cluster${targets.length === 1 ? '' : 's'}`));
-      if (!instanceView) root.append(element('p', 'warning', `Waiting for ${safe(selection.target.name)} to report this application instance.`));
-      else {
-        const summary = element('div', 'instance-summary');
-        summary.append(badge(`Release ${selectedHealth.ready.label}`, selectedHealth.ready.tone), badge(`Workload ${selectedHealth.workload.label}`, selectedHealth.workload.tone));
-        const revision = selection.instance.applied?.helmRevision;
-        if (revision !== undefined) summary.append(element('span', 'resource-meta', `Release revision ${safe(revision)}`));
-        root.append(summary);
-        root.append(element('p', 'resource-meta', `Target namespace: ${safe(selection.instance.binding?.releaseNamespace || targetNamespace(app) || 'Not specified')}`));
-      }
-    } else {
-      root.append(element('p', 'resource-meta', `Target namespace: ${targetNamespace(app) || 'Not specified'}`));
+    const view = instanceView || app;
+
+    const header = element('div', 'detail-header');
+    const topbar = element('div', 'detail-topbar');
+    const back = element('button', 'back-button', '← Back to applications'); back.type = 'button'; back.addEventListener('click', closeApplication);
+    const tools = element('div', 'detail-tools');
+    const refresh = element('button', 'button button-secondary', 'Refresh'); refresh.type = 'button';
+    refresh.addEventListener('click', async () => { refresh.disabled = true; try { await refreshDetail(); } finally { refresh.disabled = false; } });
+    tools.append(refresh, detailMenu(app));
+    topbar.append(back, tools);
+    const titleRow = element('div', 'detail-title-row');
+    const title = element('h1', 'detail-title', safe(app.metadata?.name)); title.id = 'application-detail-title';
+    titleRow.append(title, applicationReadyBadge(view));
+    header.append(topbar, titleRow);
+    root.append(header);
+
+    const meta = element('div', 'detail-meta');
+    const metaItem = (label, value) => {
+      const item = element('span', 'detail-meta-item');
+      item.append(element('span', 'detail-meta-label', label), element('span', 'detail-meta-value', safe(value)));
+      return item;
+    };
+    meta.append(
+      metaItem('Namespace', app.metadata?.namespace),
+      metaItem('Cluster', app.spec?.clusterRef?.name || app.spec?.environment?.name),
+      metaItem('Definition', app.spec?.applicationDefinitionRef?.name),
+    );
+    root.append(meta);
+
+    const tabs = element('nav', 'detail-tabs'); tabs.setAttribute('aria-label', 'Application sections');
+    APPLICATION_TABS.forEach((tab) => {
+      const button = element('button', `detail-tab${state.detailTab === tab.id ? ' is-active' : ''}`, tab.label);
+      button.type = 'button'; button.setAttribute('role', 'tab'); button.setAttribute('aria-selected', state.detailTab === tab.id ? 'true' : 'false');
+      button.addEventListener('click', () => { state.detailTab = tab.id; renderApplicationDetail(); });
+      tabs.append(button);
+    });
+    const panel = element('div', 'detail-panel');
+    root.append(tabs, panel);
+    renderApplicationTab(panel, state.detailTab, { app, view, selection, instanceView, selectedHealth });
+  }
+
+  function renderApplicationTab(panel, tab, ctx) {
+    const { app, view, selection, instanceView, selectedHealth } = ctx;
+    if (tab === 'overview') { renderOverview(panel, ctx); return; }
+    if (tab === 'resources') {
+      if (!selection || instanceView) appendResourceGraph(panel, view, selectedHealth?.workload || null);
+      else panel.append(element('p', 'helper', 'No instance selected.'));
+      return;
     }
-    if (!selection || instanceView) appendApplicationHealth(root, instanceView || app, selectedHealth?.workload || null);
-    root.append(element('h3', 'values-title', 'Value overrides'));
-    const values = app.spec?.values;
-    root.append(element('pre', 'values-json', values && typeof values === 'object' && Object.keys(values).length ? JSON.stringify(values, null, 2) : 'No value overrides'));
-    appendValuesEditor(root, app);
-    if (!selection || instanceView) appendResourceGraph(root, instanceView || app, selectedHealth?.workload || null);
-    appendActivity(root, app);
-    appendObservability(root, app);
-    const actions = element('div', 'detail-actions');
+    if (tab === 'configuration') {
+      panel.append(element('h3', 'values-title', 'Value overrides'));
+      const values = app.spec?.values;
+      panel.append(element('pre', 'values-json', values && typeof values === 'object' && Object.keys(values).length ? JSON.stringify(values, null, 2) : 'No value overrides'));
+      appendValuesEditor(panel, app);
+      return;
+    }
+    if (tab === 'observability') { appendObservability(panel, view); return; }
+    if (tab === 'activity') { appendActivity(panel, app); return; }
+  }
+
+  function detailMenu(app) {
+    const menu = document.createElement('details'); menu.className = 'detail-menu';
+    const toggle = element('summary', 'detail-menu-toggle');
+    toggle.setAttribute('aria-label', 'More actions'); toggle.title = 'More actions';
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 20 20'); svg.setAttribute('aria-hidden', 'true');
+    [5, 10, 15].forEach((cx) => {
+      const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      dot.setAttribute('cx', String(cx)); dot.setAttribute('cy', '10'); dot.setAttribute('r', '1.7');
+      svg.append(dot);
+    });
+    toggle.append(svg);
+    const list = element('div', 'detail-menu-list');
     const pending = state.deletionPending.has(app.metadata?.name);
-    const remove = element('button', 'button button-danger', pending ? 'Deletion in progress' : state.deleting ? 'Deleting…' : 'Delete application');
-    remove.type = 'button'; remove.disabled = !state.canDeleteApps || state.deleting || pending; remove.addEventListener('click', () => deleteApplication(app));
-    if (!state.canDeleteApps) {
-      const hint = element('p', 'helper access-required', 'Developer or administrator access is required to delete an application.');
-      hint.id = 'delete-access-help';
-      remove.setAttribute('aria-describedby', hint.id);
-      actions.append(hint);
+    const label = pending ? 'Deletion in progress' : state.deleting ? 'Deleting…' : 'Delete application';
+    const remove = element('button', 'detail-menu-item detail-menu-danger', label);
+    remove.type = 'button';
+    remove.disabled = !state.canDeleteApps || state.deleting || pending;
+    if (!state.canDeleteApps) remove.title = 'Developer or administrator access is required to delete an application.';
+    remove.addEventListener('click', () => { menu.open = false; deleteApplication(app); });
+    list.append(remove);
+    menu.append(toggle, list);
+    return menu;
+  }
+
+  async function refreshDetail() {
+    try {
+      const apps = await getList(withTeam('/api/applications'));
+      state.applications = apps;
+      renderApplications();
+      return true;
+    } catch (error) {
+      showNotice(error.message || 'Could not refresh this application.', 'error');
+      return false;
     }
-    actions.append(remove); root.append(actions);
+  }
+
+  const OV_ICON_PATHS = {
+    health: 'M12 20.5S3.5 15.5 3.5 9.8A4.3 4.3 0 0 1 12 7a4.3 4.3 0 0 1 8.5 2.8c0 5.7-8.5 10.7-8.5 10.7z',
+    resources: 'M12 3 3 7l9 4 9-4-9-4zM3 12l9 4 9-4M3 17l9 4 9-4',
+    usage: 'M4 20V10M10 20V4M16 20v-7M2 20h20',
+  };
+
+  function ovIcon(kind) {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('aria-hidden', 'true');
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', OV_ICON_PATHS[kind] || OV_ICON_PATHS.resources);
+    path.setAttribute('fill', 'none'); path.setAttribute('stroke', 'currentColor');
+    path.setAttribute('stroke-width', '1.6'); path.setAttribute('stroke-linecap', 'round'); path.setAttribute('stroke-linejoin', 'round');
+    svg.append(path);
+    return svg;
+  }
+
+  function ovCard(iconKind, title) {
+    const card = element('section', 'ov-card');
+    const icon = element('span', 'ov-card-icon'); icon.append(ovIcon(iconKind));
+    const body = element('div', 'ov-card-body');
+    body.append(element('h4', 'ov-card-title', title));
+    card.append(icon, body);
+    return { card, body };
+  }
+
+  function renderOverview(panel, ctx) {
+    const { app, view, selection, instanceView, selectedHealth } = ctx;
+    if (selection) {
+      const targets = applicationTargets(app) || [];
+      if (targets.length > 1) {
+        const picker = element('label', 'field instance-picker'); picker.append(element('span', '', 'Cluster instance'));
+        const select = document.createElement('select'); select.setAttribute('aria-label', 'Select cluster instance');
+        targets.forEach((target) => select.add(new Option(target.name, target.uid)));
+        select.value = selection.target.uid;
+        select.addEventListener('change', () => { state.selectedInstanceUID = select.value; renderApplicationDetail(); });
+        picker.append(select); panel.append(picker);
+      }
+      if (!instanceView) panel.append(element('p', 'warning', `Waiting for ${safe(selection.target.name)} to report this application instance.`));
+    }
+
+    const health = selectedHealth?.workload || workloadHealth(view);
+    const grid = element('div', 'overview-grid');
+    const main = element('div', 'overview-main');
+    const side = element('div', 'overview-side');
+
+    const cards = element('div', 'ov-cards');
+    cards.append(overviewHealthCard(health), overviewResourcesCard(view), overviewUsageCard(app));
+    main.append(cards);
+    main.append(overviewWorkloadsCard(app, view, health));
+    main.append(overviewActivityCard(app));
+
+    side.append(overviewQuickInfo(app, view));
+    side.append(overviewValueOverrides(app));
+
+    grid.append(main, side);
+    panel.append(grid);
+  }
+
+  function overviewHealthCard(health) {
+    const { card, body } = ovCard('health', 'Workload health');
+    body.append(badge(health.label, health.tone));
+    const valid = typeof health.observedAt === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(health.observedAt);
+    if (valid) body.append(element('p', 'ov-card-note', `Last observed${health.fresh ? '' : ' (stale)'}: ${formatObservedTime(health.observedAt)}`));
+    else body.append(element('p', 'ov-card-note', health.fresh ? 'Current' : 'Not current'));
+    return card;
+  }
+
+  function resourceKindLabel(kind, count) {
+    const irregular = { Ingress: 'Ingresses', NetworkPolicy: 'NetworkPolicies' };
+    return count === 1 ? kind : (irregular[kind] || `${kind}s`);
+  }
+
+  function overviewResourcesCard(view) {
+    const { card, body } = ovCard('resources', 'Resources');
+    const resources = Array.isArray(view.status?.resources) ? view.status.resources : [];
+    const counts = new Map();
+    resources.forEach((resource) => counts.set(resource.kind, (counts.get(resource.kind) || 0) + 1));
+    const total = element('div', 'ov-total');
+    total.append(element('strong', '', String(resources.length)), element('span', '', 'total'));
+    body.append(total);
+    if (!resources.length) { body.append(element('p', 'ov-card-note', 'No resources reported')); return card; }
+    const kinds = [...counts.keys()].sort((a, b) => (counts.get(b) - counts.get(a)) || a.localeCompare(b));
+    const maxCells = 6;
+    let cells = kinds;
+    let other = 0;
+    if (kinds.length > maxCells) { cells = kinds.slice(0, maxCells - 1); other = kinds.length - cells.length; }
+    const grid = element('div', 'ov-counts');
+    cells.forEach((kind) => {
+      const count = counts.get(kind);
+      const item = element('span', 'ov-count');
+      item.append(element('strong', '', String(count)), document.createTextNode(` ${resourceKindLabel(kind, count)}`));
+      grid.append(item);
+    });
+    if (other > 0) grid.append(element('span', 'ov-count ov-count-more', `+${other} other type${other === 1 ? '' : 's'}`));
+    body.append(grid);
+    return card;
+  }
+
+  function overviewUsageCard(app) {
+    const { card, body } = ovCard('usage', 'Resource usage');
+    body.append(element('p', 'ov-card-note', 'Loading…'));
+    loadOverviewUsage(app.metadata?.name, body);
+    return card;
+  }
+
+  async function loadOverviewUsage(name, body) {
+    try {
+      const response = await apiFetch(withTeam(`/api/applications/${encodeURIComponent(name)}/metrics`));
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || `Request failed (${response.status})`);
+      body.replaceChildren();
+      if (!data.available) { body.append(element('p', 'ov-card-note', safe(data.reason || 'Metrics are not available.'))); return; }
+      const stats = element('div', 'ov-stats');
+      const cpu = element('div', 'ov-stat');
+      cpu.append(element('strong', '', formatCPUmilli(data.totalCpuMilli)), element('span', '', data.requestedCpuMilli ? `of ${formatCPUmilli(data.requestedCpuMilli)} requested` : 'CPU in use'));
+      const memory = element('div', 'ov-stat');
+      memory.append(element('strong', '', formatBytes(data.totalMemoryBytes)), element('span', '', 'Memory in use'));
+      stats.append(cpu, memory); body.append(stats);
+    } catch (error) {
+      body.replaceChildren(element('p', 'ov-card-note', error.message || 'Could not load usage.'));
+    }
+  }
+
+  function ovSection(title, subtitle) {
+    const section = element('section', 'ov-section');
+    const head = element('div', 'ov-section-head');
+    const titles = element('div', '');
+    titles.append(element('h4', 'ov-section-title', title), element('p', 'ov-section-sub', subtitle));
+    head.append(titles);
+    section.append(head);
+    return { section, head };
+  }
+
+  function resourceRollout(resource) {
+    return resource.deployment || resource.statefulSet || resource.daemonSet || resource.job || null;
+  }
+
+  function resourceReadyText(resource) {
+    if (resource.deployment) return resource.deployment.readyReplicas != null && resource.deployment.desiredReplicas != null ? `${resource.deployment.readyReplicas}/${resource.deployment.desiredReplicas}` : '—';
+    if (resource.statefulSet) return resource.statefulSet.readyReplicas != null && resource.statefulSet.desiredReplicas != null ? `${resource.statefulSet.readyReplicas}/${resource.statefulSet.desiredReplicas}` : '—';
+    if (resource.daemonSet) return resource.daemonSet.numberReady != null && resource.daemonSet.desiredNumberScheduled != null ? `${resource.daemonSet.numberReady}/${resource.daemonSet.desiredNumberScheduled}` : '—';
+    if (resource.job) return resource.job.completions != null ? `${resource.job.succeeded ?? 0}/${resource.job.completions}` : '—';
+    return '—';
+  }
+
+  function overviewWorkloadsCard(app, view, health) {
+    const { section, head } = ovSection('Workloads', 'Top-level resources in this application.');
+    const link = element('button', 'ov-link', 'View all resources →'); link.type = 'button';
+    link.addEventListener('click', () => { state.detailTab = 'resources'; renderApplicationDetail(); });
+    head.append(link);
+    const resources = (Array.isArray(view.status?.resources) ? view.status.resources : []).filter((resource) => !resource.parentUID);
+    if (!resources.length) { section.append(element('p', 'helper', 'No resources reported.')); return section; }
+    const table = element('table', 'ov-table');
+    const thead = document.createElement('thead'); const headRow = document.createElement('tr');
+    ['Kind', 'Name', 'Status', 'Ready'].forEach((label) => headRow.append(element('th', '', label)));
+    thead.append(headRow); table.append(thead);
+    const tbody = document.createElement('tbody');
+    resources.slice().sort((a, b) => (a.kind === b.kind ? String(a.name).localeCompare(String(b.name)) : String(a.kind).localeCompare(String(b.kind)))).forEach((resource) => {
+      const row = document.createElement('tr');
+      row.append(element('td', '', safe(resource.kind)), element('td', '', safe(resource.name)));
+      const statusCell = element('td', '');
+      const rollout = resourceRollout(resource);
+      if (!rollout) statusCell.append(element('span', 'ov-dash', '—'));
+      else if (!health.fresh) statusCell.append(badge('Unknown', 'neutral'));
+      else { const state = workloadCardStatus(rollout.state); statusCell.append(badge(state.label, state.tone)); }
+      row.append(statusCell, element('td', '', resourceReadyText(resource)));
+      tbody.append(row);
+    });
+    table.append(tbody); section.append(table);
+    return section;
+  }
+
+  function overviewActivityCard(app) {
+    const { section, head } = ovSection('Recent activity', 'Recent events recorded for this application.');
+    const link = element('button', 'ov-link', 'View all activity →'); link.type = 'button';
+    link.addEventListener('click', () => { state.detailTab = 'activity'; renderApplicationDetail(); });
+    head.append(link);
+    const body = element('div', 'ov-activity'); body.append(element('p', 'helper', 'Loading…'));
+    section.append(body);
+    loadOverviewActivity(app.metadata?.name, body);
+    return section;
+  }
+
+  async function loadOverviewActivity(name, body) {
+    try {
+      const response = await apiFetch(withTeam(`/api/activity?kind=Application&name=${encodeURIComponent(name)}`));
+      if (!response.ok) throw new Error(`Request failed (${response.status})`);
+      const data = await response.json();
+      const items = (Array.isArray(data.items) ? data.items : []).slice(0, 5);
+      if (!items.length) { body.replaceChildren(element('p', 'helper', 'No recorded activity yet.')); return; }
+      const table = element('table', 'ov-table');
+      const thead = document.createElement('thead'); const headRow = document.createElement('tr');
+      ['Time', 'Type', 'Message'].forEach((label) => headRow.append(element('th', '', label)));
+      thead.append(headRow); table.append(thead);
+      const tbody = document.createElement('tbody');
+      items.forEach((entry) => {
+        const row = document.createElement('tr');
+        row.append(element('td', '', formatObservedTime(entry.lastSeen)), element('td', '', safe(entry.type)), element('td', '', safe(entry.message || entry.reason || '')));
+        tbody.append(row);
+      });
+      table.append(tbody); body.replaceChildren(table);
+    } catch (error) {
+      body.replaceChildren(element('p', 'helper', error.message || 'Could not load activity.'));
+    }
+  }
+
+  function overviewQuickInfo(app, view) {
+    const card = element('section', 'ov-card ov-card-block');
+    card.append(element('h4', 'ov-card-title', 'Quick info'));
+    const list = element('dl', 'ov-info');
+    const infoRow = (label, value) => { const row = element('div', 'ov-info-row'); row.append(element('dt', '', label), element('dd', '', safe(value))); return row; };
+    list.append(
+      infoRow('Application', app.metadata?.name),
+      infoRow('Target namespace', targetNamespace(app) || view.status?.binding?.releaseNamespace),
+      infoRow('Cluster', app.spec?.clusterRef?.name || app.spec?.environment?.name),
+      infoRow('Definition', app.spec?.applicationDefinitionRef?.name),
+      infoRow('Created', app.metadata?.creationTimestamp ? formatObservedTime(app.metadata.creationTimestamp) : '—'),
+      infoRow('Last updated', view.status?.workloadObservedAt ? formatObservedTime(view.status.workloadObservedAt) : '—'),
+    );
+    card.append(list);
+    const labels = app.metadata?.labels || {};
+    const keys = Object.keys(labels);
+    if (keys.length) {
+      const row = element('div', 'ov-info-row');
+      row.append(element('dt', '', 'Labels'));
+      const chips = element('dd', 'ov-chips');
+      keys.forEach((key) => chips.append(element('span', 'ov-chip', `${key}=${labels[key]}`)));
+      row.append(chips); card.append(row);
+    }
+    return card;
+  }
+
+  function overviewValueOverrides(app) {
+    const card = element('section', 'ov-card ov-card-block');
+    card.append(element('h4', 'ov-card-title', 'Value overrides'));
+    const values = app.spec?.values;
+    const has = values && typeof values === 'object' && Object.keys(values).length > 0;
+    card.append(element('p', 'ov-card-note', has ? `${Object.keys(values).length} override${Object.keys(values).length === 1 ? '' : 's'}` : 'No value overrides'));
+    const def = applicationDefinition(app);
+    const available = Boolean(def && definitionReadiness(def).ready && Array.isArray(def.spec?.configurableValues) && def.spec.configurableValues.length);
+    const button = element('button', 'button button-secondary', 'Edit values'); button.type = 'button';
+    button.disabled = !state.canUpdateApps || !available;
+    button.addEventListener('click', () => {
+      if (button.disabled) return;
+      state.detailTab = 'configuration'; state.editingValues = true; state.valuesDraft = Object.create(null); renderApplicationDetail();
+    });
+    card.append(button);
+    if (!available) card.append(element('p', 'helper', 'The Application Definition is unavailable, so values cannot be edited.'));
+    return card;
   }
 
   function selectionTargets(app) {
@@ -1941,6 +2264,12 @@
       return false;
     } finally { button.disabled = false; }
   }
+
+  document.addEventListener('click', (event) => {
+    document.querySelectorAll('.detail-menu[open]').forEach((menu) => {
+      if (!menu.contains(event.target)) menu.open = false;
+    });
+  });
 
   const logoutButton = $('#auth-logout');
   if (logoutButton) logoutButton.addEventListener('click', signOutLocally);

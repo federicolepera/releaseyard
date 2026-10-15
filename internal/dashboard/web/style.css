@@ -689,3 +689,118 @@ html[data-theme="dark"] .team-select select { border-color: #30434c; background:
 .metrics-table { border-collapse: collapse; width: 100%; margin-top: 8px; }
 .metrics-table th, .metrics-table td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--line); }
 .metrics-table tr:last-child td { font-weight: 600; }
+
+.detail-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.detail-heading { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.detail-title { margin: 0; font-size: 1.6rem; letter-spacing: -.01em; }
+.detail-tools { display: flex; align-items: center; gap: 8px; }
+.detail-meta { display: flex; gap: 22px; flex-wrap: wrap; margin: 12px 0 4px; }
+.detail-meta-item { display: inline-flex; gap: 6px; align-items: baseline; font-size: .85rem; }
+.detail-meta-label { color: var(--muted); }
+.detail-meta-value { color: var(--ink); font-weight: 600; }
+.detail-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin: 16px 0 18px; flex-wrap: wrap; }
+.detail-tab { appearance: none; background: none; border: 0; border-bottom: 2px solid transparent; padding: 8px 12px; font: inherit; font-weight: 600; color: var(--muted); cursor: pointer; }
+.detail-tab:hover { color: var(--ink); }
+.detail-tab.is-active { color: var(--accent-dark); border-bottom-color: var(--accent); }
+.detail-panel { display: block; }
+
+.page.is-detail-open .hero,
+.page.is-detail-open .page-tools { display: none; }
+
+.overview-grid { display: grid; grid-template-columns: minmax(0, 2.2fr) minmax(260px, 1fr); gap: 20px; align-items: start; }
+.overview-main, .overview-side { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.ov-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.ov-card { display: flex; gap: 12px; border: 1px solid var(--line); border-radius: 12px; padding: 16px; background: var(--surface); }
+.ov-card-block { display: block; }
+.ov-card-icon { flex: 0 0 auto; width: 38px; height: 38px; border-radius: 10px; background: var(--soft-green); color: var(--accent-dark); display: grid; place-items: center; }
+.ov-card-icon svg { width: 22px; height: 22px; }
+.ov-card-body { min-width: 0; }
+.ov-card-title { margin: 0 0 8px; font-size: .95rem; }
+.ov-card-note { margin: 6px 0 0; color: var(--muted); font-size: .8rem; }
+.ov-stats { display: flex; gap: 18px; flex-wrap: wrap; margin-top: 4px; }
+.ov-stat { display: flex; flex-direction: column; }
+.ov-stat strong { font-size: 1.25rem; }
+.ov-stat span { color: var(--muted); font-size: .78rem; }
+.ov-section { border: 1px solid var(--line); border-radius: 12px; padding: 16px; background: var(--surface); }
+.ov-section-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+.ov-section-title { margin: 0; font-size: 1rem; }
+.ov-section-sub { margin: 2px 0 0; color: var(--muted); font-size: .8rem; }
+.ov-link { appearance: none; background: none; border: 0; padding: 0; color: var(--accent-dark); font: inherit; font-weight: 600; cursor: pointer; white-space: nowrap; }
+.ov-table { width: 100%; border-collapse: collapse; }
+.ov-table th { text-align: left; font-size: .72rem; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); padding: 6px 8px; border-bottom: 1px solid var(--line); }
+.ov-table td { padding: 9px 8px; border-bottom: 1px solid var(--line); font-size: .86rem; vertical-align: middle; }
+.ov-table tr:last-child td { border-bottom: 0; }
+.ov-dash { color: var(--muted); }
+.ov-info { margin: 0; }
+.ov-info-row { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 7px 0; border-bottom: 1px solid var(--line); }
+.ov-info-row dt { color: var(--muted); font-size: .82rem; }
+.ov-info-row dd { margin: 0; font-size: .84rem; font-weight: 600; text-align: right; overflow-wrap: anywhere; }
+.ov-chips { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.ov-chip { background: var(--paper); border: 1px solid var(--line); border-radius: 999px; padding: 2px 8px; font-size: .74rem; font-weight: 500; }
+@media (max-width: 980px) { .overview-grid { grid-template-columns: 1fr; } }
+@media (max-width: 760px) { .ov-cards { grid-template-columns: 1fr; } }
+
+/* Application detail is part of the page, not a card: no panel chrome, and it
+   uses the full content width (adapts to the sidebar being open). */
+.page.is-detail-open > #application-detail,
+#application-detail.application-detail {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  padding: 0;
+  margin-top: 0;
+}
+.page.is-detail-open > #application-detail {
+  width: min(calc(100% - 80px), 1400px);
+}
+@media (max-width: 900px) {
+  .page.is-detail-open > #application-detail { width: min(calc(100% - 48px), 1400px); }
+}
+@media (max-width: 760px) {
+  .page.is-detail-open > #application-detail { width: min(calc(100% - 32px), 1400px); }
+}
+
+/* When a detail is open, let the page use the full content width so the view is
+   not squeezed (aligned with the topbar's 28px side padding). */
+.page.is-detail-open { width: min(calc(100% - 56px), 1760px); margin-top: 24px; }
+.page.is-detail-open > #application-detail { width: 100%; max-width: none; }
+@media (max-width: 900px) { .page.is-detail-open { width: calc(100% - 40px); } }
+@media (max-width: 620px) { .page.is-detail-open { width: calc(100% - 28px); } }
+
+.detail-topbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.detail-title-row { display: flex; align-items: center; gap: 12px; margin: 4px 0 0; }
+.detail-title { margin: 0; font-family: "Avenir Next", Avenir, "Segoe UI", sans-serif; font-weight: 760; letter-spacing: -.03em; font-size: clamp(26px, 3vw, 34px); line-height: 1.1; overflow-wrap: anywhere; }
+
+/* Header stacks: topbar (back + tools) on top, then the title row. */
+.detail-header { display: block; }
+.detail-topbar { width: 100%; }
+
+.ov-total { display: flex; align-items: baseline; gap: 6px; margin: 2px 0 0; }
+.ov-total strong { font-size: 1.5rem; font-weight: 760; line-height: 1.1; }
+.ov-total span { color: var(--muted); font-size: .8rem; }
+.ov-counts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px 12px; margin-top: 10px; }
+.ov-count { font-size: .82rem; white-space: nowrap; }
+.ov-count strong { font-weight: 760; }
+.ov-card { align-items: flex-start; }
+
+/* Let the counts drop to fewer columns instead of overlapping on narrow cards. */
+.ov-counts { grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); }
+.ov-count { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+
+/* Resources counts: fixed 3 columns, "+N other types" as the next cell. */
+.ov-counts { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.ov-count { font-size: .8rem; }
+.ov-count-more { color: var(--muted); }
+
+.detail-menu { position: relative; }
+.detail-menu-toggle { display: grid; place-items: center; width: 40px; height: 40px; list-style: none; cursor: pointer; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--ink); }
+.detail-menu-toggle::-webkit-details-marker { display: none; }
+.detail-menu-toggle svg { width: 20px; height: 20px; fill: currentColor; }
+.detail-menu[open] .detail-menu-toggle { border-color: var(--accent); }
+.detail-menu-list { position: absolute; right: 0; top: calc(100% + 6px); z-index: 20; min-width: 210px; padding: 6px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); box-shadow: 0 10px 26px rgb(20 40 40 / 14%); }
+.detail-menu-item { display: block; width: 100%; padding: 9px 10px; border: 0; border-radius: 7px; background: none; color: var(--ink); font: inherit; font-size: .86rem; text-align: left; cursor: pointer; }
+.detail-menu-item:hover:not(:disabled) { background: var(--paper); }
+.detail-menu-item:disabled { color: var(--muted); cursor: not-allowed; }
+.detail-menu-danger { color: #b3261e; }
+.detail-menu-danger:disabled { color: var(--muted); }
