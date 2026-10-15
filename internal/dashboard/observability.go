@@ -3,6 +3,7 @@ package dashboard
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"sort"
@@ -181,6 +182,11 @@ type applicationResourceView struct {
 	Kind       string `json:"kind"`
 	Namespace  string `json:"namespace,omitempty"`
 	Name       string `json:"name"`
+	UID        string `json:"uid,omitempty"`
+	CreatedAt  string `json:"createdAt,omitempty"`
+	Status     string `json:"status,omitempty"`
+	StatusTone string `json:"statusTone,omitempty"`
+	Ready      string `json:"ready,omitempty"`
 	YAML       string `json:"yaml,omitempty"`
 	Error      string `json:"error,omitempty"`
 }
@@ -245,6 +251,11 @@ func (s *server) listApplicationResources(w http.ResponseWriter, r *http.Request
 			items = append(items, view)
 			continue
 		}
+		view.UID = string(object.GetUID())
+		if created := object.GetCreationTimestamp(); !created.IsZero() {
+			view.CreatedAt = created.UTC().Format(time.RFC3339)
+		}
+		view.Status, view.StatusTone, view.Ready = summarizeResource(object)
 		if encoded, err := yaml.Marshal(object.Object); err == nil {
 			view.YAML = string(encoded)
 		}
@@ -435,8 +446,101 @@ func (s *server) applicationPodMetrics(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, requested)
 }
 
-func sumMetricsContainers(item *unstructured.Unstructured) (resource.Quantity, resource.Quantity) {
-	var cpu, memory resource.Quantity
+// summarizeResource derives a short, display-friendly status label, its tone
+// (good/muted/error/neutral) and a readiness string from a live object. It is
+// intentionally generic: unknown kinds are reported as Healthy because the
+// controller only records resources that were successfully applied.
+func summarizeResource(obj *unstructured.Unstructured) (status, tone, ready string) {
+	switch obj.GetKind() {
+	case "Pod":
+		phase, _, _ := unstructured.NestedString(obj.Object, "status", "phase")
+		ready = podReadyString(obj)
+		switch phase {
+		case "Running":
+			return "Running", "good", ready
+		case "Succeeded":
+			return "Completed", "good", ready
+		case "Pending":
+			return "Pending", "muted", ready
+		case "Failed":
+			return "Failed", "error", ready
+		default:
+			return "Unknown", "neutral", ready
+		}
+	case "Deployment", "ReplicaSet", "StatefulSet":
+		desired := int64Field(obj, 1, "spec", "replicas")
+		readyValue := int64Field(obj, 0, "status", "readyReplicas")
+		ready = fmt.Sprintf("%d/%d", readyValue, desired)
+		if desired > 0 && readyValue >= desired {
+			return "Healthy", "good", ready
+		}
+		return "Progressing", "muted", ready
+	case "DaemonSet":
+		desired := int64Field(obj, 0, "status", "desiredNumberScheduled")
+		readyValue := int64Field(obj, 0, "status", "numberReady")
+		ready = fmt.Sprintf("%d/%d", readyValue, desired)
+		if desired > 0 && readyValue >= desired {
+			return "Healthy", "good", ready
+		}
+		return "Progressing", "muted", ready
+	case "Job":
+		completions := int64Field(obj, 1, "spec", "completions")
+		succeeded := int64Field(obj, 0, "status", "succeeded")
+		if completions <= 0 {
+			completions = 1
+		}
+		ready = fmt.Sprintf("%d/%d", succeeded, completions)
+		if succeeded >= completions {
+			return "Complete", "good", ready
+		}
+		return "Running", "muted", ready
+	case "PersistentVolumeClaim":
+		phase, _, _ := unstructured.NestedString(obj.Object, "status", "phase")
+		if phase == "" {
+			phase = "Pending"
+		}
+		tone := "muted"
+		if phase == "Bound" {
+			tone = "good"
+		}
+		return phase, tone, "—"
+	default:
+		return "Healthy", "good", "—"
+	}
+}
+
+func podReadyString(obj *unstructured.Unstructured) string {
+	statuses, _, _ := unstructured.NestedSlice(obj.Object, "status", "containerStatuses")
+	total := len(statuses)
+	ready := 0
+	for _, raw := range statuses {
+		container, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		if isReady, ok := container["ready"].(bool); ok && isReady {
+			ready++
+		}
+	}
+	if total == 0 {
+		containers, _, _ := unstructured.NestedSlice(obj.Object, "spec", "containers")
+		total = len(containers)
+	}
+	if total == 0 {
+		return "—"
+	}
+	return fmt.Sprintf("%d/%d", ready, total)
+}
+
+func int64Field(obj *unstructured.Unstructured, fallback int64, fields ...string) int64 {
+	value, found, err := unstructured.NestedInt64(obj.Object, fields...)
+	if err != nil || !found {
+		return fallback
+	}
+	return value
+}
+
+func sumMetricsContainers(item *unstructured.Unstructured) (resource.Quantity, resource.Quantity) {	var cpu, memory resource.Quantity
 	containers, _, _ := unstructured.NestedSlice(item.Object, "containers")
 	for _, raw := range containers {
 		container, ok := raw.(map[string]any)

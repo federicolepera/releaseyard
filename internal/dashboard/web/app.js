@@ -35,7 +35,7 @@
       try { localStorage.setItem('idp-sidebar', next ? 'collapsed' : 'open'); } catch (_) { /* Storage can be unavailable. */ }
     });
   }
-  const state = { definitions: [], applications: [], clusters: [], selectedApplication: null, selectedCluster: null, selectedInstanceUID: '', detailTab: 'overview', deleting: false, deletionPending: new Set(), editingValues: false, valuesDraft: Object.create(null), savingValues: false, definitionQuery: '', definitionSort: 'name', definitionType: '', destinationMode: 'cluster', preview: null, previewController: null, previewSequence: 0, previewLoading: false, savingEnvironment: false, creating: false, teams: [], team: '' };
+  const state = { definitions: [], applications: [], clusters: [], selectedApplication: null, selectedCluster: null, selectedInstanceUID: '', detailTab: 'overview', deleting: false, deletionPending: new Set(), editingValues: false, valuesDraft: Object.create(null), savingValues: false, definitionQuery: '', definitionSort: 'name', definitionType: '', destinationMode: 'cluster', preview: null, previewController: null, previewSequence: 0, previewLoading: false, savingEnvironment: false, creating: false, teams: [], team: '', resourcesQuery: '', resourcesKind: '', resourcesStatus: '', resourcesExpanded: new Set(), resourcesLive: null, resourcesLiveKey: '' };
   state.selectedDefinition = null;
   state.canCreateApps = false;
   state.canDeleteApps = false;
@@ -612,7 +612,7 @@
     const page = $('#application-detail')?.closest('.page');
     if (page) page.classList.toggle('is-detail-open', open);
   }
-  function openApplication(app) { state.selectedApplication = app; state.selectedInstanceUID = ''; state.detailTab = 'overview'; state.editingValues = false; state.valuesDraft = Object.create(null); $('#applications-list-view').hidden = true; setDetailChrome(true); renderApplicationDetail(); $('#application-detail .back-button').focus(); }
+  function openApplication(app) { state.selectedApplication = app; state.selectedInstanceUID = ''; state.detailTab = 'overview'; state.editingValues = false; state.valuesDraft = Object.create(null); state.resourcesQuery = ''; state.resourcesKind = ''; state.resourcesStatus = ''; state.resourcesExpanded = new Set(); state.resourcesLive = null; state.resourcesLiveKey = ''; $('#applications-list-view').hidden = true; setDetailChrome(true); renderApplicationDetail(); $('#application-detail .back-button').focus(); }
   function closeApplication() {
     const name = state.selectedApplication?.metadata?.name;
     state.selectedApplication = null; state.editingValues = false; state.valuesDraft = Object.create(null); $('#application-detail').hidden = true; $('#applications-list-view').hidden = false; setDetailChrome(false);
@@ -688,7 +688,7 @@
     const { app, view, selection, instanceView, selectedHealth } = ctx;
     if (tab === 'overview') { renderOverview(panel, ctx); return; }
     if (tab === 'resources') {
-      if (!selection || instanceView) appendResourceGraph(panel, view, selectedHealth?.workload || null);
+      if (!selection || instanceView) appendResourcesTab(panel, { app, view, selectedHealth });
       else panel.append(element('p', 'helper', 'No instance selected.'));
       return;
     }
@@ -703,10 +703,7 @@
     if (tab === 'activity') { appendActivity(panel, app); return; }
   }
 
-  function detailMenu(app) {
-    const menu = document.createElement('details'); menu.className = 'detail-menu';
-    const toggle = element('summary', 'detail-menu-toggle');
-    toggle.setAttribute('aria-label', 'More actions'); toggle.title = 'More actions';
+  function dotsIcon() {
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
     svg.setAttribute('viewBox', '0 0 20 20'); svg.setAttribute('aria-hidden', 'true');
     [5, 10, 15].forEach((cx) => {
@@ -714,7 +711,14 @@
       dot.setAttribute('cx', String(cx)); dot.setAttribute('cy', '10'); dot.setAttribute('r', '1.7');
       svg.append(dot);
     });
-    toggle.append(svg);
+    return svg;
+  }
+
+  function detailMenu(app) {
+    const menu = document.createElement('details'); menu.className = 'detail-menu';
+    const toggle = element('summary', 'detail-menu-toggle');
+    toggle.setAttribute('aria-label', 'More actions'); toggle.title = 'More actions';
+    toggle.append(dotsIcon());
     const list = element('div', 'detail-menu-list');
     const pending = state.deletionPending.has(app.metadata?.name);
     const label = pending ? 'Deletion in progress' : state.deleting ? 'Deleting…' : 'Delete application';
@@ -1310,22 +1314,9 @@
     return block;
   }
 
-  function appendResourceGraph(root, app, authoritativeHealth = null) {
-    const resources = Array.isArray(app.status?.resources) ? app.status.resources : [];
-    const section = element('section', 'resource-graph-section');
-    section.setAttribute('aria-labelledby', 'resource-graph-title');
-    const heading = element('h3', 'values-title', 'Resources');
-    heading.id = 'resource-graph-title'; section.append(heading);
-    const inventory = condition(app, 'InventoryReady');
-    if (authoritativeHealth && !authoritativeHealth.fresh) section.append(element('p', 'warning', 'Showing last-known resources. Instance health and replica counts are not current.'));
-    if (inventory?.status === 'False') section.append(element('p', 'warning', 'Resource inventory is not current and may be incomplete or outdated.'));
-    if (!resources.length) {
-      section.append(element('p', 'empty', 'No resources recorded.'));
-      root.append(section); return;
-    }
-
-    // UID identifies nodes; resources without a UID remain visible as roots.
-    const nodes = resources.map((resource, index) => ({ resource, index, children: [], parent: null }));
+  function resourceNodes(view) {
+    const resources = Array.isArray(view.status?.resources) ? view.status.resources : [];
+    const nodes = resources.map((resource) => ({ resource, children: [], parent: null }));
     const byUID = new Map();
     nodes.forEach((node) => {
       const uid = node.resource?.uid;
@@ -1348,34 +1339,215 @@
         node.parent = null;
       }
     });
-    const roots = nodes.filter((node) => !node.parent);
-    const tree = element('ul', 'resource-tree');
-    tree.setAttribute('aria-label', 'Resource hierarchy');
-    const healthSnapshot = authoritativeHealth || workloadHealth(app);
-    const rendered = new Set();
-    function renderNode(node) {
-      const item = element('li', 'resource-tree-item');
-      const resource = node.resource || {};
-      const card = element('div', 'resource-card');
-      card.append(element('span', 'resource-kind', safe(resource.kind || 'Resource')));
-      card.append(element('span', 'resource-object-name', safe(resource.name || 'Name not specified')));
-      const namespace = resource.namespace || (['Namespace', 'Node', 'PersistentVolume', 'ClusterRole', 'ClusterRoleBinding', 'CustomResourceDefinition', 'StorageClass', 'PriorityClass', 'APIService', 'MutatingWebhookConfiguration', 'ValidatingWebhookConfiguration'].includes(resource.kind) ? 'Cluster-scoped' : 'Namespace not specified');
-      card.append(element('span', 'resource-object-namespace', namespace));
-      appendResourceWorkloadStatus(card, resource, healthSnapshot.fresh);
-      item.append(card); rendered.add(node);
-      const children = node.children.filter((child) => !rendered.has(child));
-      if (children.length) {
-        const nested = element('ul', 'resource-tree');
-        children.forEach((child) => nested.append(renderNode(child)));
-        item.append(nested);
-      }
-      return item;
-    }
-    roots.forEach((node) => tree.append(renderNode(node)));
-    // Defensive fallback for malformed or duplicate UID graphs.
-    nodes.filter((node) => !rendered.has(node)).forEach((node) => tree.append(renderNode(node)));
-    section.append(tree); root.append(section);
+    return nodes;
   }
+
+  const RES_KIND_ICON = 'M12 3 21 8v8l-9 5-9-5V8l9-5Zm0 0v10m9-5-9 5-9-5';
+
+  function resourceKindIcon() {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('aria-hidden', 'true');
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', RES_KIND_ICON);
+    path.setAttribute('fill', 'none'); path.setAttribute('stroke', 'currentColor');
+    path.setAttribute('stroke-width', '1.5'); path.setAttribute('stroke-linecap', 'round'); path.setAttribute('stroke-linejoin', 'round');
+    svg.append(path);
+    return svg;
+  }
+
+  function resourceChevron(hasChildren, open) {
+    const span = element('span', `res-chevron${open ? ' is-open' : ''}${hasChildren ? '' : ' is-leaf'}`);
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('aria-hidden', 'true');
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', 'M9 6l6 6-6 6');
+    path.setAttribute('fill', 'none'); path.setAttribute('stroke', 'currentColor');
+    path.setAttribute('stroke-width', '1.8'); path.setAttribute('stroke-linecap', 'round'); path.setAttribute('stroke-linejoin', 'round');
+    svg.append(path); span.append(svg);
+    return span;
+  }
+
+  function ageText(value) {
+    const timestamp = Date.parse(value);
+    if (!Number.isFinite(timestamp)) return '—';
+    const seconds = Math.max(0, Math.floor((Date.now() - timestamp) / 1000));
+    if (seconds < 60) return `${seconds}s`;
+    const minutes = Math.floor(seconds / 60); if (minutes < 60) return `${minutes}m`;
+    const hours = Math.floor(minutes / 60); if (hours < 24) return `${hours}h`;
+    const days = Math.floor(hours / 24); if (days < 30) return `${days}d`;
+    const months = Math.floor(days / 30); if (months < 12) return `${months}mo`;
+    return `${Math.floor(months / 12)}y`;
+  }
+
+  function inventoryResourceBadge(resource, fresh) {
+    const rollout = resourceRollout(resource);
+    if (rollout) { if (!fresh) return badge('Unknown', 'neutral'); const state = workloadCardStatus(rollout.state); return badge(state.label, state.tone); }
+    if (resource.pod) {
+      if (!fresh) return badge('Unknown', 'neutral');
+      if (resource.pod.ready === 'True') return badge('Running', 'good');
+      const state = workloadCardStatus(resource.pod.state); return badge(state.label, state.tone);
+    }
+    return badge('—', 'neutral');
+  }
+
+  async function copyText(value) {
+    const text = String(value ?? '');
+    if (!text) return;
+    try { await navigator.clipboard.writeText(text); showNotice('Copied to clipboard', 'success'); }
+    catch { showNotice('Could not copy to the clipboard.', 'error'); }
+  }
+
+  function resourceRowMenu(resource) {
+    const menu = document.createElement('details'); menu.className = 'detail-menu res-row-menu';
+    const toggle = element('summary', 'detail-menu-toggle res-row-toggle');
+    toggle.setAttribute('aria-label', 'Resource actions'); toggle.title = 'Resource actions';
+    toggle.append(dotsIcon());
+    const list = element('div', 'detail-menu-list');
+    const copyName = element('button', 'detail-menu-item', 'Copy name'); copyName.type = 'button';
+    copyName.addEventListener('click', () => { menu.open = false; copyText(resource.name || ''); });
+    const copyPath = element('button', 'detail-menu-item', 'Copy kind/name'); copyPath.type = 'button';
+    copyPath.addEventListener('click', () => { menu.open = false; copyText(`${resource.kind || ''}/${resource.name || ''}`); });
+    list.append(copyName, copyPath);
+    menu.append(toggle, list);
+    return menu;
+  }
+
+  function appendResourcesTab(panel, ctx) {
+    const { app, view, selectedHealth } = ctx;
+    const nodes = resourceNodes(view);
+    const fresh = Boolean(selectedHealth?.workload?.fresh ?? workloadHealth(view).fresh);
+    const section = element('section', 'res-section');
+
+    const head = element('div', 'res-head');
+    const titles = element('div', 'res-head-titles');
+    const title = element('h3', 'res-title');
+    title.append(document.createTextNode('Resources '), element('span', 'res-total', `(${nodes.length} total)`));
+    titles.append(title, element('p', 'res-sub', 'Browse and explore all Kubernetes resources for this application.'));
+    head.append(titles);
+
+    const toolbar = element('div', 'res-toolbar');
+    const search = element('input', 'res-search'); search.type = 'search'; search.placeholder = 'Search resources...';
+    search.setAttribute('aria-label', 'Search resources'); search.value = state.resourcesQuery;
+    const kindSelect = document.createElement('select'); kindSelect.className = 'res-select'; kindSelect.setAttribute('aria-label', 'Filter by kind');
+    const statusSelect = document.createElement('select'); statusSelect.className = 'res-select'; statusSelect.setAttribute('aria-label', 'Filter by status');
+    const refresh = element('button', 'button button-secondary res-refresh', 'Refresh'); refresh.type = 'button';
+    toolbar.append(search, kindSelect, statusSelect, refresh);
+    head.append(toolbar);
+    section.append(head);
+
+    if (selectedHealth && !selectedHealth.fresh) section.append(element('p', 'warning', 'Showing last-known resources. Instance health and replica counts are not current.'));
+    if (condition(app, 'InventoryReady')?.status === 'False') section.append(element('p', 'warning', 'Resource inventory is not current and may be incomplete or outdated.'));
+    if (!nodes.length) { section.append(element('p', 'empty', 'No resources recorded.')); panel.append(section); return; }
+
+    kindSelect.append(new Option('All kinds', ''));
+    [...new Set(nodes.map((node) => node.resource.kind).filter(Boolean))].sort().forEach((kind) => kindSelect.add(new Option(kind, kind)));
+    kindSelect.value = state.resourcesKind;
+    statusSelect.append(new Option('All statuses', '')); statusSelect.value = state.resourcesStatus;
+
+    const table = element('table', 'res-table');
+    const thead = document.createElement('thead'); const headRow = document.createElement('tr');
+    ['Kind', 'Name', 'Status', 'Ready', 'Age', ''].forEach((label, index) => headRow.append(element('th', index === 0 ? 'res-th-kind' : index === 5 ? 'res-th-actions' : '', label)));
+    thead.append(headRow); table.append(thead);
+    const tbody = document.createElement('tbody'); table.append(tbody);
+    section.append(table);
+
+    const rows = [];
+    const parentOf = new Map();
+    nodes.forEach((node) => { if (node.resource.uid) parentOf.set(node.resource.uid, node.parent?.resource.uid || ''); });
+
+    const renderRows = (list, depth) => list.forEach((node) => {
+      const resource = node.resource || {};
+      const row = document.createElement('tr'); row.className = 'res-row';
+      if (resource.uid) row.dataset.uid = resource.uid;
+
+      const kindCell = element('td', 'res-td-kind');
+      const kindWrap = element('span', 'res-kind-cell'); kindWrap.style.paddingLeft = `${depth * 20}px`;
+      const hasChildren = node.children.length > 0;
+      const chevron = resourceChevron(hasChildren, state.resourcesExpanded.has(resource.uid));
+      if (hasChildren) {
+        chevron.setAttribute('role', 'button'); chevron.tabIndex = 0;
+        chevron.setAttribute('aria-label', `Toggle ${resource.name || 'resource'}`);
+        chevron.addEventListener('click', () => {
+          if (state.resourcesExpanded.has(resource.uid)) state.resourcesExpanded.delete(resource.uid); else state.resourcesExpanded.add(resource.uid);
+          applyVisibility();
+        });
+      }
+      const icon = element('span', 'res-kind-icon'); icon.append(resourceKindIcon());
+      kindWrap.append(chevron, icon, element('span', 'res-kind', safe(resource.kind || 'Resource')));
+      kindCell.append(kindWrap); row.append(kindCell);
+
+      row.append(element('td', 'res-td-name', safe(resource.name || '—')));
+
+      const live = state.resourcesLive?.get(resource.uid);
+      const statusCell = element('td', 'res-td-status');
+      const statusBadge = live ? badge(live.status || '—', live.statusTone || 'neutral') : inventoryResourceBadge(resource, fresh);
+      statusCell.append(statusBadge); row.dataset.status = statusBadge.textContent || '';
+      row.append(statusCell);
+
+      row.append(element('td', 'res-td-ready', live ? (live.ready || '—') : resourceReadyText(resource)));
+      row.append(element('td', 'res-td-age', live?.createdAt ? ageText(live.createdAt) : '—'));
+
+      const actionsCell = element('td', 'res-td-actions'); actionsCell.append(resourceRowMenu(resource)); row.append(actionsCell);
+
+      tbody.append(row);
+      rows.push({ row, node, parentUid: node.parent?.resource.uid || '' });
+      renderRows(node.children, depth + 1);
+    });
+
+    const roots = nodes.filter((node) => !node.parent);
+    renderRows(roots, 0);
+
+    const statuses = [...new Set(rows.map((item) => item.row.dataset.status).filter((value) => value && value !== '—'))].sort();
+    if (state.resourcesStatus && !statuses.includes(state.resourcesStatus)) state.resourcesStatus = '';
+    statuses.forEach((status) => statusSelect.add(new Option(status, status)));
+    statusSelect.value = state.resourcesStatus;
+
+    function applyVisibility() {
+      const query = state.resourcesQuery.trim().toLowerCase();
+      const filtering = Boolean(query || state.resourcesKind || state.resourcesStatus);
+      rows.forEach(({ row, node, parentUid }) => {
+        const resource = node.resource || {};
+        const matches = (!state.resourcesKind || resource.kind === state.resourcesKind)
+          && (!state.resourcesStatus || row.dataset.status === state.resourcesStatus)
+          && (!query || `${resource.kind} ${resource.name}`.toLowerCase().includes(query));
+        let visible = matches;
+        if (visible && !filtering) {
+          let cursor = parentUid;
+          while (cursor) { if (!state.resourcesExpanded.has(cursor)) { visible = false; break; } cursor = parentOf.get(cursor); }
+        }
+        row.hidden = !visible;
+        const chevron = row.querySelector('.res-chevron');
+        if (chevron && node.children.length) chevron.classList.toggle('is-open', state.resourcesExpanded.has(resource.uid));
+      });
+    }
+
+    search.addEventListener('input', () => { state.resourcesQuery = search.value; applyVisibility(); });
+    kindSelect.addEventListener('change', () => { state.resourcesKind = kindSelect.value; applyVisibility(); });
+    statusSelect.addEventListener('change', () => { state.resourcesStatus = statusSelect.value; applyVisibility(); });
+    refresh.addEventListener('click', () => { state.resourcesLive = null; state.resourcesLiveKey = ''; renderApplicationDetail(); });
+
+    applyVisibility();
+    loadResourceAges(app);
+    panel.append(section);
+  }
+
+  async function loadResourceAges(app) {
+    const key = app.metadata?.name || '';
+    if (state.resourcesLive || state.resourcesLiveKey === key) return;
+    state.resourcesLiveKey = key;
+    try {
+      const response = await apiFetch(withTeam(`/api/applications/${encodeURIComponent(key)}/resources`));
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || `Request failed (${response.status})`);
+      const map = new Map();
+      (Array.isArray(data.items) ? data.items : []).forEach((item) => { if (item.uid) map.set(item.uid, item); });
+      state.resourcesLive = map;
+      if (state.selectedApplication?.metadata?.name === key && state.detailTab === 'resources') renderApplicationDetail();
+    } catch (error) {
+      state.resourcesLive = new Map();
+    }
+  }
+
   async function deleteApplication(app) {
     const name = app.metadata?.name;
     if (!state.canDeleteApps || !name || state.deleting || state.deletionPending.has(name) || !window.confirm(`Delete application “${name}”? This action cannot be undone.`)) return;

@@ -62,3 +62,39 @@ func TestSumMetricsContainers(t *testing.T) {
 		t.Fatalf("memory bytes=%d, want %d", memory.Value(), 128<<20)
 	}
 }
+
+func TestSummarizeResource(t *testing.T) {
+	pod := &unstructured.Unstructured{Object: map[string]any{
+		"kind": "Pod",
+		"status": map[string]any{
+			"phase": "Running",
+			"containerStatuses": []any{
+				map[string]any{"ready": true},
+				map[string]any{"ready": false},
+			},
+		},
+	}}
+	status, tone, ready := summarizeResource(pod)
+	if status != "Running" || tone != "good" || ready != "1/2" {
+		t.Fatalf("pod summary = %q/%q/%q, want Running/good/1/2", status, tone, ready)
+	}
+
+	deployment := &unstructured.Unstructured{Object: map[string]any{
+		"kind":   "Deployment",
+		"spec":   map[string]any{"replicas": int64(2)},
+		"status": map[string]any{"readyReplicas": int64(1)},
+	}}
+	status, tone, ready = summarizeResource(deployment)
+	if status != "Progressing" || tone != "muted" || ready != "1/2" {
+		t.Fatalf("deployment summary = %q/%q/%q, want Progressing/muted/1/2", status, tone, ready)
+	}
+
+	pvc := &unstructured.Unstructured{Object: map[string]any{
+		"kind":   "PersistentVolumeClaim",
+		"status": map[string]any{"phase": "Bound"},
+	}}
+	status, tone, ready = summarizeResource(pvc)
+	if status != "Bound" || tone != "good" || ready != "—" {
+		t.Fatalf("pvc summary = %q/%q/%q, want Bound/good/—", status, tone, ready)
+	}
+}
