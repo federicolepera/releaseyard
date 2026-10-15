@@ -404,13 +404,14 @@ func (a *authHandler) middleware(next http.Handler) http.Handler {
 		capabilities := a.capabilities(r.Context(), session, impersonated)
 
 		if r.Method == http.MethodGet && r.URL.Path == "/api/session" {
-			writeJSON(w, http.StatusOK, map[string]any{"csrfToken": session.csrfToken, "username": session.username, "isAdmin": capabilities.isAdmin, "isLocalAdmin": session.authMethod == authMethodLocal, "canCreateApps": capabilities.canCreateApps, "canDeleteApps": capabilities.canDeleteApps, "canUpdateApps": capabilities.canUpdateApps, "teams": teamOptions})
+			writeJSON(w, http.StatusOK, map[string]any{"csrfToken": session.csrfToken, "username": session.username, "isAdmin": capabilities.isAdmin, "isLocalAdmin": session.authMethod == authMethodLocal, "canAdminister": capabilities.canAdminister, "canCreateApps": capabilities.canCreateApps, "canDeleteApps": capabilities.canDeleteApps, "canUpdateApps": capabilities.canUpdateApps, "teams": teamOptions})
 			return
 		}
 		if r.URL.Path == "/identity-provider.html" || r.URL.Path == "/access-definitions.html" || r.URL.Path == "/cluster-access.html" || r.URL.Path == "/access-applications.html" || strings.HasPrefix(r.URL.Path, "/api/administration/") {
-			// For now the administration area is reserved to the initial local
-			// administrator; OIDC users cannot see or use it.
-			if session.authMethod != authMethodLocal {
+			// The administration area is available to the initial local
+			// administrator and to OIDC users whose management-cluster RBAC
+			// already allows the actions the panel performs.
+			if !capabilities.canAdminister {
 				writeError(w, http.StatusForbidden, "Administrator access is required")
 				return
 			}

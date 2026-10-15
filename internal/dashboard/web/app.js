@@ -84,7 +84,7 @@
         if (state.selectedApplication) renderApplicationDetail();
         if (state.selectedCluster) renderClusterDetail();
         const adminNav = $('#admin-nav');
-        if (adminNav && session.isLocalAdmin === true) adminNav.removeAttribute('hidden');
+        if (adminNav && session.canAdminister === true) adminNav.removeAttribute('hidden');
         const userChip = $('#user-chip');
         if (userChip && typeof session.username === 'string' && session.username) {
           const name = $('#user-name');

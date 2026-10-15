@@ -122,10 +122,18 @@ func sanitizeDNSLabel(value string) string {
 
 type dashboardCapabilities struct {
 	isAdmin       bool
+	canAdminister bool
 	canCreateApps bool
 	canDeleteApps bool
 	canUpdateApps bool
 }
+
+// administerPermission is the representative action the Administration area
+// needs: managing the ClusterRoles and ClusterRoleBindings behind definition and
+// cluster access. Requiring it (via SelfSubjectAccessReview as the user) means an
+// OIDC user is an administrator only when the management cluster's RBAC already
+// lets them do what the panel does, so the panel cannot escalate privileges.
+var administerPermission = authorizationv1.ResourceAttributes{Group: "rbac.authorization.k8s.io", Resource: "clusterrolebindings", Verb: "create"}
 
 // impersonatingClient returns the cached impersonating client for the session.
 // Local sessions and configurations without a factory return nil, meaning the
@@ -152,7 +160,7 @@ func (a *authHandler) impersonatingClient(session dashboardSession) (client.Clie
 // answer always reflects the cluster's RBAC rather than any rule in this app.
 func (a *authHandler) capabilities(ctx context.Context, session dashboardSession, impersonated client.Client) dashboardCapabilities {
 	if session.authMethod == authMethodLocal || impersonated == nil {
-		return dashboardCapabilities{isAdmin: true, canCreateApps: true, canDeleteApps: true, canUpdateApps: true}
+		return dashboardCapabilities{isAdmin: true, canAdminister: true, canCreateApps: true, canDeleteApps: true, canUpdateApps: true}
 	}
 	namespaces := teamsFromContext(ctx)
 	if len(namespaces) == 0 {
@@ -170,6 +178,7 @@ func (a *authHandler) capabilities(ctx context.Context, session dashboardSession
 	clusters := authorizationv1.ResourceAttributes{Group: "platform.releaseyard.io", Resource: "clusters", Verb: "patch"}
 	return dashboardCapabilities{
 		isAdmin:       selfSubjectAccessAllowed(ctx, impersonated, clusters),
+		canAdminister: selfSubjectAccessAllowed(ctx, impersonated, administerPermission),
 		canCreateApps: allowed("create"),
 		canDeleteApps: allowed("delete"),
 		canUpdateApps: allowed("update"),

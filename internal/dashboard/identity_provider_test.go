@@ -208,7 +208,7 @@ func TestIdentityProviderAdminSaveAndDelete(t *testing.T) {
 	}
 }
 
-func TestIdentityProviderAdminIsLocalAdministratorOnly(t *testing.T) {
+func TestIdentityProviderAdminWithoutImpersonationIsPrivileged(t *testing.T) {
 	handler, provider, _ := newOIDCTestHandler(t, []string{"releaseyard:developers"}, "http://"+testDashboardHost+"/auth/callback")
 	login := beginTestLogin(t, handler, provider)
 	callback := finishTestLogin(t, handler, login)
@@ -227,7 +227,8 @@ func TestIdentityProviderAdminIsLocalAdministratorOnly(t *testing.T) {
 	sessionResponse := httptest.NewRecorder()
 	handler.ServeHTTP(sessionResponse, session)
 	var flags struct {
-		IsLocalAdmin bool `json:"isLocalAdmin"`
+		IsLocalAdmin  bool `json:"isLocalAdmin"`
+		CanAdminister bool `json:"canAdminister"`
 	}
 	if err := json.Unmarshal(sessionResponse.Body.Bytes(), &flags); err != nil {
 		t.Fatal(err)
@@ -235,13 +236,18 @@ func TestIdentityProviderAdminIsLocalAdministratorOnly(t *testing.T) {
 	if flags.IsLocalAdmin {
 		t.Fatal("OIDC session was reported as the local administrator")
 	}
+	// A pinned-provider handler has no impersonating client, so the dashboard
+	// cannot consult RBAC and falls back to treating the session as privileged.
+	if !flags.CanAdminister {
+		t.Fatal("OIDC session without impersonation should be able to administer")
+	}
 
 	get := httptest.NewRequest(http.MethodGet, "http://"+testDashboardHost+"/api/administration/identity-provider", nil)
 	get.AddCookie(cookie)
 	getResponse := httptest.NewRecorder()
 	handler.ServeHTTP(getResponse, get)
-	if getResponse.Code != http.StatusForbidden {
-		t.Fatalf("OIDC user GET admin endpoint status=%d, want 403", getResponse.Code)
+	if getResponse.Code != http.StatusOK {
+		t.Fatalf("OIDC user GET admin endpoint status=%d, want 200", getResponse.Code)
 	}
 }
 
