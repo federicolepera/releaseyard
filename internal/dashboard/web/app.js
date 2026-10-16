@@ -35,7 +35,7 @@
       try { localStorage.setItem('idp-sidebar', next ? 'collapsed' : 'open'); } catch (_) { /* Storage can be unavailable. */ }
     });
   }
-  const state = { definitions: [], applications: [], clusters: [], selectedApplication: null, selectedCluster: null, selectedInstanceUID: '', detailTab: 'overview', deleting: false, deletionPending: new Set(), editingValues: false, valuesDraft: Object.create(null), savingValues: false, definitionQuery: '', definitionSort: 'name', definitionType: '', destinationMode: 'cluster', preview: null, previewController: null, previewSequence: 0, previewLoading: false, savingEnvironment: false, creating: false, teams: [], team: '', resourcesQuery: '', resourcesKind: '', resourcesStatus: '', resourcesExpanded: new Set(), resourcesLive: null, resourcesLiveKey: '', selectedResourceUID: '', resourcePanelTab: 'overview' };
+  const state = { definitions: [], applications: [], clusters: [], selectedApplication: null, selectedCluster: null, selectedInstanceUID: '', detailTab: 'overview', deleting: false, deletionPending: new Set(), editingValues: false, valuesDraft: Object.create(null), savingValues: false, definitionQuery: '', definitionSort: 'name', definitionType: '', destinationMode: 'cluster', preview: null, previewController: null, previewSequence: 0, previewLoading: false, savingEnvironment: false, creating: false, teams: [], team: '', resourcesQuery: '', resourcesKind: '', resourcesStatus: '', resourcesExpanded: new Set(), resourcesLive: null, resourcesLiveKey: '', selectedResourceUID: '', resourcePanelTab: 'overview', activityRange: '24h', activityType: '', activitySource: '', activityQuery: '' };
   state.selectedDefinition = null;
   state.canCreateApps = false;
   state.canDeleteApps = false;
@@ -612,7 +612,7 @@
     const page = $('#application-detail')?.closest('.page');
     if (page) page.classList.toggle('is-detail-open', open);
   }
-  function openApplication(app) { state.selectedApplication = app; state.selectedInstanceUID = ''; state.detailTab = 'overview'; state.editingValues = false; state.valuesDraft = Object.create(null); state.resourcesQuery = ''; state.resourcesKind = ''; state.resourcesStatus = ''; state.resourcesExpanded = new Set(); state.resourcesLive = null; state.resourcesLiveKey = ''; state.selectedResourceUID = ''; state.resourcePanelTab = 'overview'; $('#applications-list-view').hidden = true; setDetailChrome(true); renderApplicationDetail(); $('#application-detail .back-button').focus(); }
+  function openApplication(app) { state.selectedApplication = app; state.selectedInstanceUID = ''; state.detailTab = 'overview'; state.editingValues = false; state.valuesDraft = Object.create(null); state.resourcesQuery = ''; state.resourcesKind = ''; state.resourcesStatus = ''; state.resourcesExpanded = new Set(); state.resourcesLive = null; state.resourcesLiveKey = ''; state.selectedResourceUID = ''; state.resourcePanelTab = 'overview'; state.activityRange = '24h'; state.activityType = ''; state.activitySource = ''; state.activityQuery = ''; $('#applications-list-view').hidden = true; setDetailChrome(true); renderApplicationDetail(); $('#application-detail .back-button').focus(); }
   function closeApplication() {
     const name = state.selectedApplication?.metadata?.name;
     state.selectedApplication = null; state.editingValues = false; state.valuesDraft = Object.create(null); $('#application-detail').hidden = true; $('#applications-list-view').hidden = false; setDetailChrome(false);
@@ -632,6 +632,23 @@
     if (ready?.status === 'True') return badge('Healthy', 'good');
     if (ready?.status === 'False') return badge(ready.reason || 'Unhealthy', 'error');
     return badge('Progressing', 'muted');
+  }
+
+  const META_ICON_PATHS = {
+    namespace: 'M12 3 3 7l9 4 9-4-9-4zM3 12l9 4 9-4M3 17l9 4 9-4',
+    cluster: 'M4 4h16v6H4zM4 14h16v6H4zM7.5 7h.01M7.5 17h.01',
+    definition: 'M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8zM14 3v5h5',
+  };
+
+  function metaIcon(kind) {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('aria-hidden', 'true');
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', META_ICON_PATHS[kind] || META_ICON_PATHS.definition);
+    path.setAttribute('fill', 'none'); path.setAttribute('stroke', 'currentColor');
+    path.setAttribute('stroke-width', '1.6'); path.setAttribute('stroke-linecap', 'round'); path.setAttribute('stroke-linejoin', 'round');
+    svg.append(path);
+    return svg;
   }
 
   function renderApplicationDetail() {
@@ -660,16 +677,22 @@
     root.append(header);
 
     const meta = element('div', 'detail-meta');
-    const metaItem = (label, value) => {
+    const metaItem = (iconKind, label, value) => {
       const item = element('span', 'detail-meta-item');
-      item.append(element('span', 'detail-meta-label', label), element('span', 'detail-meta-value', safe(value)));
+      const icon = element('span', 'detail-meta-icon'); icon.append(metaIcon(iconKind));
+      const text = element('span', 'detail-meta-text');
+      text.append(element('span', 'detail-meta-label', label), element('span', 'detail-meta-value', safe(value)));
+      item.append(icon, text);
       return item;
     };
-    meta.append(
-      metaItem('Namespace', app.metadata?.namespace),
-      metaItem('Cluster', app.spec?.clusterRef?.name || app.spec?.environment?.name),
-      metaItem('Definition', app.spec?.applicationDefinitionRef?.name),
-    );
+    [
+      ['namespace', 'Namespace', app.metadata?.namespace],
+      ['cluster', 'Cluster', app.spec?.clusterRef?.name || app.spec?.environment?.name],
+      ['definition', 'Definition', app.spec?.applicationDefinitionRef?.name],
+    ].filter((entry) => entry[2]).forEach((entry, index) => {
+      if (index > 0) meta.append(element('span', 'detail-meta-divider'));
+      meta.append(metaItem(entry[0], entry[1], entry[2]));
+    });
     root.append(meta);
 
     const tabs = element('nav', 'detail-tabs'); tabs.setAttribute('aria-label', 'Application sections');
@@ -692,15 +715,9 @@
       else panel.append(element('p', 'helper', 'No instance selected.'));
       return;
     }
-    if (tab === 'configuration') {
-      panel.append(element('h3', 'values-title', 'Value overrides'));
-      const values = app.spec?.values;
-      panel.append(element('pre', 'values-json', values && typeof values === 'object' && Object.keys(values).length ? JSON.stringify(values, null, 2) : 'No value overrides'));
-      appendValuesEditor(panel, app);
-      return;
-    }
-    if (tab === 'observability') { appendObservability(panel, view); return; }
-    if (tab === 'activity') { appendActivity(panel, app); return; }
+    if (tab === 'configuration') { renderConfigurationTab(panel, ctx); return; }
+    if (tab === 'observability') { renderObservabilityTab(panel, ctx); return; }
+    if (tab === 'activity') { renderActivityTab(panel, ctx); return; }
   }
 
   function dotsIcon() {
@@ -1002,87 +1019,272 @@
 
   function applicationDefinition(app) {
     const ref = app.spec?.applicationDefinitionRef?.name;
-    return state.definitions.find((definition) => definition.metadata?.name === ref && definition.metadata?.namespace === app.metadata?.namespace);
+    if (!ref) return null;
+    // ApplicationDefinitions are cluster-scoped, so names are unique.
+    return state.definitions.find((definition) => definition.metadata?.name === ref) || null;
   }
 
-  function appendValuesEditor(root, app) {
-    const def = applicationDefinition(app);
-    const configs = Array.isArray(def?.spec?.configurableValues) ? def.spec.configurableValues : [];
-    const available = Boolean(def && definitionReadiness(def).ready && configs.length);
-    const section = element('section', 'values-editor');
-    if (state.editingValues && !state.canUpdateApps) {
-      state.editingValues = false;
-      state.valuesDraft = Object.create(null);
-    }
-    if (!state.editingValues) {
-      const button = element('button', 'button button-secondary', 'Edit values');
-      button.type = 'button'; button.disabled = !state.canUpdateApps || !available || state.deletionPending.has(app.metadata?.name);
-      button.setAttribute('aria-describedby', 'values-edit-help');
-      button.addEventListener('click', () => {
-        if (!state.canUpdateApps || !available || state.deletionPending.has(app.metadata?.name)) return;
-        state.valuesDraft = Object.create(null);
-        state.editingValues = true;
-        renderApplicationDetail();
-        $('#application-values-form input, #application-values-form select')?.focus();
-      });
-      section.append(button);
-      const help = !state.canUpdateApps
-        ? 'Developer or administrator access is required to update application values.'
-        : !def ? 'The Application Definition is unavailable, so values cannot be edited.' : !definitionReadiness(def).ready ? 'The Application Definition is not validated, so values cannot be edited.' : !configs.length ? 'The Application Definition has no configurable values.' : 'Only values exposed by the Application Definition can be edited.';
-      section.append(element('p', `helper values-edit-help${state.canUpdateApps ? '' : ' access-required'}`, help));
-      section.lastChild.id = 'values-edit-help';
-      root.append(section); return;
-    }
-    const formNode = element('form', 'application-values-form'); formNode.id = 'application-values-form';
-    formNode.setAttribute('aria-labelledby', 'application-values-heading');
-    const heading = element('h3', 'values-title', 'Edit configurable values'); heading.id = 'application-values-heading';
-    formNode.append(heading, element('p', 'helper', 'Defaults apply automatically. Leave an optional field blank to remove its override.'));
-    const fields = element('div', 'form-grid values-edit-grid');
-    const current = app.spec?.values || {};
-    configs.forEach((config, index) => {
-      const path = String(config.path || `value-${index + 1}`);
-      const label = element('label', 'field');
-      const labelText = element('span', '', path);
-      if (config.required) labelText.append(element('span', 'required-mark', ' · required'));
-      label.append(labelText);
-      const input = config.type === 'boolean' ? document.createElement('select') : document.createElement('input');
-      if (config.type === 'boolean') {
-        input.add(new Option('Not set', ''));
-        input.add(new Option('Yes', 'true'));
-        input.add(new Option('No', 'false'));
+  const CFG_ICON_PATHS = {
+    document: 'M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8zM14 3v5h5',
+    sliders: 'M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0M16 4v4M8 10v4M18 16v4',
+    code: 'M9 8l-4 4 4 4M15 8l4 4-4 4',
+    info: 'M12 8h.01M11 12h1v4h1M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18',
+    clock: 'M12 7v5l3 2M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18',
+    copy: 'M9 9V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-4M5 9h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2z',
+    pencil: 'M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z',
+  };
+
+  function cfgIcon(kind) {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('aria-hidden', 'true');
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', CFG_ICON_PATHS[kind] || CFG_ICON_PATHS.document);
+    path.setAttribute('fill', 'none'); path.setAttribute('stroke', 'currentColor');
+    path.setAttribute('stroke-width', '1.6'); path.setAttribute('stroke-linecap', 'round'); path.setAttribute('stroke-linejoin', 'round');
+    svg.append(path);
+    return svg;
+  }
+
+  function cfgCard(iconKind, title, subtitle) {
+    const card = element('section', 'cfg-card');
+    const head = element('div', 'cfg-card-head');
+    const icon = element('span', 'cfg-card-icon'); icon.append(cfgIcon(iconKind));
+    const titles = element('div', 'cfg-card-titles');
+    titles.append(element('h4', 'cfg-card-title', title));
+    if (subtitle) titles.append(element('p', 'cfg-card-sub', subtitle));
+    head.append(icon, titles);
+    card.append(head);
+    return { card, head, titles };
+  }
+
+  function decodeHistory(app) {
+    try {
+      const raw = app.metadata?.annotations?.['platform.releaseyard.io/change-history'];
+      const parsed = raw ? JSON.parse(raw) : [];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (error) { return []; }
+  }
+
+  function deepMerge(base, extra) {
+    const result = { ...(base || {}) };
+    Object.keys(extra || {}).forEach((key) => {
+      const value = extra[key];
+      if (value && typeof value === 'object' && !Array.isArray(value) && base?.[key] && typeof base[key] === 'object' && !Array.isArray(base[key])) {
+        result[key] = deepMerge(base[key], value);
       } else {
-        input.type = config.type === 'integer' ? 'number' : 'text';
-        if (config.type === 'integer') input.step = '1';
-        if (config.minimum !== undefined) input.min = config.minimum;
-        if (config.maximum !== undefined) input.max = config.maximum;
-        input.placeholder = config.required ? 'Enter a value' : 'Optional';
+        result[key] = value;
       }
-      input.dataset.path = path; input.dataset.type = config.type || 'string'; input.dataset.required = config.required ? 'true' : 'false';
-      const fromCurrent = path.split('.').reduce((value, key) => value && typeof value === 'object' ? value[key] : undefined, current);
-      if (!Object.prototype.hasOwnProperty.call(state.valuesDraft, path) && fromCurrent !== undefined) {
-        state.valuesDraft[path] = typeof fromCurrent === 'boolean' ? String(fromCurrent) : String(fromCurrent);
-      }
-      input.value = state.valuesDraft[path] ?? '';
+    });
+    return result;
+  }
+
+  function toYAML(value, indent = 0) {
+    const pad = '  '.repeat(indent);
+    if (value === null || value === undefined) return 'null';
+    if (Array.isArray(value)) {
+      if (!value.length) return '[]';
+      return value.map((item) => {
+        const rendered = toYAML(item, indent + 1);
+        return typeof item === 'object' && item !== null ? `${pad}- ${rendered.trimStart()}` : `${pad}- ${rendered}`;
+      }).join('\n');
+    }
+    if (typeof value === 'object') {
+      const keys = Object.keys(value);
+      if (!keys.length) return '{}';
+      return keys.map((key) => {
+        const item = value[key];
+        if (item && typeof item === 'object') return `${pad}${key}:\n${toYAML(item, indent + 1)}`;
+        if (typeof item === 'string' && /[:#]|^\s|\s$/.test(item)) return `${pad}${key}: ${JSON.stringify(item)}`;
+        return `${pad}${key}: ${String(item)}`;
+      }).join('\n');
+    }
+    if (typeof value === 'string' && /[:#]|^\s|\s$/.test(value)) return JSON.stringify(value);
+    return String(value);
+  }
+
+  function renderConfigurationTab(panel, ctx) {
+    const { app } = ctx;
+    const def = applicationDefinition(app);
+    if (state.editingValues && !state.canUpdateApps) { state.editingValues = false; state.valuesDraft = Object.create(null); }
+    const layout = element('div', 'cfg-layout');
+    const main = element('div', 'cfg-main');
+    const side = element('div', 'cfg-side');
+    main.append(cfgDefinitionCard(app, def));
+    main.append(cfgOverridesCard(app, def));
+    main.append(cfgYamlCard(app, def));
+    side.append(cfgSummaryCard(app, def));
+    side.append(cfgHistoryCard(app));
+    layout.append(main, side);
+    panel.append(layout);
+  }
+
+  function cfgDefinitionCard(app, def) {
+    const { card } = cfgCard('document', 'Application definition', 'Source Helm chart and version used for this application.');
+    const bar = element('div', 'cfg-def-bar');
+    const item = (label, value) => { const node = element('div', 'cfg-def-item'); node.append(element('span', 'cfg-def-label', label), element('span', 'cfg-def-value', safe(value))); return node; };
+    bar.append(item('Definition', app.spec?.applicationDefinitionRef?.name), item('Version', def?.spec?.chart?.version));
+    card.append(bar);
+    return card;
+  }
+
+  function cfgValueControl(config, path, current, def, editable) {
+    const overrideValue = path.split('.').reduce((value, key) => value && typeof value === 'object' ? value[key] : undefined, current);
+    const defaultValue = path.split('.').reduce((value, key) => value && typeof value === 'object' ? value[key] : undefined, def?.spec?.defaults);
+    const effective = overrideValue !== undefined ? overrideValue : defaultValue;
+    const draft = Object.prototype.hasOwnProperty.call(state.valuesDraft, path) ? state.valuesDraft[path] : (overrideValue !== undefined ? String(overrideValue) : '');
+    const value = editable ? draft : (effective !== undefined ? String(effective) : '');
+    let input;
+    if (config.type === 'boolean') {
+      input = document.createElement('select');
+      input.add(new Option('Not set', '')); input.add(new Option('true', 'true')); input.add(new Option('false', 'false'));
+      input.value = value;
+    } else {
+      input = document.createElement('input');
+      input.type = config.type === 'integer' ? 'number' : 'text';
+      if (config.type === 'integer') input.step = '1';
+      if (config.minimum !== undefined) input.min = config.minimum;
+      if (config.maximum !== undefined) input.max = config.maximum;
+      input.value = value;
+      input.placeholder = config.required ? 'Required' : (defaultValue !== undefined ? `Default: ${defaultValue}` : 'Optional');
+    }
+    input.dataset.path = path; input.dataset.type = config.type || 'string'; input.dataset.required = config.required ? 'true' : 'false';
+    input.disabled = !editable;
+    if (editable) {
+      if (!Object.prototype.hasOwnProperty.call(state.valuesDraft, path) && overrideValue !== undefined) state.valuesDraft[path] = String(overrideValue);
       input.addEventListener('input', () => { state.valuesDraft[path] = input.value; input.setCustomValidity(''); });
       input.addEventListener('change', () => { state.valuesDraft[path] = input.value; input.setCustomValidity(''); });
       if (config.required) input.required = true;
-      label.append(input);
-      const defaultValue = path.split('.').reduce((value, key) => value && typeof value === 'object' ? value[key] : undefined, def.spec?.defaults);
-      if (defaultValue !== undefined) label.append(element('small', '', `Default: ${typeof defaultValue === 'object' ? JSON.stringify(defaultValue) : String(defaultValue)}`));
-      if (config.minimum !== undefined || config.maximum !== undefined) label.append(element('small', '', `Range: ${config.minimum ?? 'no minimum'} – ${config.maximum ?? 'no maximum'}`));
-      fields.append(label);
+    }
+    return input;
+  }
+
+  function cfgOverridesCard(app, def) {
+    const configs = Array.isArray(def?.spec?.configurableValues) ? def.spec.configurableValues : [];
+    const available = Boolean(def && definitionReadiness(def).ready && configs.length);
+    const { card, head } = cfgCard('sliders', 'Value overrides', 'Custom Helm values for this application. These values override the defaults from the application definition.');
+    const editable = state.editingValues && state.canUpdateApps && available;
+    const edit = element('button', 'button button-secondary cfg-btn'); edit.type = 'button';
+    edit.append(cfgIcon('pencil'), document.createTextNode(' Edit values'));
+    edit.disabled = !state.canUpdateApps || !available || state.deletionPending.has(app.metadata?.name);
+    if (!editable) edit.addEventListener('click', () => {
+      if (!state.canUpdateApps || !available || state.deletionPending.has(app.metadata?.name)) return;
+      state.valuesDraft = Object.create(null); state.editingValues = true; renderApplicationDetail();
+      $('#application-values-form input, #application-values-form select')?.focus();
     });
-    formNode.append(fields);
-    const formActions = element('div', 'form-actions values-edit-actions');
-    const hint = element('p', 'helper', 'Saving updates the configuration; the Helm release may take time to apply it.');
-    const buttons = element('div', 'values-edit-buttons');
-    const cancel = element('button', 'button button-secondary', 'Cancel'); cancel.type = 'button';
-    cancel.addEventListener('click', () => { state.editingValues = false; state.valuesDraft = Object.create(null); renderApplicationDetail(); });
-    const save = element('button', 'button button-primary', state.savingValues ? 'Saving…' : 'Save values');
-    save.type = 'submit'; save.disabled = state.savingValues;
-    buttons.append(cancel, save); formActions.append(hint, buttons); formNode.append(formActions);
-    formNode.addEventListener('submit', (event) => { event.preventDefault(); saveApplicationValues(app, formNode); });
-    section.append(formNode); root.append(section);
+    head.append(edit);
+
+    if (!configs.length) { card.append(element('p', 'helper', 'The Application Definition has no configurable values.')); return card; }
+
+    const current = app.spec?.values || {};
+    const form = element('form', 'cfg-values-form'); form.id = 'application-values-form';
+    const table = element('table', 'cfg-table');
+    const thead = document.createElement('thead'); const headRow = document.createElement('tr');
+    ['Key', 'Value', ''].forEach((label) => headRow.append(element('th', '', label)));
+    thead.append(headRow); table.append(thead);
+    const tbody = document.createElement('tbody');
+    configs.forEach((config, index) => {
+      const path = String(config.path || `value-${index + 1}`);
+      const row = document.createElement('tr'); row.className = 'cfg-row';
+      const key = element('td', 'cfg-key'); key.append(element('span', '', path));
+      if (config.required) key.append(element('span', 'cfg-required', 'required'));
+      const valueCell = element('td', 'cfg-value'); valueCell.append(cfgValueControl(config, path, current, def, editable));
+      const actions = element('td', 'cfg-row-actions'); actions.append(cfgRowMenu(path, config, def, app, editable));
+      row.append(key, valueCell, actions); tbody.append(row);
+    });
+    table.append(tbody); form.append(table);
+    if (editable) {
+      const actions = element('div', 'cfg-values-actions');
+      const hint = element('p', 'helper', 'Saving updates the configuration; the Helm release may take time to apply it.');
+      const buttons = element('div', 'cfg-values-buttons');
+      const cancel = element('button', 'button button-secondary', 'Cancel'); cancel.type = 'button';
+      cancel.addEventListener('click', () => { state.editingValues = false; state.valuesDraft = Object.create(null); renderApplicationDetail(); });
+      const save = element('button', 'button button-primary', state.savingValues ? 'Saving…' : 'Save values');
+      save.type = 'submit'; save.disabled = state.savingValues;
+      buttons.append(cancel, save); actions.append(hint, buttons); form.append(actions);
+      form.addEventListener('submit', (event) => { event.preventDefault(); saveApplicationValues(app, form); });
+    }
+    card.append(form);
+    return card;
+  }
+
+  function cfgRowMenu(path, config, def, app, editable) {
+    const menu = document.createElement('details'); menu.className = 'detail-menu res-row-menu';
+    const toggle = element('summary', 'detail-menu-toggle res-row-toggle');
+    toggle.setAttribute('aria-label', 'Value actions'); toggle.title = 'Value actions';
+    toggle.append(dotsIcon());
+    const list = element('div', 'detail-menu-list');
+    const copyKey = element('button', 'detail-menu-item', 'Copy key'); copyKey.type = 'button';
+    copyKey.addEventListener('click', () => { menu.open = false; copyText(path); });
+    list.append(copyKey);
+    const defaultValue = path.split('.').reduce((value, key) => value && typeof value === 'object' ? value[key] : undefined, def?.spec?.defaults);
+    if (editable) {
+      const reset = element('button', 'detail-menu-item', 'Reset to default'); reset.type = 'button';
+      reset.disabled = defaultValue === undefined;
+      reset.addEventListener('click', () => { menu.open = false; state.valuesDraft[path] = defaultValue !== undefined ? String(defaultValue) : ''; renderApplicationDetail(); });
+      list.append(reset);
+    }
+    menu.append(toggle, list);
+    return menu;
+  }
+
+  function cfgYamlCard(app, def) {
+    const { card, head } = cfgCard('code', 'YAML preview', 'Rendered values.yaml with your overrides. This is a preview of the values applied to the application.');
+    const merged = deepMerge(def?.spec?.defaults || {}, app.spec?.values || {});
+    const text = Object.keys(merged).length ? toYAML(merged) : '# No values apply to this application.';
+    const copy = element('button', 'button button-secondary cfg-btn'); copy.type = 'button';
+    copy.append(cfgIcon('copy'), document.createTextNode(' Copy'));
+    copy.addEventListener('click', () => copyText(text));
+    head.append(copy);
+    const pre = element('div', 'cfg-yaml');
+    text.split('\n').forEach((line, index) => {
+      const row = element('div', 'cfg-yaml-line');
+      row.append(element('span', 'cfg-yaml-ln', String(index + 1)), element('span', 'cfg-yaml-code', line));
+      pre.append(row);
+    });
+    card.append(pre);
+    return card;
+  }
+
+  function cfgSummaryCard(app, def) {
+    const { card } = cfgCard('info', 'Configuration summary', null);
+    const latest = decodeHistory(app)[0];
+    const chart = def?.spec?.chart || {};
+    const list = element('dl', 'cfg-info');
+    const row = (label, valueNode) => { const item = element('div', 'cfg-info-row'); item.append(element('dt', '', label)); const dd = element('dd', ''); dd.append(valueNode); item.append(dd); list.append(item); };
+    row('Source', element('span', '', 'Helm chart'));
+    row('Repository', element('span', '', chart.repository || '—'));
+    row('Chart', element('span', '', chart.name || '—'));
+    row('Chart version', element('span', '', chart.version || '—'));
+    row('Last updated', element('span', '', latest?.at ? formatObservedTime(latest.at) : (app.status?.workloadObservedAt ? formatObservedTime(app.status.workloadObservedAt) : '—')));
+    row('Updated by', element('span', '', latest?.by || '—'));
+    const validity = def ? definitionReadiness(def) : { ready: false, reason: 'The Application Definition is unavailable.' };
+    const status = element('div', 'cfg-validity');
+    status.append(badge(validity.ready ? 'Valid' : 'Not valid', validity.ready ? 'good' : 'muted'));
+    status.append(element('p', 'cfg-validity-note', validity.ready ? 'Values are valid and can be applied.' : (validity.reason || 'Values cannot be applied.')));
+    row('Validation status', status);
+    card.append(list);
+    return card;
+  }
+
+  function cfgHistoryCard(app) {
+    const { card } = cfgCard('clock', 'Change history', 'Recent configuration changes for this application.');
+    const entries = decodeHistory(app);
+    if (!entries.length) { card.append(element('p', 'helper', 'No configuration changes recorded yet.')); return card; }
+    const list = element('ol', 'cfg-history');
+    entries.forEach((entry) => {
+      const item = element('li', 'cfg-history-item');
+      item.append(element('span', 'cfg-history-dot'));
+      const body = element('div', 'cfg-history-body');
+      const top = element('div', 'cfg-history-top');
+      top.append(element('span', 'cfg-history-version', `v${entry.version}`));
+      top.append(element('span', 'cfg-history-time', entry.at ? formatObservedTime(entry.at) : ''));
+      body.append(top);
+      body.append(element('p', 'cfg-history-summary', safe(entry.summary || 'Updated configuration')));
+      if (entry.by) body.append(element('p', 'cfg-history-by', safe(entry.by)));
+      item.append(body); list.append(item);
+    });
+    card.append(list);
+    return card;
   }
 
   async function saveApplicationValues(app, formNode) {
@@ -1137,121 +1339,235 @@
     }
   }
 
-  function appendActivity(root, app) {
-    const name = app.metadata?.name;
-    const section = element('section', 'activity-section');
-    section.setAttribute('aria-labelledby', 'application-activity-title');
-    const heading = element('h3', 'values-title', 'Activity'); heading.id = 'application-activity-title';
-    section.append(heading, element('p', 'helper', 'Recent events recorded for this application.'));
-    const list = element('ul', 'activity-list');
-    list.append(element('li', 'activity-empty', 'Loading activity…'));
-    section.append(list); root.append(section);
-    loadActivity(name, list);
+  function formatDateParts(value) {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return { date: safe(value), time: '' };
+    return {
+      date: new Intl.DateTimeFormat('en', { dateStyle: 'medium' }).format(date),
+      time: new Intl.DateTimeFormat('en', { timeStyle: 'short' }).format(date),
+    };
   }
 
-  async function loadActivity(name, list) {
-    try {
-      const response = await apiFetch(withTeam(`/api/activity?kind=Application&name=${encodeURIComponent(name)}`));
-      if (response.status === 403) { list.replaceChildren(element('li', 'activity-empty', 'You do not have permission to view this activity.')); return; }
-      if (!response.ok) throw new Error(`Request failed (${response.status})`);
-      const data = await response.json();
-      const items = Array.isArray(data.items) ? data.items : [];
-      if (!items.length) { list.replaceChildren(element('li', 'activity-empty', 'No recorded activity yet.')); return; }
-      list.replaceChildren(...items.map(activityRow));
-    } catch (error) {
-      list.replaceChildren(element('li', 'activity-empty', error.message || 'Could not load activity.'));
-    }
+  function activityTypeLabel(kind) {
+    const map = { ConfigMap: 'Config', PersistentVolumeClaim: 'PVC', ReplicaSet: 'ReplicaSet' };
+    return map[kind] || kind || 'Event';
   }
 
-  function activityRow(entry) {
-    const warning = entry.type === 'Warning';
-    const row = element('li', `activity-row${warning ? ' activity-warning' : ''}`);
-    const head = element('div', 'activity-head');
-    head.append(badge(warning ? 'Warning' : 'Normal', warning ? 'error' : 'good'), element('span', 'activity-reason', safe(entry.reason || 'Event')));
-    if (entry.count > 1) head.append(element('span', 'activity-count', `×${entry.count}`));
-    head.append(element('time', 'activity-time', formatObservedTime(entry.lastSeen)));
-    row.append(head, element('p', 'activity-message', safe(entry.message || '')));
-    return row;
+  function activityTitle(entry) {
+    const map = {
+      ScalingReplicaSet: 'Deployment applied', SuccessfulCreate: 'Pod created', Started: 'Pod started',
+      Pulled: 'Image pulled', Created: 'Application created', Killing: 'Pod stopped',
+      ConfigMapUpdated: 'Config updated', SecretUpdated: 'Secret updated', FailedToRetrieveImagePullSecret: 'Image pull secret failed',
+    };
+    if (map[entry.reason]) return map[entry.reason];
+    const humanized = String(entry.reason || '').replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/[-_]+/g, ' ').trim();
+    return humanized ? humanized.charAt(0).toUpperCase() + humanized.slice(1) : 'Event';
   }
 
-  function observabilityPods(app) {
-    const resources = Array.isArray(app.status?.resources) ? app.status.resources : [];
-    return resources.filter((resource) => resource.kind === 'Pod' && resource.name).map((resource) => resource.name).sort();
+  function activityIcon(kind) {
+    if (['Deployment', 'ReplicaSet', 'StatefulSet', 'DaemonSet', 'Pod', 'Job'].includes(kind)) return resourceKindIcon();
+    return cfgIcon('document');
   }
 
-  function appendObservability(root, app) {
+  function activityStatusBadge(entry) {
+    if (entry.type === 'Warning') return badge('Warning', 'error');
+    if (/health|ready|healthy|completed|scaled|success/i.test(entry.reason || '') || entry.objectKind === 'Application') return badge('Healthy', 'good');
+    return badge('Info', 'neutral');
+  }
+
+  function actKpi(iconKind, title, opts = {}) {
+    const card = element('section', 'act-kpi');
+    const head = element('div', 'act-kpi-head');
+    const icon = element('span', 'act-kpi-icon'); icon.append(obsIcon(iconKind));
+    head.append(icon, element('span', 'act-kpi-title', title));
+    const value = element('div', 'act-kpi-value', '—');
+    const sub = element('div', 'act-kpi-sub', '');
+    card.append(head, value, sub);
+    if (opts.chevron) card.append(element('span', 'act-kpi-chevron', '›'));
+    return { card, value, sub };
+  }
+
+  function actSelect(label, options, value, onChange) {
+    const field = element('label', 'act-field');
+    field.append(element('span', 'act-field-label', label));
+    const select = document.createElement('select'); select.className = 'act-select';
+    options.forEach(([val, text]) => select.add(new Option(text, val)));
+    select.value = value;
+    select.addEventListener('change', () => onChange(select.value));
+    field.append(select);
+    return field;
+  }
+
+  function renderActivityTab(panel, ctx) {
+    const { app } = ctx;
     const name = app.metadata?.name;
     if (!name) return;
-    const section = element('section', 'observability-section');
-    section.setAttribute('aria-labelledby', 'application-observability-title');
-    const heading = element('h3', 'values-title', 'Observability'); heading.id = 'application-observability-title';
-    section.append(heading, element('p', 'helper', 'Live data read from the target cluster.'));
-    section.append(observabilityResourcesBlock(name));
-    section.append(observabilityMetricsBlock(name));
-    section.append(observabilityLogsBlock(name, observabilityPods(app)));
-    root.append(section);
-  }
+    const section = element('section', 'act-section');
 
-  function observabilityBlock(title, description) {
-    const block = element('div', 'observability-block');
-    const head = element('div', 'observability-head');
-    head.append(element('strong', '', title));
-    block.append(head);
-    if (description) block.append(element('p', 'helper', description));
-    const body = element('div', 'observability-body');
-    block.append(body);
-    return { block, head, body };
-  }
+    const kpis = element('div', 'act-kpis');
+    const eventsKpi = actKpi('document', '24h events');
+    const warningsKpi = actKpi('events', 'Warnings');
+    const deployKpi = actKpi('restart', 'Last deployment', { chevron: true });
+    kpis.append(eventsKpi.card, warningsKpi.card, deployKpi.card);
+    section.append(kpis);
 
-  function observabilityResourcesBlock(name) {
-    const { block, head, body } = observabilityBlock('Resources (live YAML & status)', 'Every resource of the release, read live from the target cluster. Secrets are excluded.');
-    const button = element('button', 'button button-secondary', 'Load resources'); button.type = 'button';
-    body.append(element('p', 'helper', 'Not loaded yet.'));
-    button.addEventListener('click', async () => {
-      button.disabled = true; body.replaceChildren(element('p', 'helper', 'Loading…'));
-      try {
-        const response = await apiFetch(withTeam(`/api/applications/${encodeURIComponent(name)}/resources`));
-        const data = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(data.error || `Request failed (${response.status})`);
-        renderLiveResources(body, data);
-      } catch (error) { body.replaceChildren(element('p', 'empty', error.message || 'Could not load resources.')); }
-      finally { button.disabled = false; }
-    });
-    head.append(button);
-    return block;
-  }
+    const filters = element('div', 'act-filters');
+    const rangeField = actSelect('Time range', [['1h', 'Last 1 hour'], ['6h', 'Last 6 hours'], ['24h', 'Last 24 hours'], ['7d', 'Last 7 days'], ['all', 'All time']], state.activityRange, (value) => { state.activityRange = value; redraw(); });
+    const typeField = actSelect('Event type', [['', 'All types'], ['Normal', 'Normal'], ['Warning', 'Warning']], state.activityType, (value) => { state.activityType = value; redraw(); });
+    const sourceSelect = actSelect('Source', [['', 'All sources']], state.activitySource, (value) => { state.activitySource = value; redraw(); });
+    const sourceField = sourceSelect;
+    const search = element('input', 'act-search'); search.type = 'search'; search.placeholder = 'Search events...'; search.setAttribute('aria-label', 'Search events');
+    search.value = state.activityQuery;
+    search.addEventListener('input', () => { state.activityQuery = search.value; redraw(); });
+    filters.append(rangeField, typeField, sourceField, search);
+    section.append(filters);
 
-  function renderLiveResources(body, data) {
-    const items = Array.isArray(data.items) ? data.items : [];
-    body.replaceChildren();
-    if (data.release) body.append(element('p', 'resource-meta', `Release ${safe(data.release)} in ${safe(data.namespace)} on ${safe(data.clusterName)}`));
-    if (!items.length) { body.append(element('p', 'helper', 'No resources reported yet.')); return; }
-    for (const item of items) {
-      const details = element('details', 'resource-yaml');
-      details.append(element('summary', '', `${safe(item.kind)} / ${safe(item.name)}`));
-      if (item.error) details.append(element('p', 'empty', safe(item.error)));
-      else details.append(element('pre', 'values-json', safe(item.yaml || '')));
-      body.append(details);
+    const grid = element('div', 'act-grid');
+    const timelineCard = element('section', 'act-card');
+    const timelineHead = element('div', 'act-card-head');
+    const timelineIcon = element('span', 'act-card-icon'); timelineIcon.append(cfgIcon('clock'));
+    timelineHead.append(timelineIcon, element('h4', 'act-card-title', 'Activity timeline'));
+    const timeline = element('ul', 'act-timeline'); timeline.append(element('li', 'act-empty', 'Loading…'));
+    timelineCard.append(timelineHead, timeline);
+
+    const eventsCard = element('section', 'act-card');
+    const eventsHead = element('div', 'act-card-head');
+    const eventsIcon = element('span', 'act-card-icon'); eventsIcon.append(obsIcon('events'));
+    const eventsTitle = element('h4', 'act-card-title', 'Events (0)');
+    eventsHead.append(eventsIcon, eventsTitle);
+    const eventsBody = element('div', 'act-events'); eventsBody.append(element('p', 'helper', 'Loading…'));
+    eventsCard.append(eventsHead, eventsBody);
+    grid.append(timelineCard, eventsCard);
+    section.append(grid);
+    panel.append(section);
+
+    let items = [];
+
+    function cutoff() {
+      const now = Date.now();
+      const map = { '1h': 3600e3, '6h': 6 * 3600e3, '24h': 24 * 3600e3, '7d': 7 * 24 * 3600e3 };
+      return map[state.activityRange] ? now - map[state.activityRange] : 0;
     }
-    if (data.truncated) body.append(element('p', 'helper', 'Output truncated to the first resources.'));
+
+    function filtered() {
+      const query = state.activityQuery.trim().toLowerCase();
+      const since = cutoff();
+      return items.filter((entry) => {
+        if (since && (!entry.lastSeen || Date.parse(entry.lastSeen) < since)) return false;
+        if (state.activityType && entry.type !== state.activityType) return false;
+        if (state.activitySource && (entry.source || '') !== state.activitySource) return false;
+        if (query) {
+          const hay = `${entry.reason || ''} ${entry.message || ''} ${entry.objectName || ''} ${entry.objectKind || ''}`.toLowerCase();
+          if (!hay.includes(query)) return false;
+        }
+        return true;
+      });
+    }
+
+    function redraw() {
+      const shown = filtered();
+      eventsTitle.textContent = `Events (${shown.length})`;
+      if (!shown.length) {
+        timeline.replaceChildren(element('li', 'act-empty', items.length ? 'No events match these filters.' : 'No events recorded yet.'));
+        eventsBody.replaceChildren(element('p', 'helper', items.length ? 'No events match these filters.' : 'No events recorded yet.'));
+        return;
+      }
+      timeline.replaceChildren(...shown.map(activityTimelineItem));
+      eventsBody.replaceChildren(activityEventsTable(shown));
+    }
+
+    loadActivityEvents(app, { eventsKpi, warningsKpi, deployKpi, sourceSelect: sourceSelect.querySelector('select'), onLoaded: (loaded) => { items = loaded; redraw(); } });
   }
 
-  function observabilityMetricsBlock(name) {
-    const { block, head, body } = observabilityBlock('Resource usage (CPU / memory)', 'CPU and memory currently used by the release Pods, from metrics-server.');
-    const button = element('button', 'button button-secondary', 'Load usage'); button.type = 'button';
-    body.append(element('p', 'helper', 'Not loaded yet.'));
-    button.addEventListener('click', async () => {
-      button.disabled = true; body.replaceChildren(element('p', 'helper', 'Loading…'));
-      try {
-        const response = await apiFetch(withTeam(`/api/applications/${encodeURIComponent(name)}/metrics`));
-        const data = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(data.error || `Request failed (${response.status})`);
-        renderPodMetrics(body, data);
-      } catch (error) { body.replaceChildren(element('p', 'empty', error.message || 'Could not load usage.')); }
-      finally { button.disabled = false; }
+  function activityTimelineItem(entry) {
+    const item = element('li', 'act-tl-item');
+    const parts = formatDateParts(entry.lastSeen);
+    const time = element('div', 'act-tl-time');
+    time.append(element('span', '', parts.date), element('span', '', parts.time));
+    const dot = element('span', `act-tl-dot${entry.type === 'Warning' ? ' is-warning' : ''}`);
+    dot.append(activityIcon(entry.objectKind));
+    const body = element('div', 'act-tl-body');
+    const title = element('h5', 'act-tl-title', activityTitle(entry));
+    if (entry.count > 1) title.append(element('span', 'act-tl-count', `×${entry.count}`));
+    body.append(title, element('p', 'act-tl-desc', safe(entry.message || entry.objectName || '')));
+    item.append(time, dot, body);
+    return item;
+  }
+
+  function activityEventsTable(items) {
+    const table = element('table', 'act-table');
+    const thead = document.createElement('thead'); const headRow = document.createElement('tr');
+    ['Time ↓', 'Type', 'Source', 'Message', 'Status'].forEach((label) => headRow.append(element('th', '', label)));
+    thead.append(headRow); table.append(thead);
+    const tbody = document.createElement('tbody');
+    items.forEach((entry) => {
+      const row = document.createElement('tr');
+      const timeCell = element('td', 'act-time', safe(formatObservedTime(entry.lastSeen)));
+      const typeCell = element('td', '');
+      const typeWrap = element('span', 'act-type'); typeWrap.append(element('span', 'act-type-icon'), document.createTextNode(activityTypeLabel(entry.objectKind)));
+      typeWrap.firstChild.append(activityIcon(entry.objectKind));
+      typeCell.append(typeWrap);
+      const statusCell = element('td', ''); statusCell.append(activityStatusBadge(entry));
+      row.append(timeCell, typeCell, element('td', '', safe(entry.source || '—')), element('td', 'act-msg', safe(entry.message || '')), statusCell);
+      tbody.append(row);
     });
-    head.append(button);
-    return block;
+    table.append(tbody);
+    return table;
+  }
+
+  async function loadActivityEvents(app, refs) {
+    const name = app.metadata?.name;
+    let items = [];
+    try {
+      const response = await apiFetch(withTeam(`/api/applications/${encodeURIComponent(name)}/events`));
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || `Request failed (${response.status})`);
+      items = Array.isArray(data.items) ? data.items : [];
+    } catch (error) {
+      refs.eventsKpi.sub.textContent = error.message || 'Could not load events.';
+      refs.onLoaded([]);
+      return;
+    }
+    const now = Date.now();
+    const within24 = items.filter((entry) => entry.lastSeen && now - Date.parse(entry.lastSeen) <= 24 * 3600e3);
+    refs.eventsKpi.value.textContent = String(within24.length);
+    refs.eventsKpi.sub.textContent = 'in last 24h';
+    refs.warningsKpi.value.textContent = String(within24.filter((entry) => entry.type === 'Warning').length);
+    refs.warningsKpi.sub.textContent = 'in last 24h';
+    const deployments = items.filter((entry) => entry.objectKind === 'Deployment').sort((a, b) => String(b.lastSeen || '').localeCompare(String(a.lastSeen || '')));
+    if (deployments.length) {
+      const parts = formatDateParts(deployments[0].lastSeen);
+      refs.deployKpi.value.textContent = `${parts.date}, ${parts.time}`;
+      refs.deployKpi.sub.textContent = deployments[0].objectName || '';
+    } else {
+      refs.deployKpi.value.textContent = '—';
+      refs.deployKpi.sub.textContent = 'No deployment events';
+    }
+    const sources = [...new Set(items.map((entry) => entry.source).filter(Boolean))].sort();
+    const sourceSelect = refs.sourceSelect;
+    sourceSelect.replaceChildren(new Option('All sources', ''), ...sources.map((source) => new Option(source, source)));
+    sourceSelect.value = state.activitySource;
+    refs.onLoaded(items);
+  }
+
+  const OBS_ICON_PATHS = {
+    cpu: 'M9 9h6v6H9zM4 9h2M4 15h2M18 9h2M18 15h2M9 4v2M15 4v2M9 18v2M15 18v2M7 7h10v10H7z',
+    memory: 'M12 4c4 0 7 1.3 7 3s-3 3-7 3-7-1.3-7-3 3-3 7-3zM5 7v10c0 1.7 3 3 7 3s7-1.3 7-3V7M5 12c0 1.7 3 3 7 3s7-1.3 7-3',
+    restart: 'M21 12a9 9 0 1 1-3-6.7M21 4v5h-5',
+    pod: 'M12 3 21 8v8l-9 5-9-5V8l9-5Zm0 0v10m9-5-9 5-9-5',
+    logs: 'M8 6h9M8 10h9M8 14h6M5 4h14v16H5z',
+    events: 'M12 3a6 6 0 0 0-6 6c0 4-1.5 5-2 5h16c-.5 0-2-1-2-5a6 6 0 0 0-6-6zM10 18a2 2 0 0 0 4 0',
+  };
+
+  function obsIcon(kind) {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('aria-hidden', 'true');
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', OBS_ICON_PATHS[kind] || OBS_ICON_PATHS.pod);
+    path.setAttribute('fill', 'none'); path.setAttribute('stroke', 'currentColor');
+    path.setAttribute('stroke-width', '1.6'); path.setAttribute('stroke-linecap', 'round'); path.setAttribute('stroke-linejoin', 'round');
+    svg.append(path);
+    return svg;
   }
 
   function formatCPUmilli(milli) {
@@ -1266,52 +1582,255 @@
     return `${value.toFixed(index === 0 ? 0 : 1)} ${units[index]}`;
   }
 
-  function renderPodMetrics(body, data) {
-    body.replaceChildren();
-    if (!data.available) { body.append(element('p', 'helper', safe(data.reason || 'Metrics are not available.'))); return; }
-    const pods = Array.isArray(data.pods) ? data.pods : [];
-    if (!pods.length) { body.append(element('p', 'helper', 'No Pod metrics reported yet.')); return; }
-    const table = element('table', 'metrics-table');
-    const head = document.createElement('thead'); const headRow = document.createElement('tr');
-    for (const label of ['Pod', 'CPU', 'Memory']) headRow.append(element('th', '', label));
-    head.append(headRow); table.append(head);
-    const tbody = document.createElement('tbody');
-    for (const pod of pods) {
-      const tr = document.createElement('tr');
-      tr.append(element('td', '', safe(pod.pod)), element('td', '', formatCPUmilli(pod.cpuMilli)), element('td', '', formatBytes(pod.memoryBytes)));
-      tbody.append(tr);
-    }
-    const total = document.createElement('tr');
-    total.append(element('td', '', 'Total'), element('td', '', formatCPUmilli(data.totalCpuMilli)), element('td', '', formatBytes(data.totalMemoryBytes)));
-    tbody.append(total);
-    table.append(tbody); body.append(table);
+  function percentOf(used, total) {
+    return total > 0 ? `${Math.round((used / total) * 100)}%` : '';
   }
 
-  function observabilityLogsBlock(name, pods) {
-    const { block, head, body } = observabilityBlock('Pod logs', 'Recent log lines from a Pod of the release.');
-    const select = document.createElement('select'); select.className = 'obs-pod-select';
-    if (pods.length) select.append(...pods.map((pod) => new Option(pod, pod)));
-    else select.append(new Option('No pods reported', ''));
-    select.disabled = !pods.length;
-    const button = element('button', 'button button-secondary', 'Load logs'); button.type = 'button';
-    button.disabled = !pods.length;
-    const controls = element('div', 'observability-controls'); controls.append(select, button);
-    head.append(controls);
-    const output = element('pre', 'values-json obs-logs', 'Not loaded yet.');
-    body.append(output);
-    button.addEventListener('click', async () => {
-      const pod = select.value; if (!pod) return;
-      button.disabled = true; output.textContent = 'Loading…';
+  function obsCard(iconKind, title, bodyNode, opts = {}) {
+    const card = element('section', 'obs-card');
+    const head = element('div', 'obs-card-head');
+    const icon = element('span', 'obs-card-icon'); icon.append(obsIcon(iconKind));
+    const titles = element('div', 'obs-card-titles');
+    titles.append(element('h4', 'obs-card-title', title));
+    head.append(icon, titles);
+    if (opts.link) {
+      const link = element('button', 'obs-link', `${opts.link} →`); link.type = 'button';
+      link.addEventListener('click', opts.onClick);
+      head.append(link);
+    }
+    card.append(head, bodyNode);
+    return card;
+  }
+
+  function obsKpi(iconKind, title) {
+    const card = element('section', 'obs-kpi');
+    const head = element('div', 'obs-kpi-head');
+    const icon = element('span', 'obs-kpi-icon'); icon.append(obsIcon(iconKind));
+    head.append(icon, element('span', 'obs-kpi-title', title));
+    const value = element('div', 'obs-kpi-value', '—');
+    const sub = element('div', 'obs-kpi-sub', '');
+    card.append(head, value, sub);
+    return { card, value, sub };
+  }
+
+  function renderObservabilityTab(panel, ctx) {
+    const { app } = ctx;
+    const name = app.metadata?.name;
+    if (!name) return;
+    const section = element('section', 'obs-section');
+
+    const kpis = element('div', 'obs-kpis');
+    const cpu = obsKpi('cpu', 'CPU');
+    const memory = obsKpi('memory', 'Memory');
+    const restarts = obsKpi('restart', 'Restarts');
+    kpis.append(cpu.card, memory.card, restarts.card);
+    section.append(kpis);
+
+    const usageBody = element('div', 'obs-card-body');
+    section.append(obsCard('pod', 'Pod usage', usageBody, { link: 'View all pods', onClick: () => { state.detailTab = 'resources'; renderApplicationDetail(); } }));
+
+    const logs = obsLogsCard(app);
+    const events = obsEventsCard(app);
+    const grid = element('div', 'obs-grid');
+    grid.append(logs.card, events.card);
+    section.append(grid);
+
+    panel.append(section);
+    loadObservability(app, { cpu, memory, restarts, usageBody, logs });
+  }
+
+  async function loadObservability(app, refs) {
+    const name = app.metadata?.name;
+    let metrics = null;
+    try {
+      const response = await apiFetch(withTeam(`/api/applications/${encodeURIComponent(name)}/metrics`));
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || `Request failed (${response.status})`);
+      metrics = data;
+      if (data.available) {
+        refs.cpu.value.textContent = formatCPUmilli(data.totalCpuMilli);
+        refs.cpu.sub.textContent = data.requestedCpuMilli ? `${percentOf(data.totalCpuMilli, data.requestedCpuMilli)} of ${formatCPUmilli(data.requestedCpuMilli)} requested` : 'CPU in use';
+        refs.memory.value.textContent = formatBytes(data.totalMemoryBytes);
+        refs.memory.sub.textContent = data.requestedMemoryBytes ? `${percentOf(data.totalMemoryBytes, data.requestedMemoryBytes)} of ${formatBytes(data.requestedMemoryBytes)} requested` : 'Memory in use';
+      } else {
+        refs.cpu.value.textContent = '—'; refs.cpu.sub.textContent = data.reason || 'Metrics are not available.';
+        refs.memory.value.textContent = '—'; refs.memory.sub.textContent = data.reason || 'Metrics are not available.';
+      }
+    } catch (error) {
+      refs.cpu.value.textContent = '—'; refs.cpu.sub.textContent = error.message || 'Could not load metrics.';
+      refs.memory.value.textContent = '—'; refs.memory.sub.textContent = error.message || 'Could not load metrics.';
+    }
+
+    let pods = [];
+    try {
+      const response = await apiFetch(withTeam(`/api/applications/${encodeURIComponent(name)}/resources`));
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || `Request failed (${response.status})`);
+      pods = (Array.isArray(data.items) ? data.items : []).filter((item) => item.kind === 'Pod');
+    } catch (error) {
+      refs.usageBody.replaceChildren(element('p', 'helper', error.message || 'Could not load Pods.'));
+      refs.logs.setPods([]);
+      return;
+    }
+    const totalRestarts = pods.reduce((sum, pod) => sum + (pod.restarts || 0), 0);
+    refs.restarts.value.textContent = String(totalRestarts);
+    refs.restarts.sub.textContent = `${pods.length} Pod${pods.length === 1 ? '' : 's'} in this release`;
+    renderPodUsage(refs.usageBody, pods, metrics);
+    refs.logs.setPods(pods);
+  }
+
+  function renderPodUsage(body, pods, metrics) {
+    body.replaceChildren();
+    if (!pods.length) { body.append(element('p', 'helper', 'No Pods reported for this release.')); return; }
+    const usage = new Map((metrics?.pods || []).map((entry) => [entry.pod, entry]));
+    const table = element('table', 'obs-table');
+    const thead = document.createElement('thead'); const headRow = document.createElement('tr');
+    ['Pod', 'Status', 'CPU', 'Memory', 'Restarts', 'Age', ''].forEach((label) => headRow.append(element('th', '', label)));
+    thead.append(headRow); table.append(thead);
+    const tbody = document.createElement('tbody');
+    pods.slice().sort((a, b) => String(a.name).localeCompare(String(b.name))).forEach((pod) => {
+      const row = document.createElement('tr');
+      const nameCell = element('td', 'obs-pod-cell');
+      nameCell.append(element('span', 'obs-kind-icon'), safe(pod.name));  // placeholder icon added below
+      nameCell.firstChild.append(resourceKindIcon());
+      const statusCell = element('td', ''); statusCell.append(badge(pod.status || '—', pod.statusTone || 'neutral'));
+      const entry = usage.get(pod.name);
+      row.append(
+        nameCell, statusCell,
+        element('td', '', entry ? formatCPUmilli(entry.cpuMilli) : '—'),
+        element('td', '', entry ? formatBytes(entry.memoryBytes) : '—'),
+        element('td', '', String(pod.restarts || 0)),
+        element('td', '', pod.createdAt ? ageText(pod.createdAt) : '—'),
+      );
+      const actions = element('td', 'obs-row-actions'); actions.append(resourceRowMenu(pod)); row.append(actions);
+      tbody.append(row);
+    });
+    table.append(tbody); body.append(table);
+    if (!metrics?.available) body.append(element('p', 'helper', safe(metrics?.reason || 'Pod CPU and memory are unavailable.')));
+  }
+
+  function obsLogsCard(app) {
+    const card = element('section', 'obs-card');
+    const head = element('div', 'obs-card-head');
+    const icon = element('span', 'obs-card-icon'); icon.append(obsIcon('logs'));
+    const titles = element('div', 'obs-card-titles'); titles.append(element('h4', 'obs-card-title', 'Logs'));
+    head.append(icon, titles);
+    card.append(head);
+
+    const podSelect = document.createElement('select'); podSelect.className = 'obs-select'; podSelect.setAttribute('aria-label', 'Pod');
+    const containerSelect = document.createElement('select'); containerSelect.className = 'obs-select'; containerSelect.setAttribute('aria-label', 'Container');
+    const search = element('input', 'obs-search'); search.type = 'search'; search.placeholder = 'Search logs...'; search.setAttribute('aria-label', 'Search logs');
+    const controls = element('div', 'obs-controls');
+    const field = (label, control) => { const wrap = element('label', 'obs-field'); wrap.append(element('span', 'obs-field-label', label), control); return wrap; };
+    controls.append(field('Pod', podSelect), field('Container', containerSelect), search);
+    card.append(controls);
+
+    const output = element('div', 'obs-logs');
+    output.append(element('p', 'helper', 'Select a Pod to load logs.'));
+    card.append(output);
+
+    const podState = { pods: [], containers: new Map(), lines: [], loadedPod: '' };
+
+    const redraw = () => redrawLogs(output, podState.lines, search.value);
+
+    const load = async () => {
+      const pod = podSelect.value;
+      if (!pod) { output.replaceChildren(element('p', 'helper', 'Select a Pod to load logs.')); return; }
+      podState.loadedPod = pod;
+      output.replaceChildren(element('p', 'helper', 'Loading…'));
       try {
-        const response = await apiFetch(withTeam(`/api/applications/${encodeURIComponent(name)}/pods/${encodeURIComponent(pod)}/logs`));
+        const container = containerSelect.value;
+        const params = container ? `?container=${encodeURIComponent(container)}` : '';
+        const response = await apiFetch(withTeam(`/api/applications/${encodeURIComponent(app.metadata?.name)}/pods/${encodeURIComponent(pod)}/logs${params}`));
         const data = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(data.error || `Request failed (${response.status})`);
-        output.textContent = (data.logs && data.logs.length) ? data.logs : 'No log output.';
-        if (data.truncated) output.textContent += '\n… (truncated)';
-      } catch (error) { output.textContent = error.message || 'Could not load logs.'; }
-      finally { button.disabled = !pods.length; }
+        podState.lines = (data.logs ? String(data.logs).replace(/\n$/, '') : '').split('\n').filter((line, index, all) => !(all.length === 1 && line === ''));
+        redraw();
+      } catch (error) {
+        output.replaceChildren(element('p', 'helper', error.message || 'Could not load logs.'));
+      }
+    };
+
+    podSelect.addEventListener('change', () => {
+      const containers = podState.containers.get(podSelect.value) || [];
+      containerSelect.replaceChildren(new Option('All containers', ''), ...containers.map((name) => new Option(name, name)));
+      load();
     });
-    return block;
+    containerSelect.addEventListener('change', load);
+    search.addEventListener('input', redraw);
+
+    return {
+      card, output,
+      setPods(pods) {
+        podState.pods = pods;
+        podState.containers = new Map(pods.map((pod) => [pod.name, Array.isArray(pod.containers) ? pod.containers : []]));
+        podSelect.replaceChildren(...pods.map((pod) => new Option(pod.name, pod.name)));
+        if (!pods.length) { podSelect.replaceChildren(new Option('No Pods', '')); containerSelect.replaceChildren(new Option('All containers', '')); output.replaceChildren(element('p', 'helper', 'No Pods reported for this release.')); return; }
+        const containers = podState.containers.get(podSelect.value) || [];
+        containerSelect.replaceChildren(new Option('All containers', ''), ...containers.map((name) => new Option(name, name)));
+        load();
+      },
+    };
+  }
+
+  function redrawLogs(container, lines, filter) {
+    const needle = String(filter || '').trim().toLowerCase();
+    const shown = lines.filter((line) => !needle || line.toLowerCase().includes(needle));
+    container.replaceChildren();
+    if (!shown.length) { container.append(element('p', 'helper', lines.length ? 'No log lines match the search.' : 'No log output.')); return; }
+    shown.forEach((line, index) => {
+      const row = element('div', 'obs-log-line');
+      row.append(element('span', 'obs-log-num', String(index + 1)));
+      const code = element('span', 'obs-log-code');
+      const match = line.match(/\b(INFO|WARN|WARNING|ERROR|ERRO|DEBUG|TRACE|FATAL|PANIC)\b/i);
+      if (match) {
+        const at = match.index;
+        code.append(document.createTextNode(line.slice(0, at)));
+        code.append(element('span', `obs-log-level lvl-${match[1].toLowerCase()}`, match[1]));
+        code.append(document.createTextNode(line.slice(at + match[1].length)));
+      } else {
+        code.textContent = line;
+      }
+      row.append(code); container.append(row);
+    });
+  }
+
+  function obsEventsCard(app) {
+    const body = element('div', 'obs-card-body');
+    const card = obsCard('events', 'Events', body, { link: 'View all activity', onClick: () => { state.detailTab = 'activity'; renderApplicationDetail(); } });
+    const list = element('div', 'obs-events'); list.append(element('p', 'helper', 'Loading…'));
+    body.append(list);
+    loadObservabilityEvents(app.metadata?.name, list);
+    return { card };
+  }
+
+  async function loadObservabilityEvents(name, container) {
+    try {
+      const response = await apiFetch(withTeam(`/api/applications/${encodeURIComponent(name)}/events`));
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || `Request failed (${response.status})`);
+      const items = Array.isArray(data.items) ? data.items : [];
+      if (!container.isConnected) return;
+      if (!items.length) { container.replaceChildren(element('p', 'helper', 'No events recorded for this release.')); return; }
+      const table = element('table', 'obs-table obs-events-table');
+      const thead = document.createElement('thead'); const headRow = document.createElement('tr');
+      ['Time', 'Type', 'Reason', 'Message'].forEach((label) => headRow.append(element('th', '', label)));
+      thead.append(headRow); table.append(thead);
+      const tbody = document.createElement('tbody');
+      items.slice(0, 40).forEach((entry) => {
+        const row = document.createElement('tr');
+        row.append(
+          element('td', 'obs-event-time', entry.lastSeen ? ageText(entry.lastSeen) + ' ago' : '—'),
+          element('td', '', safe(entry.type || 'Normal')),
+          element('td', '', safe(entry.reason || '')),
+          element('td', 'obs-event-msg', safe(entry.message || '')),
+        );
+        tbody.append(row);
+      });
+      table.append(tbody); container.replaceChildren(table);
+    } catch (error) {
+      if (container.isConnected) container.replaceChildren(element('p', 'helper', error.message || 'Could not load events.'));
+    }
   }
 
   function resourceNodes(view) {

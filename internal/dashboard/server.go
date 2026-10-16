@@ -660,6 +660,8 @@ func (s *server) updateApplicationValues(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	app.Spec.Values = prospective.Spec.Values
+	session, _ := sessionFromContext(r.Context())
+	recordChangeHistory(app, session.username, "Updated values")
 	if err := s.writeClient(r).Update(r.Context(), app); err != nil {
 		if apierrors.IsConflict(err) {
 			writeError(w, http.StatusConflict, "Application was modified by another request")
@@ -814,6 +816,8 @@ func (s *server) createApplication(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnprocessableEntity, "Values do not meet the application definition's requirements")
 		return
 	}
+	session, _ := sessionFromContext(r.Context())
+	recordChangeHistory(app, session.username, "Initial configuration")
 	if err := s.writeClient(r).Create(r.Context(), app); err != nil {
 		if apierrors.IsAlreadyExists(err) {
 			writeError(w, http.StatusConflict, "An application with this name already exists")
