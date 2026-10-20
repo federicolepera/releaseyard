@@ -107,6 +107,9 @@ The dashboard is a web UI for platform admins and teams. It includes:
 - **Catalog**: browse validated Application Definitions and create Applications.
 - **Applications**: manage every Application owned by the signed-in user.
 - **Clusters**: see registered target clusters, connectivity, and nodes.
+- **Cloud**: when Crossplane is installed, browse the available cloud targets and
+  resource definitions and create or delete `Resource` requests from the
+  dashboard.
 - **Application detail**: four tabs for a running Application.
   - **Overview**: status, placement, release information, and recent activity.
   - **Configuration**: the definition contract, overrides, rendered YAML, and change history.
