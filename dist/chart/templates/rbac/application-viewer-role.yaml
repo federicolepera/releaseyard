@@ -30,4 +30,18 @@ rules:
   - applications/status
   verbs:
   - get
+- apiGroups:
+  - platform.releaseyard.io
+  resources:
+  - resources
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - platform.releaseyard.io
+  resources:
+  - resources/status
+  verbs:
+  - get
 {{- end }}

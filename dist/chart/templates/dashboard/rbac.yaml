@@ -16,6 +16,16 @@ rules:
       - update
       - delete
   - apiGroups:
+      - platform.releaseyard.io
+    resources:
+      - resources
+    verbs:
+      - get
+      - list
+      - create
+      - update
+      - delete
+  - apiGroups:
       - ""
     resources:
       - secrets
@@ -81,6 +91,14 @@ rules:
       - platform.releaseyard.io
     resources:
       - applicationdefinitions
+    verbs:
+      - get
+      - list
+  - apiGroups:
+      - platform.releaseyard.io
+    resources:
+      - cloudtargets
+      - resourcedefinitions
     verbs:
       - get
       - list

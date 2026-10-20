@@ -48,6 +48,7 @@ const (
 	platformAPIGroup     = "platform.releaseyard.io"
 	resourceApplications = "applications"
 	resourceClusters     = "clusters"
+	resourceResources    = "resources"
 	verbGet              = "get"
 	schemeHTTP           = "http"
 	schemeHTTPS          = "https"
@@ -88,6 +89,11 @@ func NewHandler(k8s client.Client, namespace string) http.Handler {
 	mux.HandleFunc("GET /api/activity", s.listActivity)
 	mux.HandleFunc("GET /api/clusters", s.listClusters)
 	mux.HandleFunc("PATCH /api/clusters/{name}/environment", s.updateClusterEnvironment)
+	mux.HandleFunc("GET /api/cloudtargets", s.listCloudTargets)
+	mux.HandleFunc("GET /api/resourcedefinitions", s.listResourceDefinitions)
+	mux.HandleFunc("GET /api/resources", s.listResources)
+	mux.HandleFunc("POST /api/resources", s.createResource)
+	mux.HandleFunc("DELETE /api/resources/{name}", s.deleteResource)
 	mux.HandleFunc("GET /api/environments/{name}/targets", s.previewEnvironmentTargets)
 	mux.HandleFunc("POST /api/applications", s.createApplication)
 	mux.HandleFunc("PATCH /api/applications/{name}", s.updateApplicationValues)

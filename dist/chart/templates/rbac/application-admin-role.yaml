@@ -28,4 +28,16 @@ rules:
   - applications/status
   verbs:
   - get
+- apiGroups:
+  - platform.releaseyard.io
+  resources:
+  - resources
+  verbs:
+  - '*'
+- apiGroups:
+  - platform.releaseyard.io
+  resources:
+  - resources/status
+  verbs:
+  - get
 {{- end }}

@@ -121,11 +121,13 @@ func sanitizeDNSLabel(value string) string {
 }
 
 type dashboardCapabilities struct {
-	isAdmin       bool
-	canAdminister bool
-	canCreateApps bool
-	canDeleteApps bool
-	canUpdateApps bool
+	isAdmin            bool
+	canAdminister      bool
+	canCreateApps      bool
+	canDeleteApps      bool
+	canUpdateApps      bool
+	canCreateResources bool
+	canDeleteResources bool
 }
 
 // administerPermission is the representative action the Administration area
@@ -160,15 +162,23 @@ func (a *authHandler) impersonatingClient(session dashboardSession) (client.Clie
 // answer always reflects the cluster's RBAC rather than any rule in this app.
 func (a *authHandler) capabilities(ctx context.Context, session dashboardSession, impersonated client.Client) dashboardCapabilities {
 	if session.authMethod == authMethodLocal || impersonated == nil {
-		return dashboardCapabilities{isAdmin: true, canAdminister: true, canCreateApps: true, canDeleteApps: true, canUpdateApps: true}
+		return dashboardCapabilities{
+			isAdmin:            true,
+			canAdminister:      true,
+			canCreateApps:      true,
+			canDeleteApps:      true,
+			canUpdateApps:      true,
+			canCreateResources: true,
+			canDeleteResources: true,
+		}
 	}
 	namespaces := teamsFromContext(ctx)
 	if len(namespaces) == 0 {
 		namespaces = []string{a.namespace}
 	}
-	allowed := func(verb string) bool {
+	allowed := func(resource, verb string) bool {
 		for _, namespace := range namespaces {
-			attributes := authorizationv1.ResourceAttributes{Namespace: namespace, Group: platformAPIGroup, Resource: resourceApplications, Verb: verb}
+			attributes := authorizationv1.ResourceAttributes{Namespace: namespace, Group: platformAPIGroup, Resource: resource, Verb: verb}
 			if selfSubjectAccessAllowed(ctx, impersonated, attributes) {
 				return true
 			}
@@ -177,11 +187,13 @@ func (a *authHandler) capabilities(ctx context.Context, session dashboardSession
 	}
 	clusters := authorizationv1.ResourceAttributes{Group: platformAPIGroup, Resource: resourceClusters, Verb: "patch"}
 	return dashboardCapabilities{
-		isAdmin:       selfSubjectAccessAllowed(ctx, impersonated, clusters),
-		canAdminister: selfSubjectAccessAllowed(ctx, impersonated, administerPermission),
-		canCreateApps: allowed("create"),
-		canDeleteApps: allowed("delete"),
-		canUpdateApps: allowed("update"),
+		isAdmin:            selfSubjectAccessAllowed(ctx, impersonated, clusters),
+		canAdminister:      selfSubjectAccessAllowed(ctx, impersonated, administerPermission),
+		canCreateApps:      allowed(resourceApplications, "create"),
+		canDeleteApps:      allowed(resourceApplications, "delete"),
+		canUpdateApps:      allowed(resourceApplications, "update"),
+		canCreateResources: allowed(resourceResources, "create"),
+		canDeleteResources: allowed(resourceResources, "delete"),
 	}
 }
 

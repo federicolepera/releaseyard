@@ -1,0 +1,82 @@
+{{- if .Values.rbac.helpers.enabled }}
+{{- $labels := dict "app.kubernetes.io/managed-by" .Release.Service "app.kubernetes.io/name" (include "idp.name" .) "helm.sh/chart" (printf "%s-%s" .Chart.Name (.Chart.Version | replace "+" "_")) "app.kubernetes.io/instance" .Release.Name }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    {{- toYaml $labels | nindent 4 }}
+  name: {{ include "idp.resourceName" (dict "suffix" "cloudtarget-viewer-role" "context" $) }}
+rules:
+  - apiGroups:
+      - platform.releaseyard.io
+    resources:
+      - cloudtargets
+    verbs:
+      - get
+      - list
+      - watch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    {{- toYaml $labels | nindent 4 }}
+  name: {{ include "idp.resourceName" (dict "suffix" "resourcedefinition-viewer-role" "context" $) }}
+rules:
+  - apiGroups:
+      - platform.releaseyard.io
+    resources:
+      - resourcedefinitions
+    verbs:
+      - get
+      - list
+      - watch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    {{- toYaml $labels | nindent 4 }}
+  name: {{ include "idp.resourceName" (dict "suffix" "resource-editor-role" "context" $) }}
+rules:
+  - apiGroups:
+      - platform.releaseyard.io
+    resources:
+      - resources
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+      - delete
+  - apiGroups:
+      - platform.releaseyard.io
+    resources:
+      - resources/status
+    verbs:
+      - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    {{- toYaml $labels | nindent 4 }}
+  name: {{ include "idp.resourceName" (dict "suffix" "resource-viewer-role" "context" $) }}
+rules:
+  - apiGroups:
+      - platform.releaseyard.io
+    resources:
+      - resources
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - platform.releaseyard.io
+    resources:
+      - resources/status
+    verbs:
+      - get
+{{- end }}

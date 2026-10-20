@@ -44,15 +44,29 @@ rules:
       - get
       - list
       - create
-  # Reading the catalog and clusters the panel lists.
+  # Reading the catalog, clusters and cloud catalog the panels list.
   - apiGroups:
       - platform.releaseyard.io
     resources:
       - clusters
       - applicationdefinitions
+      - cloudtargets
+      - resourcedefinitions
     verbs:
       - get
       - list
+  # Platform administrators can manage cloud resources from the dashboard.
+  - apiGroups:
+      - platform.releaseyard.io
+    resources:
+      - resources
+    verbs:
+      - get
+      - list
+      - create
+      - update
+      - patch
+      - delete
 {{- range .Values.dashboard.adminGroups }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1

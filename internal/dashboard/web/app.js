@@ -35,14 +35,17 @@
       try { localStorage.setItem('idp-sidebar', next ? 'collapsed' : 'open'); } catch (_) { /* Storage can be unavailable. */ }
     });
   }
-  const state = { definitions: [], applications: [], clusters: [], selectedApplication: null, selectedCluster: null, selectedInstanceUID: '', detailTab: 'overview', deleting: false, deletionPending: new Set(), editingValues: false, valuesDraft: Object.create(null), savingValues: false, definitionQuery: '', definitionSort: 'name', definitionType: '', destinationMode: 'cluster', preview: null, previewController: null, previewSequence: 0, previewLoading: false, savingEnvironment: false, creating: false, teams: [], team: '', resourcesQuery: '', resourcesKind: '', resourcesStatus: '', resourcesExpanded: new Set(), resourcesLive: null, resourcesLiveKey: '', selectedResourceUID: '', resourcePanelTab: 'overview', activityRange: '24h', activityType: '', activitySource: '', activityQuery: '' };
+  const state = { definitions: [], applications: [], clusters: [], selectedApplication: null, selectedCluster: null, selectedInstanceUID: '', detailTab: 'overview', deleting: false, deletionPending: new Set(), editingValues: false, valuesDraft: Object.create(null), savingValues: false, definitionQuery: '', definitionSort: 'name', definitionType: '', destinationMode: 'cluster', preview: null, previewController: null, previewSequence: 0, previewLoading: false, savingEnvironment: false, creating: false, teams: [], team: '', resourcesQuery: '', resourcesKind: '', resourcesStatus: '', resourcesExpanded: new Set(), resourcesLive: null, resourcesLiveKey: '', selectedResourceUID: '', resourcePanelTab: 'overview', activityRange: '24h', activityType: '', activitySource: '', activityQuery: '', cloudTargets: [], cloudDefinitions: [], cloudResources: [], selectedCloudResource: null, cloudCreating: false, cloudSaving: false, cloudDeleting: false, cloudResourcesError: '' };
   state.selectedDefinition = null;
   state.canCreateApps = false;
   state.canDeleteApps = false;
   state.canUpdateApps = false;
   state.canChangeClusterEnvironment = false;
+  state.canCreateResources = false;
+  state.canDeleteResources = false;
+  state.cloudProvisioning = false;
   const form = $('#create-form');
-  const notice = $('#notice') || $('#applications-notice') || $('#clusters-notice');
+  const notice = $('#notice') || $('#applications-notice') || $('#clusters-notice') || $('#cloud-notice');
   const safe = (value) => String(value ?? '—');
   const initials = (value) => {
     const parts = String(value ?? '').trim().split(/[\s._@-]+/).filter(Boolean);
@@ -80,6 +83,11 @@
         state.canDeleteApps = session.canDeleteApps === true;
         state.canUpdateApps = session.canUpdateApps === true;
         state.canChangeClusterEnvironment = session.isAdmin === true;
+        state.canCreateResources = session.canCreateResources === true;
+        state.canDeleteResources = session.canDeleteResources === true;
+        state.cloudProvisioning = session.cloudProvisioning === true;
+        const cloudNav = $('#cloud-nav');
+        if (cloudNav && state.cloudProvisioning) cloudNav.removeAttribute('hidden');
         if(form) updateSubmit()
         if (state.selectedApplication) renderApplicationDetail();
         if (state.selectedCluster) renderClusterDetail();
@@ -130,7 +138,10 @@
 
   async function getList(path) {
     const response = await apiFetch(path, { headers: { Accept: 'application/json' } });
-    if (!response.ok) throw new Error(`Request failed (${response.status})`);
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      throw new Error(body.error || `Request failed (${response.status})`);
+    }
     const data = await response.json();
     if (!data || !Array.isArray(data.items)) throw new Error('The server returned an invalid response');
     return data.items;
@@ -148,6 +159,7 @@
 
   function refreshForTeam() {
     if ($('#applications')) refreshApplications();
+    if ($('#cloud')) refreshCloud();
   }
 
   function element(tag, className, text) {
@@ -3174,6 +3186,444 @@
   const logoutButton = $('#auth-logout');
   if (logoutButton) logoutButton.addEventListener('click', signOutLocally);
 
+  function cloudResourceReady(resource) {
+    const status = condition(resource, 'Ready');
+    if (!status) return { label: 'Pending', tone: 'neutral' };
+    if (status.status === 'True') return { label: 'Available', tone: 'good' };
+    if (status.status === 'False') return { label: status.reason || 'Not ready', tone: 'muted' };
+    return { label: status.reason || 'Unknown', tone: 'neutral' };
+  }
+
+  function sortByName(items) {
+    return [...items].sort((a, b) => String(a.metadata?.name || '').localeCompare(String(b.metadata?.name || '')));
+  }
+
+  function cloudOption(label, value) {
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = label;
+    return option;
+  }
+
+  async function refreshCloud() {
+    const button = $('#refresh-cloud');
+    if (button) button.disabled = true;
+    const results = await Promise.allSettled([
+      getList('/api/cloudtargets'),
+      getList('/api/resourcedefinitions'),
+      getList(withTeam('/api/resources'))
+    ]);
+    const [targets, definitions, resources] = results;
+    if (targets.status === 'fulfilled') state.cloudTargets = sortByName(targets.value);
+    if (definitions.status === 'fulfilled') state.cloudDefinitions = sortByName(definitions.value);
+    if (resources.status === 'fulfilled') {
+      state.cloudResources = sortByName(resources.value);
+      state.cloudResourcesError = '';
+    } else {
+      state.cloudResourcesError = resources.reason?.message || 'Cloud resources are unavailable for your account.';
+    }
+    if (state.selectedCloudResource) {
+      const latest = state.cloudResources.find((item) => item.metadata?.uid === state.selectedCloudResource.metadata?.uid || item.metadata?.name === state.selectedCloudResource.metadata?.name);
+      state.selectedCloudResource = latest || null;
+      if (!latest) { $('#cloud-detail').hidden = true; $('#cloud-list-view').hidden = false; }
+    }
+    renderCloud();
+    const failure = results.find((result) => result.status === 'rejected');
+    if (failure) showNotice(failure.reason?.message || 'Could not load cloud data. Try again.', 'error');
+    else notice.hidden = true;
+    if (button) button.disabled = false;
+    return !failure;
+  }
+
+  function renderCloud() {
+    const resources = $('#cloud-resources');
+    if (!resources) return;
+    resources.replaceChildren();
+    $('#cloud-resource-count').textContent = String(state.cloudResources.length);
+    if (!state.cloudResources.length) {
+      resources.append(element('p', 'empty', state.cloudResourcesError || 'No cloud resources yet.'));
+    } else {
+      const list = element('div', 'resource-list');
+      state.cloudResources.forEach((resource) => {
+        const row = element('article', 'resource-row');
+        const details = element('div', 'resource-main');
+        const name = resource.metadata?.name || 'Unnamed resource';
+        const open = element('button', 'application-link', name);
+        open.type = 'button';
+        open.setAttribute('aria-label', `Open cloud resource ${name} details`);
+        open.addEventListener('click', () => openCloudResource(resource));
+        const heading = element('h3', 'resource-name');
+        heading.append(open);
+        details.append(heading);
+        const definition = resource.spec?.definitionRef?.name || 'Definition not specified';
+        const target = resource.spec?.targetRef?.name || 'Target not specified';
+        details.append(element('p', 'resource-meta', `${definition} · ${target} · ${resource.metadata?.namespace || '—'}`));
+        const outputs = Object.keys(resource.status?.outputs || {});
+        if (outputs.length) details.append(element('p', 'resource-meta', `${outputs.length} output${outputs.length === 1 ? '' : 's'}`));
+        const ready = cloudResourceReady(resource);
+        const side = element('div', 'resource-side');
+        side.append(badge(ready.label, ready.tone));
+        row.append(details, side);
+        list.append(row);
+      });
+      resources.append(list);
+    }
+    renderCloudDefinitions();
+    renderCloudTargets();
+    renderCloudCreateOptions();
+    if (state.selectedCloudResource) renderCloudResourceDetail();
+  }
+
+  function renderCloudDefinitions() {
+    const root = $('#cloud-definitions');
+    if (!root) return;
+    root.replaceChildren();
+    $('#cloud-definition-count').textContent = String(state.cloudDefinitions.length);
+    if (!state.cloudDefinitions.length) {
+      root.append(element('p', 'empty', 'No resource definitions available.'));
+      return;
+    }
+    const list = element('div', 'resource-list');
+    state.cloudDefinitions.forEach((definition) => {
+      const row = element('article', 'resource-row');
+      const details = element('div', 'resource-main');
+      details.append(element('h3', 'resource-name', definition.metadata?.name || 'Unnamed definition'));
+      if (definition.spec?.description) details.append(element('p', 'resource-meta', definition.spec.description));
+      const values = Array.isArray(definition.spec?.configurableValues) ? definition.spec.configurableValues : [];
+      const summary = values.length ? values.map((value) => `${value.path} (${value.type}${value.required ? ', required' : ''})`).join(' · ') : 'No configurable values';
+      details.append(element('p', 'resource-meta', summary));
+      row.append(details);
+      list.append(row);
+    });
+    root.append(list);
+  }
+
+  function renderCloudTargets() {
+    const root = $('#cloud-targets');
+    if (!root) return;
+    root.replaceChildren();
+    $('#cloud-target-count').textContent = String(state.cloudTargets.length);
+    if (!state.cloudTargets.length) {
+      root.append(element('p', 'empty', 'No cloud targets available.'));
+      return;
+    }
+    const list = element('div', 'resource-list');
+    state.cloudTargets.forEach((target) => {
+      const row = element('article', 'resource-row');
+      const details = element('div', 'resource-main');
+      details.append(element('h3', 'resource-name', target.metadata?.name || 'Unnamed target'));
+      const providerConfig = target.spec?.providerConfigRef;
+      const reference = providerConfig?.name ? `${providerConfig.namespace ? `${providerConfig.namespace}/` : ''}${providerConfig.name}` : '';
+      details.append(element('p', 'resource-meta', `${target.spec?.provider || '—'} · ${target.spec?.region || '—'}${reference ? ` · ${reference}` : ''}`));
+      row.append(details);
+      list.append(row);
+    });
+    root.append(list);
+  }
+
+  function renderCloudCreateOptions() {
+    const definitionSelect = $('#cloud-definition');
+    const targetSelect = $('#cloud-target');
+    if (!definitionSelect || !targetSelect) return;
+    const currentDefinition = definitionSelect.value;
+    const currentTarget = targetSelect.value;
+    definitionSelect.replaceChildren(cloudOption('Select a definition', ''), ...state.cloudDefinitions.map((definition) => cloudOption(definition.metadata?.name || 'Unnamed definition', definition.metadata?.name || '')));
+    targetSelect.replaceChildren(cloudOption('Select a target', ''), ...state.cloudTargets.map((target) => cloudOption(target.metadata?.name || 'Unnamed target', target.metadata?.name || '')));
+    if (state.cloudDefinitions.some((definition) => definition.metadata?.name === currentDefinition)) definitionSelect.value = currentDefinition;
+    if (state.cloudTargets.some((target) => target.metadata?.name === currentTarget)) targetSelect.value = currentTarget;
+    updateCloudSubmit();
+  }
+
+  function selectedCloudDefinition() {
+    const select = $('#cloud-definition');
+    if (!select) return null;
+    return state.cloudDefinitions.find((definition) => definition.metadata?.name === select.value) || null;
+  }
+
+  function renderCloudValueFields() {
+    const root = $('#cloud-dynamic-fields');
+    const fields = $('#cloud-values-fields');
+    if (!root || !fields) return;
+    root.replaceChildren();
+    const definition = selectedCloudDefinition();
+    const values = definition && Array.isArray(definition.spec?.configurableValues) ? definition.spec.configurableValues : [];
+    fields.hidden = values.length === 0;
+    values.forEach((config) => {
+      const label = element('label', 'field');
+      label.append(element('span', '', config.path));
+      let input;
+      if (config.type === 'boolean') {
+        input = document.createElement('select');
+        input.append(cloudOption('Not set', ''), cloudOption('True', 'true'), cloudOption('False', 'false'));
+      } else {
+        input = document.createElement('input');
+        input.type = config.type === 'integer' ? 'number' : 'text';
+        if (config.type === 'integer') {
+          input.step = '1';
+          if (config.minimum !== undefined) input.min = String(config.minimum);
+          if (config.maximum !== undefined) input.max = String(config.maximum);
+        }
+        input.autocomplete = 'off';
+      }
+      input.dataset.path = config.path;
+      input.dataset.type = config.type || 'string';
+      input.dataset.required = config.required === true ? 'true' : 'false';
+      if (config.required === true) input.required = true;
+      input.id = `cloud-value-${config.path.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
+      input.addEventListener('input', updateCloudSubmit);
+      input.addEventListener('change', updateCloudSubmit);
+      label.append(input);
+      if (config.required) label.append(element('small', '', 'Required'));
+      else if (config.minimum !== undefined || config.maximum !== undefined) label.append(element('small', '', `Range: ${config.minimum ?? 'no minimum'} – ${config.maximum ?? 'no maximum'}`));
+      root.append(label);
+    });
+    updateCloudSubmit();
+  }
+
+  function updateCloudSubmit() {
+    const submit = $('#cloud-submit');
+    const name = $('#cloud-name');
+    const hint = $('#cloud-form-hint');
+    if (!submit || !name || !hint) return;
+    const definition = $('#cloud-definition')?.value || '';
+    const target = $('#cloud-target')?.value || '';
+    if (!state.canCreateResources) hint.textContent = 'You do not have permission to create cloud resources.';
+    else if (!definition || !target) hint.textContent = 'Choose a definition and a target to get started.';
+    else hint.textContent = 'Only values declared by the definition are sent.';
+    submit.disabled = !state.canCreateResources || state.cloudSaving || !name.value.trim() || !name.checkValidity() || !definition || !target;
+  }
+
+  function openCloudCreate() {
+    if (!state.canCreateResources) {
+      showNotice('You do not have permission to create cloud resources.', 'error');
+      return;
+    }
+    state.cloudCreating = true;
+    $('#cloud-list-view').hidden = true;
+    $('#cloud-create-view').hidden = false;
+    $('#cloud-name').value = '';
+    $('#cloud-definition').value = '';
+    $('#cloud-target').value = '';
+    $('#cloud-dynamic-fields').replaceChildren();
+    $('#cloud-values-fields').hidden = true;
+    updateCloudSubmit();
+    $('#cloud-name').focus();
+  }
+
+  function closeCloudCreate() {
+    state.cloudCreating = false;
+    $('#cloud-create-view').hidden = true;
+    $('#cloud-list-view').hidden = false;
+    if (state.selectedCloudResource) renderCloudResourceDetail();
+  }
+
+  function setNestedValue(target, path, value) {
+    const parts = String(path).split('.');
+    let cursor = target;
+    parts.forEach((part, index) => {
+      if (index === parts.length - 1) {
+        cursor[part] = value;
+        return;
+      }
+      if (!cursor[part] || typeof cursor[part] !== 'object') cursor[part] = {};
+      cursor = cursor[part];
+    });
+  }
+
+  async function submitCloudResource(event) {
+    event.preventDefault();
+    if (state.cloudSaving) return;
+    const form = $('#cloud-create-form');
+    if (!form.reportValidity()) return;
+    const values = Object.create(null);
+    for (const input of $('#cloud-dynamic-fields').querySelectorAll('[data-path]')) {
+      if (input.value === '') {
+        if (input.dataset.required === 'true') {
+          input.focus();
+          showNotice(`Enter a value for “${input.dataset.path}”.`, 'error');
+          return;
+        }
+        continue;
+      }
+      let value = input.value;
+      if (input.dataset.type === 'boolean') value = value === 'true';
+      else if (input.dataset.type === 'integer') {
+        if (!/^-?\d+$/.test(value) || !Number.isSafeInteger(Number(value))) {
+          input.setCustomValidity('Enter a valid whole number.');
+          input.reportValidity();
+          showNotice(`“${input.dataset.path}” must be a valid whole number.`, 'error');
+          return;
+        }
+        input.setCustomValidity('');
+        value = Number(value);
+      }
+      setNestedValue(values, input.dataset.path, value);
+    }
+    const payload = { name: $('#cloud-name').value.trim(), definitionName: $('#cloud-definition').value, targetName: $('#cloud-target').value, values };
+    if (state.team) payload.namespace = state.team;
+    state.cloudSaving = true;
+    const button = $('#cloud-submit');
+    button.disabled = true;
+    button.textContent = 'Creating…';
+    try {
+      const response = await apiFetch('/api/resources', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.error || `Creation failed (${response.status})`);
+      const createdName = body.metadata?.name || payload.name;
+      closeCloudCreate();
+      await refreshCloud();
+      showNotice(`Cloud resource “${createdName}” created.`, 'success');
+    } catch (error) {
+      showNotice(error.message || 'An error occurred while creating the cloud resource.', 'error');
+    } finally {
+      state.cloudSaving = false;
+      button.disabled = false;
+      button.textContent = 'Create resource';
+      updateCloudSubmit();
+    }
+  }
+
+  function openCloudResource(resource) {
+    state.selectedCloudResource = resource;
+    $('#cloud-list-view').hidden = true;
+    $('#cloud-create-view').hidden = true;
+    renderCloudResourceDetail();
+    $('#cloud-detail .back-button')?.focus();
+  }
+
+  function closeCloudResource() {
+    const name = state.selectedCloudResource?.metadata?.name;
+    state.selectedCloudResource = null;
+    $('#cloud-detail').hidden = true;
+    $('#cloud-list-view').hidden = false;
+    const links = [...document.querySelectorAll('#cloud-resources .application-link')];
+    (links.find((item) => item.textContent === name) || links[0] || $('#refresh-cloud'))?.focus();
+  }
+
+  function renderCloudResourceDetail() {
+    const resource = state.selectedCloudResource;
+    if (!resource) return;
+    const root = $('#cloud-detail');
+    root.replaceChildren();
+    root.hidden = false;
+    const back = element('button', 'back-button', '← Back to cloud resources');
+    back.type = 'button';
+    back.addEventListener('click', closeCloudResource);
+    root.append(back, element('p', 'eyebrow', 'Cloud resource'));
+    const title = element('h2', '', safe(resource.metadata?.name));
+    title.id = 'cloud-detail-title';
+    root.append(title);
+    const ready = cloudResourceReady(resource);
+    const summary = element('div', 'cluster-summary');
+    summary.append(element('span', 'cluster-summary-label', 'Status'), badge(ready.label, ready.tone));
+    if (resource.metadata?.namespace) summary.append(element('span', 'cluster-summary-label', `Namespace: ${resource.metadata.namespace}`));
+    root.append(summary);
+    root.append(element('p', 'resource-meta', `${resource.spec?.definitionRef?.name || '—'} · ${resource.spec?.targetRef?.name || '—'}`));
+
+    root.append(element('h3', 'values-title', 'Values'));
+    const values = resource.spec?.values;
+    root.append(element('pre', 'res-yaml', values ? JSON.stringify(values, null, 2) : 'No values.'));
+
+    const conditions = Array.isArray(resource.status?.conditions) ? resource.status.conditions : [];
+    root.append(element('h3', 'values-title', 'Conditions'));
+    if (!conditions.length) root.append(element('p', 'empty', 'No conditions reported yet.'));
+    else {
+      const list = element('ul', 'cluster-node-list');
+      conditions.forEach((item) => {
+        const row = element('li', 'cluster-node');
+        row.append(element('span', 'cluster-node-name', `${item.type}: ${item.status}`));
+        if (item.reason) row.append(badge(item.reason, item.status === 'True' ? 'good' : item.status === 'False' ? 'muted' : 'neutral'));
+        if (item.message) row.append(element('span', 'resource-meta', item.message));
+        list.append(row);
+      });
+      root.append(list);
+    }
+
+    const outputs = Object.entries(resource.status?.outputs || {});
+    root.append(element('h3', 'values-title', 'Outputs'));
+    if (!outputs.length) root.append(element('p', 'empty', 'No outputs reported yet.'));
+    else {
+      const list = element('ul', 'cluster-node-list');
+      outputs.forEach(([key, value]) => {
+        const row = element('li', 'cluster-node');
+        row.append(element('span', 'cluster-node-name', key), element('code', '', String(value)));
+        list.append(row);
+      });
+      root.append(list);
+    }
+
+    const composed = Array.isArray(resource.status?.composed) ? resource.status.composed : [];
+    root.append(element('h3', 'values-title', 'Composed resources'));
+    if (!composed.length) root.append(element('p', 'empty', 'No managed resources reported yet.'));
+    else {
+      const list = element('ul', 'cluster-node-list');
+      composed.forEach((item) => {
+        const row = element('li', 'cluster-node');
+        row.append(element('span', 'cluster-node-name', `${item.kind}/${item.name}`), element('span', 'resource-meta', item.namespace || '—'));
+        list.append(row);
+      });
+      root.append(list);
+    }
+
+    if (state.canDeleteResources) {
+      const actions = element('div', 'form-actions');
+      const remove = element('button', 'button button-secondary', state.cloudDeleting ? 'Deleting…' : 'Delete resource');
+      remove.type = 'button';
+      remove.disabled = state.cloudDeleting;
+      remove.addEventListener('click', async () => {
+        if (state.cloudDeleting) return;
+        if (!window.confirm(`Delete cloud resource “${resource.metadata?.name}”? The composed cloud objects will be deleted too.`)) return;
+        state.cloudDeleting = true;
+        remove.disabled = true;
+        remove.textContent = 'Deleting…';
+        try {
+          const response = await apiFetch(`/api/resources/${encodeURIComponent(resource.metadata.name)}`, { method: 'DELETE' });
+          if (!response.ok) {
+            const body = await response.json().catch(() => ({}));
+            throw new Error(body.error || `Delete failed (${response.status})`);
+          }
+          state.selectedCloudResource = null;
+          $('#cloud-detail').hidden = true;
+          $('#cloud-list-view').hidden = false;
+          await refreshCloud();
+          showNotice(`Cloud resource “${resource.metadata.name}” deleted.`, 'success');
+        } catch (error) {
+          showNotice(error.message || 'Could not delete the cloud resource.', 'error');
+        } finally {
+          state.cloudDeleting = false;
+          remove.disabled = false;
+          remove.textContent = 'Delete resource';
+          renderCloudResourceDetail();
+        }
+      });
+      actions.append(element('p', 'helper', 'Deleting the request cascades to the cloud objects it owns.'), remove);
+      root.append(actions);
+    }
+  }
+
+  async function initCloud() {
+    const create = $('#new-cloud-resource');
+    $('#refresh-cloud').addEventListener('click', refreshCloud);
+    create.addEventListener('click', openCloudCreate);
+    $('#cancel-cloud-create').addEventListener('click', closeCloudCreate);
+    $('#cloud-name').addEventListener('input', updateCloudSubmit);
+    $('#cloud-definition').addEventListener('change', () => { renderCloudValueFields(); updateCloudSubmit(); });
+    $('#cloud-target').addEventListener('change', updateCloudSubmit);
+    $('#cloud-create-form').addEventListener('submit', submitCloudResource);
+    await refreshCloud();
+    if (!state.cloudProvisioning) {
+      $('#cloud-no-crossplane').hidden = false;
+      create.disabled = true;
+      create.title = 'Crossplane is not installed';
+    } else if (!state.canCreateResources) {
+      create.disabled = true;
+      create.title = 'You do not have permission to create cloud resources';
+    }
+  }
+
   if (form) {
   $('#back-to-catalog').addEventListener('click', showCatalog);
   $('#cluster').addEventListener('change', updateSubmit);
@@ -3274,6 +3724,8 @@
   } else if ($('#clusters')) {
     $('#refresh-clusters').addEventListener('click', refreshClusterPage);
     refreshClusterPage();
+  } else if ($('#cloud')) {
+    initCloud();
   } else if ($('#identity-provider-form')) {
     initIdentityProviderAdmin();
   }
