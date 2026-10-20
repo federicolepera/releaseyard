@@ -35,7 +35,7 @@
       try { localStorage.setItem('idp-sidebar', next ? 'collapsed' : 'open'); } catch (_) { /* Storage can be unavailable. */ }
     });
   }
-  const state = { definitions: [], applications: [], clusters: [], selectedApplication: null, selectedCluster: null, selectedInstanceUID: '', detailTab: 'overview', deleting: false, deletionPending: new Set(), editingValues: false, valuesDraft: Object.create(null), savingValues: false, definitionQuery: '', definitionSort: 'name', definitionType: '', destinationMode: 'cluster', preview: null, previewController: null, previewSequence: 0, previewLoading: false, savingEnvironment: false, creating: false, teams: [], team: '', resourcesQuery: '', resourcesKind: '', resourcesStatus: '', resourcesExpanded: new Set(), resourcesLive: null, resourcesLiveKey: '', selectedResourceUID: '', resourcePanelTab: 'overview', activityRange: '24h', activityType: '', activitySource: '', activityQuery: '', cloudTargets: [], cloudDefinitions: [], cloudResources: [], selectedCloudResource: null, cloudCreating: false, cloudSaving: false, cloudDeleting: false, cloudResourcesError: '', cloudSearch: '', cloudStatusFilter: '', cloudTargetFilter: '', cloudDefinitionFilter: '', cloudSort: { key: 'name', direction: 'asc' }, cloudDefinitionsExpanded: false, cloudTargetsExpanded: false, cloudActivityExpanded: false };
+  const state = { definitions: [], applications: [], clusters: [], selectedApplication: null, selectedCluster: null, selectedInstanceUID: '', detailTab: 'overview', deleting: false, deletionPending: new Set(), editingValues: false, valuesDraft: Object.create(null), savingValues: false, definitionQuery: '', definitionSort: 'name', definitionType: '', definitionView: 'grid', destinationMode: 'cluster', preview: null, previewController: null, previewSequence: 0, previewLoading: false, savingEnvironment: false, creating: false, teams: [], team: '', resourcesQuery: '', resourcesKind: '', resourcesStatus: '', resourcesExpanded: new Set(), resourcesLive: null, resourcesLiveKey: '', selectedResourceUID: '', resourcePanelTab: 'overview', activityRange: '24h', activityType: '', activitySource: '', activityQuery: '', cloudTargets: [], cloudDefinitions: [], cloudResources: [], selectedCloudResource: null, cloudCreating: false, cloudSaving: false, cloudDeleting: false, cloudResourcesError: '', cloudSearch: '', cloudStatusFilter: '', cloudTargetFilter: '', cloudDefinitionFilter: '', cloudSort: { key: 'name', direction: 'asc' }, cloudDefinitionsExpanded: false, cloudTargetsExpanded: false, cloudActivityExpanded: false };
   state.selectedDefinition = null;
   state.canCreateApps = false;
   state.canDeleteApps = false;
@@ -2334,19 +2334,84 @@
     return searchable.includes(query.trim().toLocaleLowerCase('en')) && (!typeFilter || type === typeFilter);
   }
 
+  function definitionTypeTone(type) {
+    const value = `${type || ''} ${definitionTypeLabel(type)}`.toLocaleLowerCase('en');
+    if (/front/.test(value)) return 'blue';
+    if (/back|api/.test(value)) return 'purple';
+    if (/data|sql|postgres|redis|mongo/.test(value)) return 'orange';
+    if (/infra|gateway|network|proxy/.test(value)) return 'blue';
+    if (/security|auth|keycloak|identity/.test(value)) return 'red';
+    if (/monitor|observ|prometheus|grafana/.test(value)) return 'amber';
+    if (/ci|cd|runner|argo|gitops|deploy/.test(value)) return 'purple';
+    return 'neutral';
+  }
+
+  function definitionConfigIcon() {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 20 20');
+    svg.setAttribute('aria-hidden', 'true');
+    svg.setAttribute('class', 'card-config-icon');
+    const line = (d) => { const path = document.createElementNS('http://www.w3.org/2000/svg', 'path'); path.setAttribute('d', d); svg.append(path); };
+    line('M3 6h14M3 14h14');
+    [ [8, 6], [13, 14] ].forEach(([cx, cy]) => {
+      const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      circle.setAttribute('cx', String(cx)); circle.setAttribute('cy', String(cy)); circle.setAttribute('r', '2.1');
+      svg.append(circle);
+    });
+    return svg;
+  }
+
+  function renderDefinitionChips(types) {
+    const root = $('#definition-chips');
+    if (!root) return;
+    root.replaceChildren();
+    const all = element('button', 'catalog-chip', 'All templates');
+    all.type = 'button';
+    all.setAttribute('aria-pressed', String(!state.definitionType));
+    all.addEventListener('click', () => selectDefinitionType(''));
+    root.append(all);
+    types.forEach((type) => {
+      const chip = element('button', 'catalog-chip', definitionTypeLabel(type));
+      chip.type = 'button';
+      chip.setAttribute('aria-pressed', String(state.definitionType === type));
+      chip.addEventListener('click', () => selectDefinitionType(type));
+      root.append(chip);
+    });
+  }
+
+  function selectDefinitionType(type) {
+    state.definitionType = type || '';
+    renderDefinitions();
+  }
+
   function renderDefinitionTypeFilter() {
     const select = $('#definition-type');
+    const category = $('#definition-category');
     if (!select) return;
     const types = [...new Set(state.definitions.map(definitionType))]
       .sort((a, b) => definitionTypeLabel(a).localeCompare(definitionTypeLabel(b), 'en', { sensitivity: 'base' }) || a.localeCompare(b, 'en'));
     if (state.definitionType && !types.includes(state.definitionType)) state.definitionType = '';
     select.replaceChildren(new Option('All types', ''));
+    if (category) category.replaceChildren(new Option('All categories', ''));
     types.forEach((type) => {
       const option = new Option(definitionTypeLabel(type), type);
       if (type !== UNCATEGORIZED_TYPE) option.title = type;
       select.add(option);
+      if (category) category.add(new Option(definitionTypeLabel(type), type));
     });
     select.value = state.definitionType;
+    if (category) category.value = state.definitionType;
+    renderDefinitionChips(types);
+  }
+
+  function setDefinitionView(view) {
+    state.definitionView = view === 'list' ? 'list' : 'grid';
+    const grid = $('#view-grid');
+    const list = $('#view-list');
+    if (grid) grid.setAttribute('aria-pressed', String(state.definitionView === 'grid'));
+    if (list) list.setAttribute('aria-pressed', String(state.definitionView === 'list'));
+    const root = $('#definitions');
+    if (root) root.classList.toggle('list-view', state.definitionView === 'list');
   }
 
   function renderDefinitions() {
@@ -2358,33 +2423,39 @@
       const valueB = state.definitionSort === 'chart' ? [chartB.name, chartB.version].filter(Boolean).join(' ') : b.metadata?.name || '';
       return valueA.localeCompare(valueB, 'en', { sensitivity: 'base' });
     });
-    $('#definition-count').textContent = String(definitions.length);
+    $('#definition-count').textContent = `${definitions.length} ${definitions.length === 1 ? 'template' : 'templates'}`;
     const root = $('#definitions');
+    root.classList.toggle('list-view', state.definitionView === 'list');
     root.replaceChildren();
-    if (!state.definitions.length) root.append(element('p', 'empty', 'No Application Definitions available.'));
-    else if (!definitions.length) root.append(element('p', 'empty no-results', 'No definitions match these filters.'));
+    if (!state.definitions.length) root.append(element('p', 'empty', 'No application templates available.'));
+    else if (!definitions.length) root.append(element('p', 'empty no-results', 'No templates match these filters.'));
     else {
       definitions.forEach((def) => {
         const readiness = definitionReadiness(def);
         const card = element('button', `definition-card${readiness.ready ? '' : ' unavailable'}`);
         card.type = 'button';
         card.disabled = !readiness.ready;
-        const main = element('span', 'card-main');
         const type = definitionType(def);
+        const chart = def.spec?.chart || {};
+        const configs = Array.isArray(def.spec?.configurableValues) ? def.spec.configurableValues : [];
+        const required = configs.filter((item) => item.required).length;
+        const head = element('span', 'card-head');
         const icon = element('span', 'card-icon'); icon.setAttribute('aria-hidden', 'true');
         const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); svg.setAttribute('viewBox', '0 0 40 40');
         const cube = document.createElementNS('http://www.w3.org/2000/svg', 'path'); cube.setAttribute('d', 'M20 4 35 12.5v15L20 36 5 27.5v-15L20 4Zm0 0v16m15-7.5-15 8-15-8m15 8v15'); svg.append(cube); icon.append(svg);
-        main.append(icon, element('span', 'card-type', definitionTypeLabel(type)));
-        main.append(element('span', 'card-name', safe(def.metadata?.name)));
-        const chart = def.spec?.chart || {};
-        main.append(element('span', 'card-chart', [chart.name, chart.version].filter(Boolean).join(' · ') || 'Chart details unavailable'));
-        const configs = Array.isArray(def.spec?.configurableValues) ? def.spec.configurableValues : [];
-        const required = configs.filter((item) => item.required).length;
-        main.append(element('span', 'card-config', `${configs.length} configurable ${configs.length === 1 ? 'value' : 'values'} · ${required} required`));
+        head.append(icon, element('span', 'card-name', safe(def.metadata?.name)), element('span', `card-type tone-${definitionTypeTone(type)}`, definitionTypeLabel(type)));
+        const description = def.spec?.description || 'No description provided.';
+        const desc = element('span', 'card-desc', safe(description));
+        const config = element('span', 'card-config');
+        config.append(definitionConfigIcon(), element('span', '', `${configs.length} configurable ${configs.length === 1 ? 'value' : 'values'} · ${required} required`));
+        const version = chart.version ? (String(chart.version).startsWith('v') ? String(chart.version) : `v${chart.version}`) : '—';
         const footer = element('span', 'card-footer');
-        footer.append(badge(readiness.ready ? 'Validated' : readiness.reason, readiness.ready ? 'good' : 'muted'), element('span', 'card-arrow', '↗'));
-        card.append(main, footer);
-        card.setAttribute('aria-label', readiness.ready ? `Open ${safe(def.metadata?.name)}, ${definitionTypeLabel(type)}, ${safe(chart.name)} ${safe(chart.version)}, ${configs.length} configurable values` : `${safe(def.metadata?.name)}, ${definitionTypeLabel(type)}, unavailable: ${readiness.reason}`);
+        footer.append(element('span', 'card-version', version));
+        const status = element('span', 'card-status');
+        status.append(badge(readiness.ready ? 'Validated' : readiness.reason, readiness.ready ? 'good' : 'muted'), element('span', 'card-arrow', '↗'));
+        footer.append(status);
+        card.append(head, desc, config, footer);
+        card.setAttribute('aria-label', readiness.ready ? `Open ${safe(def.metadata?.name)}, ${definitionTypeLabel(type)}, ${safe(chart.name)} ${version}, ${configs.length} configurable values` : `${safe(def.metadata?.name)}, ${definitionTypeLabel(type)}, unavailable: ${readiness.reason}`);
         card.dataset.definitionName = def.metadata?.name || '';
         card.addEventListener('click', () => openDefinition(def));
         root.append(card);
@@ -3922,7 +3993,11 @@
   $('#refresh-create').addEventListener('click', refreshCatalog);
   $('#definition-search').addEventListener('input', (event) => { state.definitionQuery = event.currentTarget.value; renderDefinitions(); });
   $('#definition-type').addEventListener('change', (event) => { state.definitionType = event.currentTarget.value; renderDefinitions(); });
+  $('#definition-category').addEventListener('change', (event) => { state.definitionType = event.currentTarget.value; renderDefinitions(); });
   $('#definition-sort').addEventListener('change', (event) => { state.definitionSort = event.currentTarget.value; renderDefinitions(); });
+  $('#view-grid').addEventListener('click', () => setDefinitionView('grid'));
+  $('#view-list').addEventListener('click', () => setDefinitionView('list'));
+  setDefinitionView(state.definitionView);
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
     if (state.creating) return;
