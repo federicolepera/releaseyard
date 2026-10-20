@@ -15,7 +15,9 @@ rules:
   - platform.releaseyard.io
   resources:
   - applicationdefinitions
+  - cloudtargets
   - clusters
+  - resourcedefinitions
   verbs:
   - get
   - list
@@ -51,3 +53,15 @@ rules:
   - resources/finalizers
   verbs:
   - update
+- apiGroups:
+  - s3.aws.m.upbound.io
+  resources:
+  - buckets
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch

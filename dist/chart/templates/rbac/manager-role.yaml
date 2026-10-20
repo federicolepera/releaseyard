@@ -11,10 +11,19 @@ metadata:
   name: {{ include "idp.resourceName" (dict "suffix" "manager-role" "context" $) }}
 rules:
 - apiGroups:
+  - ""
+  resources:
+  - events
+  verbs:
+  - create
+  - patch
+- apiGroups:
   - platform.releaseyard.io
   resources:
   - applicationdefinitions
+  - cloudtargets
   - clusters
+  - resourcedefinitions
   verbs:
   - get
   - list
@@ -25,6 +34,7 @@ rules:
   - applicationdefinitions/status
   - applications/status
   - clusters/status
+  - resources/status
   verbs:
   - get
   - patch
@@ -33,6 +43,7 @@ rules:
   - platform.releaseyard.io
   resources:
   - applications
+  - resources
   verbs:
   - create
   - delete
@@ -45,12 +56,18 @@ rules:
   - platform.releaseyard.io
   resources:
   - applications/finalizers
+  - resources/finalizers
   verbs:
   - update
 - apiGroups:
-  - ""
+  - s3.aws.m.upbound.io
   resources:
-  - events
+  - buckets
   verbs:
   - create
+  - delete
+  - get
+  - list
   - patch
+  - update
+  - watch

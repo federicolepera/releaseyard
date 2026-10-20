@@ -36,6 +36,9 @@ type ResourceReconciler struct {
 // +kubebuilder:rbac:groups=platform.releaseyard.io,resources=resources,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=platform.releaseyard.io,resources=resources/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=platform.releaseyard.io,resources=resources/finalizers,verbs=update
+// +kubebuilder:rbac:groups=platform.releaseyard.io,resources=resourcedefinitions,verbs=get;list;watch
+// +kubebuilder:rbac:groups=platform.releaseyard.io,resources=cloudtargets,verbs=get;list;watch
+// +kubebuilder:rbac:groups=s3.aws.m.upbound.io,resources=buckets,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
