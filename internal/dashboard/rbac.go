@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"time"
 
 	authorizationv1 "k8s.io/api/authorization/v1"
 	"k8s.io/apimachinery/pkg/util/validation"
@@ -61,9 +62,9 @@ func teamsFromContext(ctx context.Context) []string {
 // management namespace instead and gets no teams. For OIDC sessions a candidate
 // namespace is the configured prefix plus a group the user belongs to, kept
 // only when the management cluster RBAC lets the user list Applications there.
-func (a *authHandler) teamNamespacesForSession(ctx context.Context, session dashboardSession, impersonated client.Client) []string {
+func (a *authHandler) teamNamespacesForSession(ctx context.Context, session dashboardSession, impersonated client.Client) ([]string, error) {
 	if session.authMethod != authMethodOIDC || impersonated == nil {
-		return nil
+		return nil, nil
 	}
 	seen := make(map[string]struct{}, len(session.groups))
 	teams := make([]string, 0, len(session.groups))
@@ -76,13 +77,17 @@ func (a *authHandler) teamNamespacesForSession(ctx context.Context, session dash
 			continue
 		}
 		attributes := authorizationv1.ResourceAttributes{Namespace: namespace, Group: platformAPIGroup, Resource: resourceApplications, Verb: "list"}
-		if selfSubjectAccessAllowed(ctx, impersonated, attributes) {
+		allowed, err := selfSubjectAccessAllowedWithError(ctx, impersonated, attributes)
+		if err != nil {
+			return nil, err
+		}
+		if allowed {
 			seen[namespace] = struct{}{}
 			teams = append(teams, namespace)
 		}
 	}
 	slices.Sort(teams)
-	return teams
+	return teams, nil
 }
 
 // namespaceForGroup builds a namespace name from the configured prefix and an
@@ -160,49 +165,160 @@ func (a *authHandler) impersonatingClient(session dashboardSession) (client.Clie
 // capabilities reports what the session may do. It asks the management cluster
 // with a SelfSubjectAccessReview performed as the impersonated user, so the
 // answer always reflects the cluster's RBAC rather than any rule in this app.
-func (a *authHandler) capabilities(ctx context.Context, session dashboardSession, impersonated client.Client) dashboardCapabilities {
+func fullCapabilities() dashboardCapabilities {
+	return dashboardCapabilities{
+		isAdmin:            true,
+		canAdminister:      true,
+		canCreateApps:      true,
+		canDeleteApps:      true,
+		canUpdateApps:      true,
+		canCreateResources: true,
+		canDeleteResources: true,
+	}
+}
+
+func (a *authHandler) capabilities(ctx context.Context, session dashboardSession, impersonated client.Client) (dashboardCapabilities, error) {
 	if session.authMethod == authMethodLocal || impersonated == nil {
-		return dashboardCapabilities{
-			isAdmin:            true,
-			canAdminister:      true,
-			canCreateApps:      true,
-			canDeleteApps:      true,
-			canUpdateApps:      true,
-			canCreateResources: true,
-			canDeleteResources: true,
-		}
+		return fullCapabilities(), nil
 	}
 	namespaces := teamsFromContext(ctx)
 	if len(namespaces) == 0 {
 		namespaces = []string{a.namespace}
 	}
-	allowed := func(resource, verb string) bool {
+	allowed := func(resource, verb string) (bool, error) {
 		for _, namespace := range namespaces {
 			attributes := authorizationv1.ResourceAttributes{Namespace: namespace, Group: platformAPIGroup, Resource: resource, Verb: verb}
-			if selfSubjectAccessAllowed(ctx, impersonated, attributes) {
-				return true
+			ok, err := selfSubjectAccessAllowedWithError(ctx, impersonated, attributes)
+			if err != nil {
+				return false, err
+			}
+			if ok {
+				return true, nil
 			}
 		}
-		return false
+		return false, nil
 	}
 	clusters := authorizationv1.ResourceAttributes{Group: platformAPIGroup, Resource: resourceClusters, Verb: "patch"}
-	return dashboardCapabilities{
-		isAdmin:            selfSubjectAccessAllowed(ctx, impersonated, clusters),
-		canAdminister:      selfSubjectAccessAllowed(ctx, impersonated, administerPermission),
-		canCreateApps:      allowed(resourceApplications, "create"),
-		canDeleteApps:      allowed(resourceApplications, "delete"),
-		canUpdateApps:      allowed(resourceApplications, "update"),
-		canCreateResources: allowed(resourceResources, "create"),
-		canDeleteResources: allowed(resourceResources, "delete"),
+	isAdmin, err := selfSubjectAccessAllowedWithError(ctx, impersonated, clusters)
+	if err != nil {
+		return dashboardCapabilities{}, err
 	}
+	canAdminister, err := selfSubjectAccessAllowedWithError(ctx, impersonated, administerPermission)
+	if err != nil {
+		return dashboardCapabilities{}, err
+	}
+	canCreateApps, err := allowed(resourceApplications, "create")
+	if err != nil {
+		return dashboardCapabilities{}, err
+	}
+	canDeleteApps, err := allowed(resourceApplications, "delete")
+	if err != nil {
+		return dashboardCapabilities{}, err
+	}
+	canUpdateApps, err := allowed(resourceApplications, "update")
+	if err != nil {
+		return dashboardCapabilities{}, err
+	}
+	canCreateResources, err := allowed(resourceResources, "create")
+	if err != nil {
+		return dashboardCapabilities{}, err
+	}
+	canDeleteResources, err := allowed(resourceResources, "delete")
+	if err != nil {
+		return dashboardCapabilities{}, err
+	}
+	return dashboardCapabilities{
+		isAdmin:            isAdmin,
+		canAdminister:      canAdminister,
+		canCreateApps:      canCreateApps,
+		canDeleteApps:      canDeleteApps,
+		canUpdateApps:      canUpdateApps,
+		canCreateResources: canCreateResources,
+		canDeleteResources: canDeleteResources,
+	}, nil
 }
 
 func selfSubjectAccessAllowed(ctx context.Context, c client.Client, attributes authorizationv1.ResourceAttributes) bool {
+	allowed, err := selfSubjectAccessAllowedWithError(ctx, c, attributes)
+	return err == nil && allowed
+}
+
+func selfSubjectAccessAllowedWithError(ctx context.Context, c client.Client, attributes authorizationv1.ResourceAttributes) (bool, error) {
 	review := &authorizationv1.SelfSubjectAccessReview{
 		Spec: authorizationv1.SelfSubjectAccessReviewSpec{ResourceAttributes: &attributes},
 	}
 	if err := c.Create(ctx, review); err != nil {
-		return false
+		return false, err
 	}
-	return review.Status.Allowed
+	return review.Status.Allowed, nil
+}
+
+const authzCacheTTL = 5 * time.Minute
+
+type cachedAuthorization struct {
+	teams        []string
+	capabilities dashboardCapabilities
+	expires      time.Time
+}
+
+func authorizationCacheKey(session dashboardSession) string {
+	groups := append([]string(nil), session.groups...)
+	slices.Sort(groups)
+	return session.issuer + "\x00" + session.username + "\x00" + strings.Join(groups, "\x1f")
+}
+
+// authorization resolves the team namespaces and dashboard capabilities for a
+// session. The Kubernetes authorization checks are cached briefly because they
+// are the same for every API request in a page load and are expensive to repeat.
+// Administrative API and page requests bypass the cache so a revoked
+// administrator cannot keep using the panel until the cache expires.
+func (a *authHandler) authorization(ctx context.Context, session dashboardSession, impersonated client.Client, refresh bool) ([]string, dashboardCapabilities) {
+	if session.authMethod == authMethodLocal || impersonated == nil {
+		return nil, fullCapabilities()
+	}
+	key := authorizationCacheKey(session)
+	if !refresh {
+		if cached, ok := a.authzCache.Load(key); ok {
+			entry := cached.(cachedAuthorization)
+			if a.now().Before(entry.expires) {
+				return entry.teams, entry.capabilities
+			}
+		}
+	}
+	value, err, _ := a.authzGroup.Do(key, func() (any, error) {
+		if !refresh {
+			if cached, ok := a.authzCache.Load(key); ok {
+				entry := cached.(cachedAuthorization)
+				if a.now().Before(entry.expires) {
+					return entry, nil
+				}
+			}
+		}
+		// Detach from the first caller's cancellation so concurrent requests do
+		// not all fail when one of them is aborted.
+		authCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		teams, err := a.teamNamespacesForSession(authCtx, session, impersonated)
+		if err != nil {
+			return nil, err
+		}
+		capabilities, err := a.capabilities(withTeams(authCtx, teams), session, impersonated)
+		if err != nil {
+			return nil, err
+		}
+		entry := cachedAuthorization{teams: teams, capabilities: capabilities, expires: a.now().Add(authzCacheTTL)}
+		a.authzCache.Store(key, entry)
+		return entry, nil
+	})
+	if err != nil {
+		if !refresh {
+			if cached, ok := a.authzCache.Load(key); ok {
+				entry := cached.(cachedAuthorization)
+				return entry.teams, entry.capabilities
+			}
+		}
+		return nil, dashboardCapabilities{}
+	}
+	entry := value.(cachedAuthorization)
+	return entry.teams, entry.capabilities
 }

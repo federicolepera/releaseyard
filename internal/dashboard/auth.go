@@ -17,6 +17,7 @@ import (
 
 	"github.com/coreos/go-oidc/v3/oidc"
 	"golang.org/x/oauth2"
+	"golang.org/x/sync/singleflight"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -117,6 +118,9 @@ type authHandler struct {
 	sessions     map[string]dashboardSession
 
 	clients sync.Map // identity key -> client.Client
+
+	authzCache sync.Map           // authorization cache key -> cachedAuthorization
+	authzGroup singleflight.Group // coalesces concurrent authorization checks
 }
 
 // oidcRuntime is the resolved OIDC configuration for the currently stored
@@ -384,33 +388,48 @@ func (a *authHandler) middleware(next http.Handler) http.Handler {
 		// Authorization is the management cluster's RBAC. The dashboard
 		// impersonates the logged-in user for writes; reads (the catalog) are
 		// allowed to any authenticated user and use the dashboard's own client.
-		impersonated, err := a.impersonatingClient(session)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "Could not assume user identity")
-			return
+		//
+		// Resolving teams and capabilities requires several SelfSubjectAccessReview
+		// calls. Do that only for API requests and the administration pages, and
+		// cache the result: static assets and ordinary page HTML do not need it.
+		needsAuthorization := isAPIPath(r.URL.Path) || isAdministrationPage(r.URL.Path)
+		var impersonated client.Client
+		if needsAuthorization {
+			var err error
+			impersonated, err = a.impersonatingClient(session)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "Could not assume user identity")
+				return
+			}
 		}
 		ctx := withSession(r.Context(), session)
-		teams := a.teamNamespacesForSession(ctx, session, impersonated)
-		teamOptions := make([]map[string]string, 0, len(teams))
-		for _, namespace := range teams {
-			name := strings.TrimPrefix(namespace, a.teamNamespacePrefix)
-			if name == "" {
-				name = namespace
-			}
-			teamOptions = append(teamOptions, map[string]string{"name": name, "namespace": namespace})
-		}
-		ctx = withTeams(ctx, teams)
 		if impersonated != nil {
 			ctx = withImpersonatingClient(ctx, impersonated)
 		}
+		var teams []string
+		var capabilities dashboardCapabilities
+		if needsAuthorization {
+			// The administration area is authorized fresh; regular API requests
+			// reuse the short-lived authorization cache.
+			refresh := isAdministrationPage(r.URL.Path) || isAdministrationAPIPath(r.URL.Path)
+			teams, capabilities = a.authorization(ctx, session, impersonated, refresh)
+			ctx = withTeams(ctx, teams)
+		}
 		r = r.WithContext(ctx)
-		capabilities := a.capabilities(r.Context(), session, impersonated)
 
 		if r.Method == http.MethodGet && r.URL.Path == "/api/session" {
+			teamOptions := make([]map[string]string, 0, len(teams))
+			for _, namespace := range teams {
+				name := strings.TrimPrefix(namespace, a.teamNamespacePrefix)
+				if name == "" {
+					name = namespace
+				}
+				teamOptions = append(teamOptions, map[string]string{"name": name, "namespace": namespace})
+			}
 			writeJSON(w, http.StatusOK, map[string]any{"csrfToken": session.csrfToken, "username": session.username, "isAdmin": capabilities.isAdmin, "isLocalAdmin": session.authMethod == authMethodLocal, "canAdminister": capabilities.canAdminister, "canCreateApps": capabilities.canCreateApps, "canDeleteApps": capabilities.canDeleteApps, "canUpdateApps": capabilities.canUpdateApps, "canCreateResources": capabilities.canCreateResources, "canDeleteResources": capabilities.canDeleteResources, "cloudProvisioning": a.cloudProvisioning, "teams": teamOptions})
 			return
 		}
-		if r.URL.Path == "/identity-provider.html" || r.URL.Path == "/access-definitions.html" || r.URL.Path == "/cluster-access.html" || r.URL.Path == "/access-applications.html" || strings.HasPrefix(r.URL.Path, "/api/administration/") {
+		if isAdministrationPage(r.URL.Path) || isAdministrationAPIPath(r.URL.Path) {
 			// The administration area is available to the initial local
 			// administrator and to OIDC users whose management-cluster RBAC
 			// already allows the actions the panel performs.
@@ -469,6 +488,18 @@ func (a *authHandler) unauthorized(w http.ResponseWriter, r *http.Request) {
 
 func isAPIPath(path string) bool {
 	return path == "/api" || strings.HasPrefix(path, "/api/")
+}
+
+func isAdministrationAPIPath(path string) bool {
+	return strings.HasPrefix(path, "/api/administration/")
+}
+
+func isAdministrationPage(path string) bool {
+	switch path {
+	case "/identity-provider.html", "/access-definitions.html", "/cluster-access.html", "/access-applications.html":
+		return true
+	}
+	return false
 }
 
 func isApplicationItemPath(path string) bool {
@@ -616,6 +647,7 @@ func (a *authHandler) callback(w http.ResponseWriter, r *http.Request) {
 		expires:      expires,
 		authMethod:   authMethodOIDC,
 	}
+	a.authzCache.Delete(authorizationCacheKey(session))
 	a.mu.Lock()
 	a.pruneSessionsLocked(now)
 	if len(a.sessions) >= maxSessions {

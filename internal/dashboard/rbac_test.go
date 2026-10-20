@@ -181,3 +181,100 @@ func TestOIDCAdminGateFollowsClusterRBAC(t *testing.T) {
 		})
 	}
 }
+
+// TestOIDCAuthorizationCaching proves that expensive authorization reviews are
+// skipped for static assets, cached for normal API requests, and refreshed for
+// administration requests.
+func TestOIDCAuthorizationCaching(t *testing.T) {
+	provider := newFakeOIDCProvider(t, []string{"releaseyard:developers"})
+
+	scheme := runtime.NewScheme()
+	if err := platformv1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	if err := authorizationv1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	var reviews int
+	impersonated := fake.NewClientBuilder().WithScheme(scheme).
+		WithInterceptorFuncs(interceptor.Funcs{
+			Create: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
+				if review, ok := obj.(*authorizationv1.SelfSubjectAccessReview); ok {
+					reviews++
+					review.Status.Allowed = true
+					return nil
+				}
+				return c.Create(ctx, obj, opts...)
+			},
+		}).Build()
+	factory := func(string, []string) (client.Client, error) { return impersonated, nil }
+
+	k8s := newIdentityProviderClient(t)
+	publicURL, err := url.Parse("http://" + testDashboardHost)
+	if err != nil {
+		t.Fatal(err)
+	}
+	issuer, err := url.Parse(provider.server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	redirect, err := url.Parse("http://" + testDashboardHost + "/auth/callback")
+	if err != nil {
+		t.Fatal(err)
+	}
+	auth := newAuthHandler(k8s, testNamespace, publicURL, "", "", factory, "", "")
+	rt, err := discoverOIDCRuntime(context.Background(), issuer, redirect, testOIDCClientID, "secret")
+	if err != nil {
+		t.Fatalf("discover runtime: %v", err)
+	}
+	auth.oidc.Store(rt)
+	handler := securityHeaders(auth.middleware(NewHandler(k8s, testNamespace)))
+
+	login := beginTestLogin(t, handler, provider)
+	callback := finishTestLogin(t, handler, login)
+	var cookie *http.Cookie
+	for _, c := range callback.Result().Cookies() {
+		if c.Name == sessionCookie {
+			cookie = c
+		}
+	}
+	if cookie == nil {
+		t.Fatal("callback did not issue a session cookie")
+	}
+	request := func(target string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodGet, "http://"+testDashboardHost+target, nil)
+		req.AddCookie(cookie)
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, req)
+		return response
+	}
+
+	if response := request("/app.js"); response.Code != http.StatusOK {
+		t.Fatalf("static asset status=%d body=%s", response.Code, response.Body)
+	}
+	if reviews != 0 {
+		t.Fatalf("static asset issued %d authorization reviews, want 0", reviews)
+	}
+
+	if response := request("/api/session"); response.Code != http.StatusOK {
+		t.Fatalf("first /api/session status=%d body=%s", response.Code, response.Body)
+	}
+	first := reviews
+	if first == 0 {
+		t.Fatal("first /api/session did not issue authorization reviews")
+	}
+
+	if response := request("/api/session"); response.Code != http.StatusOK {
+		t.Fatalf("second /api/session status=%d body=%s", response.Code, response.Body)
+	}
+	if reviews != first {
+		t.Fatalf("second /api/session issued %d extra authorization reviews, want 0", reviews-first)
+	}
+
+	if response := request("/api/administration/identity-provider"); response.Code != http.StatusOK {
+		t.Fatalf("admin endpoint status=%d body=%s", response.Code, response.Body)
+	}
+	if reviews <= first {
+		t.Fatal("admin endpoint did not refresh authorization reviews")
+	}
+}
