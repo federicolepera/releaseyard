@@ -26,6 +26,7 @@ rules:
   - applicationdefinitions/status
   - applications/status
   - clusters/status
+  - resources/status
   verbs:
   - get
   - patch
@@ -34,6 +35,7 @@ rules:
   - platform.releaseyard.io
   resources:
   - applications
+  - resources
   verbs:
   - create
   - delete
@@ -46,5 +48,6 @@ rules:
   - platform.releaseyard.io
   resources:
   - applications/finalizers
+  - resources/finalizers
   verbs:
   - update

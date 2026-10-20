@@ -243,6 +243,13 @@ func main() {
 		setupLog.Error(err, "Failed to create controller", "controller", "application")
 		os.Exit(1)
 	}
+	if err := (&controller.ResourceReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "Failed to create controller", "controller", "resource")
+		os.Exit(1)
+	}
 	// +kubebuilder:scaffold:builder
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {

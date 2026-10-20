@@ -5,6 +5,9 @@ resources:
 - bases/platform.releaseyard.io_clusters.yaml
 - bases/platform.releaseyard.io_applicationdefinitions.yaml
 - bases/platform.releaseyard.io_applications.yaml
+- bases/platform.releaseyard.io_cloudtargets.yaml
+- bases/platform.releaseyard.io_resourcedefinitions.yaml
+- bases/platform.releaseyard.io_resources.yaml
 # +kubebuilder:scaffold:crdkustomizeresource
 
 patches:

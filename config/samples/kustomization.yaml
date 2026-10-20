@@ -2,4 +2,7 @@
 resources:
 - platform_v1alpha1_cluster.yaml
 - platform_v1alpha1_applicationdefinition.yaml
+- platform_v1alpha1_cloudtarget.yaml
+- platform_v1alpha1_resourcedefinition.yaml
+- platform_v1alpha1_resource.yaml
 # +kubebuilder:scaffold:manifestskustomizesamples
