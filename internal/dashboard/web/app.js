@@ -35,7 +35,7 @@
       try { localStorage.setItem('idp-sidebar', next ? 'collapsed' : 'open'); } catch (_) { /* Storage can be unavailable. */ }
     });
   }
-  const state = { definitions: [], applications: [], clusters: [], selectedApplication: null, selectedCluster: null, selectedInstanceUID: '', detailTab: 'overview', deleting: false, deletionPending: new Set(), editingValues: false, valuesDraft: Object.create(null), savingValues: false, definitionQuery: '', definitionSort: 'name', definitionType: '', definitionView: 'grid', destinationMode: 'cluster', preview: null, previewController: null, previewSequence: 0, previewLoading: false, savingEnvironment: false, creating: false, teams: [], team: '', resourcesQuery: '', resourcesKind: '', resourcesStatus: '', resourcesExpanded: new Set(), resourcesLive: null, resourcesLiveKey: '', selectedResourceUID: '', resourcePanelTab: 'overview', activityRange: '24h', activityType: '', activitySource: '', activityQuery: '', cloudTargets: [], cloudDefinitions: [], cloudResources: [], selectedCloudResource: null, cloudCreating: false, cloudSaving: false, cloudDeleting: false, cloudResourcesError: '', cloudSearch: '', cloudStatusFilter: '', cloudTargetFilter: '', cloudDefinitionFilter: '', cloudSort: { key: 'name', direction: 'asc' }, cloudDefinitionsExpanded: false, cloudTargetsExpanded: false, cloudActivityExpanded: false };
+  const state = { definitions: [], applications: [], clusters: [], selectedApplication: null, selectedCluster: null, selectedInstanceUID: '', detailTab: 'overview', deleting: false, deletionPending: new Set(), editingValues: false, valuesDraft: Object.create(null), savingValues: false, definitionQuery: '', definitionSort: 'name', definitionType: '', definitionView: 'grid', destinationMode: 'cluster', preview: null, previewController: null, previewSequence: 0, previewLoading: false, savingEnvironment: false, creating: false, teams: [], team: '', resourcesQuery: '', resourcesKind: '', resourcesStatus: '', resourcesExpanded: new Set(), resourcesLive: null, resourcesLiveKey: '', selectedResourceUID: '', resourcePanelTab: 'overview', activityRange: '24h', activityType: '', activitySource: '', activityQuery: '', applicationQuery: '', applicationCluster: '', applicationNamespace: '', applicationStatus: '', applicationSort: { key: 'name', direction: 'asc' }, cloudTargets: [], cloudDefinitions: [], cloudResources: [], selectedCloudResource: null, cloudCreating: false, cloudSaving: false, cloudDeleting: false, cloudResourcesError: '', cloudSearch: '', cloudStatusFilter: '', cloudTargetFilter: '', cloudDefinitionFilter: '', cloudSort: { key: 'name', direction: 'asc' }, cloudDefinitionsExpanded: false, cloudTargetsExpanded: false, cloudActivityExpanded: false };
   state.selectedDefinition = null;
   state.canCreateApps = false;
   state.canDeleteApps = false;
@@ -557,55 +557,260 @@
     root.append(section);
   }
 
+  function applicationClusterLabel(app) {
+    const targets = applicationTargets(app);
+    if (targets?.length) {
+      if (targets.length === 1) return targets[0].name || app.spec?.environment?.name || 'Environment';
+      return `${app.spec?.environment?.name || 'Environment'} · ${targets.length} clusters`;
+    }
+    return app.spec?.clusterRef?.name || '—';
+  }
+
+  function applicationNamespaceLabel(app) {
+    return targetNamespace(app) || '—';
+  }
+
+  function applicationLastUpdated(app) {
+    const values = [app.status?.workloadObservedAt, ...(Array.isArray(app.status?.instances) ? app.status.instances.map((instance) => instance.workloadObservedAt) : [])]
+      .filter(Boolean);
+    values.sort();
+    return values.length ? values[values.length - 1] : app.metadata?.creationTimestamp || '';
+  }
+
+  function relativeTimeAgo(value) {
+    const date = Date.parse(value || '');
+    if (!Number.isFinite(date)) return '—';
+    const seconds = Math.max(0, Math.round((Date.now() - date) / 1000));
+    if (seconds < 60) return `${seconds} second${seconds === 1 ? '' : 's'} ago`;
+    const minutes = Math.round(seconds / 60);
+    if (minutes < 60) return `${minutes} minute${minutes === 1 ? '' : 's'} ago`;
+    const hours = Math.round(minutes / 60);
+    if (hours < 24) return `${hours} hour${hours === 1 ? '' : 's'} ago`;
+    const days = Math.round(hours / 24);
+    return `${days} day${days === 1 ? '' : 's'} ago`;
+  }
+
+  function applicationTableStatus(app) {
+    const name = app.metadata?.name;
+    if (state.deletionPending.has(name)) return { key: 'unavailable', label: 'Deleting', tone: 'muted' };
+    const targets = applicationTargets(app);
+    const health = targets ? aggregateEnvironmentHealth(app) : workloadHealth(app);
+    const ready = condition(app, 'Ready');
+    if (health.label === 'Degraded') return { key: 'degraded', label: 'Degraded', tone: 'muted' };
+    if (targets) {
+      if (health.label === 'Healthy' && ready?.status === 'True') return { key: 'running', label: 'Running', tone: 'good' };
+      return { key: 'progressing', label: 'Progressing', tone: 'info' };
+    }
+    if (ready?.status === 'True') return { key: 'running', label: 'Running', tone: 'good' };
+    if (ready?.status === 'False' && health.label !== 'Progressing') return { key: 'unavailable', label: 'Unavailable', tone: 'error' };
+    if (!ready || ready.status === 'Unknown' || health.label === 'Progressing') {
+      return { key: 'progressing', label: 'Progressing', tone: 'info' };
+    }
+    return { key: 'unavailable', label: 'Unavailable', tone: 'error' };
+  }
+
+  function applicationResourceGroup(kind) {
+    if (/^(Deployment|StatefulSet|DaemonSet|ReplicaSet|Job|CronJob|Pod)$/.test(kind)) return 'workload';
+    if (/^(Service|Ingress|EndpointSlice|NetworkPolicy)$/.test(kind)) return 'network';
+    if (/^(ConfigMap|Secret|ServiceAccount|Role|RoleBinding|PersistentVolumeClaim)$/.test(kind)) return 'config';
+    return 'other';
+  }
+
+  function applicationResourceIcon(group) {
+    const paths = {
+      workload: 'M12 3 21 8v8l-9 5-9-5V8l9-5Zm0 0v9m9-4-9 5-9-5',
+      network: 'M4 7h16v10H4zM8 11h.01M12 11h.01M16 11h.01M8 15h8',
+      config: 'M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8zM14 3v5h5M8 13h8M8 17h5',
+      other: 'M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z',
+    };
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('aria-hidden', 'true'); svg.setAttribute('class', 'apps-resource-icon');
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', paths[group] || paths.other);
+    svg.append(path);
+    return svg;
+  }
+
+  function applicationResourceSummary(app) {
+    const resources = [];
+    if (Array.isArray(app.status?.instances) && app.status.instances.length) {
+      app.status.instances.forEach((instance) => { if (Array.isArray(instance.resources)) resources.push(...instance.resources); });
+    } else if (Array.isArray(app.status?.resources)) {
+      resources.push(...app.status.resources);
+    }
+    const groups = new Map();
+    resources.forEach((resource) => {
+      if (!resource) return;
+      const group = applicationResourceGroup(String(resource.kind || ''));
+      groups.set(group, (groups.get(group) || 0) + 1);
+    });
+    const order = ['workload', 'network', 'config', 'other'];
+    return [...groups.entries()]
+      .sort((a, b) => order.indexOf(a[0]) - order.indexOf(b[0]))
+      .map(([group, count]) => ({ group, count }));
+  }
+
+  function fillApplicationFilter(select, allLabel, values) {
+    if (!select) return;
+    const current = select.value;
+    const unique = [...new Set(values.filter((value) => value && value !== '—'))].sort((a, b) => a.localeCompare(b, 'en', { sensitivity: 'base' }));
+    select.replaceChildren(new Option(allLabel, ''), ...unique.map((value) => new Option(value, value)));
+    select.value = unique.includes(current) ? current : '';
+  }
+
+  function renderApplicationKpis() {
+    const total = state.applications.length;
+    const counts = { running: 0, degraded: 0, progressing: 0, unavailable: 0 };
+    state.applications.forEach((app) => { counts[applicationTableStatus(app).key] += 1; });
+    const degraded = counts.degraded + counts.progressing;
+    const percent = (value) => total ? `${Math.round((value / total) * 100)}% of total` : '0% of total';
+    $('#apps-kpi-total').textContent = String(total);
+    $('#apps-kpi-total-note').textContent = state.team ? 'Team scope' : 'All teams';
+    $('#apps-kpi-healthy').textContent = String(counts.running);
+    $('#apps-kpi-healthy-note').textContent = percent(counts.running);
+    $('#apps-kpi-degraded').textContent = String(degraded);
+    $('#apps-kpi-degraded-note').textContent = percent(degraded);
+    $('#apps-kpi-unavailable').textContent = String(counts.unavailable);
+    $('#apps-kpi-unavailable-note').textContent = percent(counts.unavailable);
+  }
+
+  function renderApplicationSort() {
+    document.querySelectorAll('.apps-sort').forEach((button) => {
+      const active = button.dataset.sort === state.applicationSort.key;
+      const arrow = button.querySelector('.apps-sort-arrow');
+      if (arrow) arrow.textContent = active ? (state.applicationSort.direction === 'asc' ? '↑' : '↓') : '↕';
+      button.setAttribute('aria-pressed', String(active));
+      const cell = button.closest('th');
+      if (cell) cell.setAttribute('aria-sort', active ? (state.applicationSort.direction === 'asc' ? 'ascending' : 'descending') : 'none');
+    });
+  }
+
+  function applicationRowMenu(app) {
+    const menu = document.createElement('details');
+    menu.className = 'detail-menu apps-row-menu';
+    const toggle = element('summary', 'detail-menu-toggle apps-row-toggle');
+    toggle.setAttribute('aria-label', 'More actions'); toggle.title = 'More actions';
+    toggle.append(dotsIcon());
+    const list = element('div', 'detail-menu-list');
+    const open = element('button', 'detail-menu-item', 'Open details'); open.type = 'button';
+    open.addEventListener('click', () => { menu.open = false; openApplication(app); });
+    const pending = state.deletionPending.has(app.metadata?.name);
+    const remove = element('button', 'detail-menu-item detail-menu-danger', pending ? 'Deletion in progress' : 'Delete application');
+    remove.type = 'button';
+    remove.disabled = !state.canDeleteApps || state.deleting || pending;
+    if (!state.canDeleteApps) remove.title = 'Developer or administrator access is required to delete an application.';
+    remove.addEventListener('click', () => { menu.open = false; deleteApplication(app); });
+    list.append(open, remove);
+    menu.append(toggle, list);
+    return menu;
+  }
+
   function renderApplications() {
     const root = $('#applications');
+    if (!root) return;
+    renderApplicationKpis();
+    fillApplicationFilter($('#application-cluster-filter'), 'All clusters', state.applications.map(applicationClusterLabel));
+    fillApplicationFilter($('#application-namespace-filter'), 'All namespaces', state.applications.map(applicationNamespaceLabel));
+    state.applicationCluster = $('#application-cluster-filter')?.value || '';
+    state.applicationNamespace = $('#application-namespace-filter')?.value || '';
+    state.applicationStatus = $('#application-status-filter')?.value || '';
+    const query = state.applicationQuery.trim().toLocaleLowerCase('en');
+    const applications = state.applications.filter((app) => {
+      const status = applicationTableStatus(app);
+      const searchable = [app.metadata?.name, app.spec?.applicationDefinitionRef?.name, applicationClusterLabel(app), applicationNamespaceLabel(app)]
+        .filter(Boolean).join(' ').toLocaleLowerCase('en');
+      return (!query || searchable.includes(query))
+        && (!state.applicationCluster || applicationClusterLabel(app) === state.applicationCluster)
+        && (!state.applicationNamespace || applicationNamespaceLabel(app) === state.applicationNamespace)
+        && (!state.applicationStatus || status.key === state.applicationStatus);
+    }).sort((a, b) => {
+      const direction = state.applicationSort.direction === 'desc' ? -1 : 1;
+      if (state.applicationSort.key === 'updated') {
+        return ((Date.parse(applicationLastUpdated(a)) || 0) - (Date.parse(applicationLastUpdated(b)) || 0)) * direction;
+      }
+      return String(a.metadata?.name || '').localeCompare(String(b.metadata?.name || ''), 'en', { sensitivity: 'base' }) * direction;
+    });
+
     root.replaceChildren();
-    $('#app-count').textContent = String(state.applications.length);
     if (!state.applications.length) {
-      const empty = element('p', 'empty', 'No applications yet.');
+      const row = document.createElement('tr');
+      const cell = element('td', 'apps-empty', 'No applications yet.');
       const link = element('a', 'inline-link', 'Browse the Catalog');
       link.href = './';
-      empty.append(' ', link);
-      root.append(empty);
+      cell.append(' ', link); cell.colSpan = 8; row.append(cell); root.append(row);
       if (state.selectedApplication) closeApplication();
-      return;
+    } else if (!applications.length) {
+      const row = document.createElement('tr');
+      const cell = element('td', 'apps-empty', 'No applications match these filters.');
+      cell.colSpan = 8; row.append(cell); root.append(row);
+    } else {
+      applications.forEach((app) => {
+        const row = document.createElement('tr');
+        row.className = 'apps-row';
+        const name = app.metadata?.name || 'Unnamed application';
+        const status = applicationTableStatus(app);
+
+        const nameCell = document.createElement('td');
+        const nameWrap = element('div', 'apps-name-cell');
+        const icon = element('span', 'apps-icon'); icon.setAttribute('aria-hidden', 'true');
+        const iconSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); iconSvg.setAttribute('viewBox', '0 0 40 40');
+        const cube = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        cube.setAttribute('d', 'M20 4 35 12.5v15L20 36 5 27.5v-15L20 4Zm0 0v16m15-7.5-15 8-15-8m15 8v15');
+        iconSvg.append(cube); icon.append(iconSvg);
+        const nameText = element('div', 'apps-name-text');
+        const open = element('button', 'application-link apps-name-button', safe(name));
+        open.type = 'button'; open.setAttribute('aria-label', `Open ${safe(name)} details`);
+        open.addEventListener('click', () => openApplication(app));
+        nameText.append(open, element('span', 'apps-def', app.spec?.applicationDefinitionRef?.name || 'Definition not specified'));
+        nameWrap.append(icon, nameText); nameCell.append(nameWrap);
+
+        const namespaceCell = document.createElement('td');
+        namespaceCell.append(element('span', 'apps-namespace-pill', applicationNamespaceLabel(app)));
+
+        const clusterCell = document.createElement('td');
+        const clusterWrap = element('div', 'apps-cluster-cell');
+        const clusterIcon = element('span', 'apps-cluster-icon');
+        clusterIcon.append(metaIcon('cluster'));
+        clusterWrap.append(clusterIcon, element('span', '', applicationClusterLabel(app)));
+        clusterCell.append(clusterWrap);
+
+        const statusCell = document.createElement('td');
+        const statusBadge = badge(status.label, status.tone);
+        statusBadge.classList.add('apps-status-badge');
+        statusCell.append(statusBadge);
+
+        const revision = app.status?.applied?.helmRevision;
+        const revisionCell = element('td', 'apps-revision', revision === undefined ? '—' : String(revision));
+
+        const resourcesCell = document.createElement('td');
+        const summary = applicationResourceSummary(app);
+        if (!summary.length) {
+          resourcesCell.append(element('span', 'apps-cell-muted', '—'));
+        } else {
+          const resources = element('div', 'apps-resources');
+          summary.slice(0, 3).forEach(({ group, count }) => {
+            const item = element('span', 'apps-resource');
+            item.title = `${count} ${group} resource${count === 1 ? '' : 's'}`;
+            item.append(applicationResourceIcon(group), element('span', 'apps-resource-count', String(count)));
+            resources.append(item);
+          });
+          if (summary.length > 3) resources.append(element('span', 'apps-resource-more', `+${summary.length - 3}`));
+          resourcesCell.append(resources);
+        }
+
+        const updatedCell = element('td', 'apps-cell-muted', relativeTimeAgo(applicationLastUpdated(app)));
+        const actionsCell = element('td', 'apps-actions-cell');
+        actionsCell.append(applicationRowMenu(app));
+
+        row.append(nameCell, namespaceCell, clusterCell, statusCell, revisionCell, resourcesCell, updatedCell, actionsCell);
+        row.addEventListener('click', (event) => {
+          if (event.target.closest('button, summary, a, details, input, select, label')) return;
+          openApplication(app);
+        });
+        root.append(row);
+      });
     }
-    const list = element('div', 'resource-list');
-    state.applications.forEach((app) => {
-      const row = element('article', 'resource-row');
-      const details = element('div', 'resource-main');
-      const appName = app.metadata?.name || 'Unnamed application';
-      const openButton = element('button', 'application-link', appName);
-      openButton.type = 'button'; openButton.setAttribute('aria-label', `Open ${appName} details`);
-      openButton.addEventListener('click', () => openApplication(app));
-      const heading = element('h3', 'resource-name'); heading.append(openButton); details.append(heading);
-      const definition = app.spec?.applicationDefinitionRef?.name || 'Definition not specified';
-      const targets = applicationTargets(app);
-      const cluster = targets ? `${app.spec.environment.name} · ${targets.length} cluster${targets.length === 1 ? '' : 's'}` : app.spec?.clusterRef?.name || 'Cluster not specified';
-      details.append(element('p', 'resource-meta', `${definition} · ${cluster}`));
-      details.append(element('p', 'resource-meta', `Target namespace: ${targetNamespace(app) || 'Not specified'}`));
-      const status = condition(app, 'Ready');
-      const instances = targets ? (Array.isArray(app.status?.instances) ? app.status.instances : []) : [];
-      const generation = app.metadata?.generation;
-      const rootReady = status?.status === 'True' && Number.isInteger(generation)
-        && app.status?.observedGeneration === generation && status.observedGeneration === generation;
-      const allInstancesReady = Boolean(rootReady && targets?.length && targets.every((target) => instances.some((instance) => {
-        const ready = instance.conditions?.find((item) => item.type === 'Ready');
-        return instance.clusterUID === target.uid && instance.observedGeneration === generation
-          && ready?.status === 'True' && ready.observedGeneration === generation
-          && instance.applied?.applicationGeneration === generation;
-      })));
-      const statusLabel = targets ? (allInstancesReady ? 'All releases ready' : 'Release status pending') : status ? (status.status === 'True' ? 'Release ready' : `Release ${status.reason || 'not ready'}`) : 'Release status pending';
-      const side = element('div', 'resource-side');
-      side.append(badge(statusLabel, targets ? (allInstancesReady ? 'good' : 'neutral') : status?.status === 'True' ? 'good' : status?.status === 'False' ? 'muted' : 'neutral'));
-      const health = targets ? aggregateEnvironmentHealth(app) : workloadHealth(app);
-      side.append(badge(`Workload ${health.label}`, health.tone));
-      if (app.status?.applied?.helmRevision !== undefined) side.append(element('span', 'minor', `Release revision ${safe(app.status.applied.helmRevision)}`));
-      if (state.deletionPending.has(appName)) side.append(badge('Deletion in progress', 'muted'));
-      row.append(details, side);
-      list.append(row);
-    });
-    root.append(list);
+    renderApplicationSort();
     if (state.selectedApplication) {
       const latest = state.applications.find((item) => item.metadata?.name === state.selectedApplication.metadata?.name);
       if (latest) { state.selectedApplication = latest; renderApplicationDetail(); }
@@ -3243,7 +3448,14 @@
       return true;
     } catch (error) {
       showNotice(error.message || 'Could not load applications. Try again.', 'error');
-      if (!state.applications.length) $('#applications').textContent = 'List unavailable.';
+      if (!state.applications.length) {
+        const root = $('#applications');
+        if (root) {
+          const row = document.createElement('tr');
+          const cell = element('td', 'apps-empty', 'Application list unavailable. Try again.');
+          cell.colSpan = 8; row.append(cell); root.replaceChildren(row);
+        }
+      }
       return false;
     } finally { button.disabled = false; }
   }
@@ -4078,6 +4290,17 @@
   refreshCatalog();
   } else if ($('#applications')) {
     $('#refresh-applications').addEventListener('click', refreshApplications);
+    $('#application-search').addEventListener('input', (event) => { state.applicationQuery = event.currentTarget.value; renderApplications(); });
+    $('#application-cluster-filter').addEventListener('change', (event) => { state.applicationCluster = event.currentTarget.value; renderApplications(); });
+    $('#application-namespace-filter').addEventListener('change', (event) => { state.applicationNamespace = event.currentTarget.value; renderApplications(); });
+    $('#application-status-filter').addEventListener('change', (event) => { state.applicationStatus = event.currentTarget.value; renderApplications(); });
+    document.querySelectorAll('.apps-sort').forEach((button) => button.addEventListener('click', () => {
+      const key = button.dataset.sort;
+      state.applicationSort = state.applicationSort.key === key
+        ? { key, direction: state.applicationSort.direction === 'asc' ? 'desc' : 'asc' }
+        : { key, direction: 'asc' };
+      renderApplications();
+    }));
     refreshApplications();
   } else if ($('#clusters')) {
     $('#refresh-clusters').addEventListener('click', refreshClusterPage);
