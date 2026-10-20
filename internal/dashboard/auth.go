@@ -110,6 +110,7 @@ type authHandler struct {
 	identityProviderSecret string
 	oidc                   atomic.Pointer[oidcRuntime]
 	clientFactory          ImpersonatingClientFactory
+	cloudProvisioning      bool
 
 	mu           sync.Mutex
 	transactions map[string]loginTransaction
@@ -162,6 +163,7 @@ func NewLocalHandler(k8s client.Client, namespace string, config LocalAuthConfig
 		return nil, err
 	}
 	auth := newAuthHandler(k8s, namespace, publicURL, config.HashPath, resolveIdentityProviderSecretName(config.IdentityProviderSecretName), config.ClientFactory, config.TeamNamespacePrefix, config.ApplicationEditorRole)
+	auth.cloudProvisioning = crossplaneInstalled(context.Background(), k8s)
 	auth.reloadIdentityProvider(context.Background())
 	auth.retryIdentityProvider(context.Background())
 	return securityHeaders(auth.middleware(NewHandler(k8s, namespace))), nil
@@ -404,7 +406,7 @@ func (a *authHandler) middleware(next http.Handler) http.Handler {
 		capabilities := a.capabilities(r.Context(), session, impersonated)
 
 		if r.Method == http.MethodGet && r.URL.Path == "/api/session" {
-			writeJSON(w, http.StatusOK, map[string]any{"csrfToken": session.csrfToken, "username": session.username, "isAdmin": capabilities.isAdmin, "isLocalAdmin": session.authMethod == authMethodLocal, "canAdminister": capabilities.canAdminister, "canCreateApps": capabilities.canCreateApps, "canDeleteApps": capabilities.canDeleteApps, "canUpdateApps": capabilities.canUpdateApps, "teams": teamOptions})
+			writeJSON(w, http.StatusOK, map[string]any{"csrfToken": session.csrfToken, "username": session.username, "isAdmin": capabilities.isAdmin, "isLocalAdmin": session.authMethod == authMethodLocal, "canAdminister": capabilities.canAdminister, "canCreateApps": capabilities.canCreateApps, "canDeleteApps": capabilities.canDeleteApps, "canUpdateApps": capabilities.canUpdateApps, "cloudProvisioning": a.cloudProvisioning, "teams": teamOptions})
 			return
 		}
 		if r.URL.Path == "/identity-provider.html" || r.URL.Path == "/access-definitions.html" || r.URL.Path == "/cluster-access.html" || r.URL.Path == "/access-applications.html" || strings.HasPrefix(r.URL.Path, "/api/administration/") {

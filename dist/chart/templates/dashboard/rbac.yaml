@@ -84,6 +84,13 @@ rules:
     verbs:
       - get
       - list
+  # The dashboard detects whether Crossplane is installed by reading its CRDs.
+  - apiGroups:
+      - apiextensions.k8s.io
+    resources:
+      - customresourcedefinitions
+    verbs:
+      - get
   # The dashboard manages definition-access ClusterRoles and bindings on behalf
   # of the local administrator (Administration panel).
   - apiGroups:
