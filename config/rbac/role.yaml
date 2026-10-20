@@ -65,3 +65,15 @@ rules:
   - patch
   - update
   - watch
+- apiGroups:
+  - ec2.aws.m.upbound.io
+  resources:
+  - instances
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch

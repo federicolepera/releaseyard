@@ -1,0 +1,12 @@
+apiVersion: aws.m.upbound.io/v1beta1
+kind: ProviderConfig
+metadata:
+  name: aws-prod
+  namespace: releaseyard-team-platform
+spec:
+  credentials:
+    source: Secret
+    secretRef:
+      namespace: releaseyard-team-platform
+      name: aws-prod-creds
+      key: creds

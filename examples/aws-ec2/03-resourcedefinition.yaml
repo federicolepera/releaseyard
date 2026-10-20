@@ -1,0 +1,50 @@
+apiVersion: platform.releaseyard.io/v1alpha1
+kind: ResourceDefinition
+metadata:
+  name: aws-ec2-milan
+spec:
+  description: An EC2 virtual machine on AWS, managed by Crossplane.
+  configurableValues:
+    - path: instanceName
+      type: string
+      required: true
+    - path: instanceType
+      type: string
+      required: true
+  resources:
+    - name: instance
+      apiVersion: ec2.aws.m.upbound.io/v1beta1
+      kind: Instance
+      base:
+        spec:
+          managementPolicies:
+            - "*"
+          forProvider:
+            ami: ami-01d10a718a6f17b2e
+            subnetId: subnet-072ca76f905921d54
+            iamInstanceProfile: releaseyard-ec2-ssm
+            associatePublicIpAddress: true
+            monitoring: false
+            rootBlockDevice:
+              volumeSize: 8
+              volumeType: gp3
+              deleteOnTermination: true
+            tags:
+              ManagedBy: Releaseyard
+      mappings:
+        - from: values.instanceName
+          to: spec.forProvider.tags.Name
+        - from: values.instanceType
+          to: spec.forProvider.instanceType
+        - from: target.region
+          to: spec.forProvider.region
+  outputs:
+    - name: instanceId
+      template: instance
+      from: status.atProvider.id
+    - name: publicIp
+      template: instance
+      from: status.atProvider.publicIp
+    - name: privateIp
+      template: instance
+      from: status.atProvider.privateIp

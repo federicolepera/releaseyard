@@ -1,0 +1,10 @@
+apiVersion: platform.releaseyard.io/v1alpha1
+kind: CloudTarget
+metadata:
+  name: aws-prod
+spec:
+  provider: aws
+  region: eu-south-1
+  providerConfigRef:
+    name: aws-prod
+    namespace: releaseyard-team-platform
