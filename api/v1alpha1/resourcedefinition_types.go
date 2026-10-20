@@ -17,6 +17,7 @@ limitations under the License.
 package v1alpha1
 
 import (
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 )
@@ -24,16 +25,115 @@ import (
 // EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
-// ResourceDefinitionSpec defines the desired state of ResourceDefinition
+// ResourceDefinitionSpec defines the desired state of ResourceDefinition.
 type ResourceDefinitionSpec struct {
-	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
-	// The following markers will use OpenAPI v3 schema to validate the value
-	// More info: https://book.kubebuilder.io/reference/markers/crd-validation.html
-
-	// foo is an example field of ResourceDefinition. Edit resourcedefinition_types.go to remove/update
+	// description is a short human-readable summary shown in the catalog.
+	// +kubebuilder:validation:MaxLength=280
 	// +optional
-	Foo *string `json:"foo,omitempty"`
+	Description string `json:"description,omitempty"`
+
+	// configurableValues lists the value paths a Resource may set.
+	// +listType=map
+	// +listMapKey=path
+	// +optional
+	ConfigurableValues []ResourceDefinitionValue `json:"configurableValues,omitempty"`
+
+	// resources is the ordered list of cloud objects to create.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinItems=1
+	// +listType=map
+	// +listMapKey=name
+	Resources []ResourceTemplate `json:"resources"`
+
+	// outputs maps Resource status keys to paths on the composed resource.
+	// +listType=map
+	// +listMapKey=name
+	// +optional
+	Outputs []ResourceOutput `json:"outputs,omitempty"`
+}
+
+// ResourceDefinitionValue exposes one configurable value.
+type ResourceDefinitionValue struct {
+	// path is a dot-separated value path.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:Pattern="^[A-Za-z][A-Za-z0-9_-]*(\\.[A-Za-z][A-Za-z0-9_-]*)*$"
+	Path string `json:"path"`
+
+	// type is the value type exposed to a Resource.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Enum=string;integer;boolean
+	Type string `json:"type"`
+
+	// required indicates whether a Resource must supply the value.
+	// +kubebuilder:default=false
+	// +optional
+	Required bool `json:"required,omitempty"`
+
+	// minimum is an inclusive lower bound for integer values.
+	// +optional
+	Minimum *int64 `json:"minimum,omitempty"`
+
+	// maximum is an inclusive upper bound for integer values.
+	// +optional
+	Maximum *int64 `json:"maximum,omitempty"`
+}
+
+// ResourceTemplate describes one managed resource to create.
+type ResourceTemplate struct {
+	// name identifies the template within the definition.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:Pattern="^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
+	Name string `json:"name"`
+
+	// apiVersion of the managed resource to create.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	APIVersion string `json:"apiVersion"`
+
+	// kind of the managed resource to create.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	Kind string `json:"kind"`
+
+	// base is an optional static fragment merged into the managed resource.
+	// +kubebuilder:validation:Type=object
+	// +kubebuilder:pruning:PreserveUnknownFields
+	// +optional
+	Base *apiextensionsv1.JSON `json:"base,omitempty"`
+
+	// mappings copy Resource values or CloudTarget fields into the managed resource.
+	// +listType=map
+	// +listMapKey=to
+	// +optional
+	Mappings []FieldMapping `json:"mappings,omitempty"`
+}
+
+// FieldMapping copies a value into a field of a managed resource.
+type FieldMapping struct {
+	// from is a source path: values.<path> or target.<path>.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	From string `json:"from"`
+
+	// to is a path on the managed resource, e.g. spec.forProvider.region.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	To string `json:"to"`
+}
+
+// ResourceOutput maps a managed resource field to Resource.status.outputs.
+type ResourceOutput struct {
+	// name is the output key exposed on Resource.status.outputs.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	Name string `json:"name"`
+
+	// from is a path on the composed resource, e.g. status.atProvider.arn.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	From string `json:"from"`
 }
 
 // ResourceDefinitionStatus defines the observed state of ResourceDefinition.

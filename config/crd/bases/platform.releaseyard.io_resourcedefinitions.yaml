@@ -40,10 +40,135 @@ spec:
           spec:
             description: spec defines the desired state of ResourceDefinition
             properties:
-              foo:
-                description: foo is an example field of ResourceDefinition. Edit resourcedefinition_types.go
-                  to remove/update
+              configurableValues:
+                description: configurableValues lists the value paths a Resource may
+                  set.
+                items:
+                  description: ResourceDefinitionValue exposes one configurable value.
+                  properties:
+                    maximum:
+                      description: maximum is an inclusive upper bound for integer
+                        values.
+                      format: int64
+                      type: integer
+                    minimum:
+                      description: minimum is an inclusive lower bound for integer
+                        values.
+                      format: int64
+                      type: integer
+                    path:
+                      description: path is a dot-separated value path.
+                      minLength: 1
+                      pattern: ^[A-Za-z][A-Za-z0-9_-]*(\.[A-Za-z][A-Za-z0-9_-]*)*$
+                      type: string
+                    required:
+                      default: false
+                      description: required indicates whether a Resource must supply
+                        the value.
+                      type: boolean
+                    type:
+                      description: type is the value type exposed to a Resource.
+                      enum:
+                      - string
+                      - integer
+                      - boolean
+                      type: string
+                  required:
+                  - path
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - path
+                x-kubernetes-list-type: map
+              description:
+                description: description is a short human-readable summary shown in
+                  the catalog.
+                maxLength: 280
                 type: string
+              outputs:
+                description: outputs maps Resource status keys to paths on the composed
+                  resource.
+                items:
+                  description: ResourceOutput maps a managed resource field to Resource.status.outputs.
+                  properties:
+                    from:
+                      description: from is a path on the composed resource, e.g. status.atProvider.arn.
+                      minLength: 1
+                      type: string
+                    name:
+                      description: name is the output key exposed on Resource.status.outputs.
+                      minLength: 1
+                      type: string
+                  required:
+                  - from
+                  - name
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - name
+                x-kubernetes-list-type: map
+              resources:
+                description: resources is the ordered list of cloud objects to create.
+                items:
+                  description: ResourceTemplate describes one managed resource to
+                    create.
+                  properties:
+                    apiVersion:
+                      description: apiVersion of the managed resource to create.
+                      minLength: 1
+                      type: string
+                    base:
+                      description: base is an optional static fragment merged into
+                        the managed resource.
+                      type: object
+                      x-kubernetes-preserve-unknown-fields: true
+                    kind:
+                      description: kind of the managed resource to create.
+                      minLength: 1
+                      type: string
+                    mappings:
+                      description: mappings copy Resource values or CloudTarget fields
+                        into the managed resource.
+                      items:
+                        description: FieldMapping copies a value into a field of a
+                          managed resource.
+                        properties:
+                          from:
+                            description: 'from is a source path: values.<path> or
+                              target.<path>.'
+                            minLength: 1
+                            type: string
+                          to:
+                            description: to is a path on the managed resource, e.g.
+                              spec.forProvider.region.
+                            minLength: 1
+                            type: string
+                        required:
+                        - from
+                        - to
+                        type: object
+                      type: array
+                      x-kubernetes-list-map-keys:
+                      - to
+                      x-kubernetes-list-type: map
+                    name:
+                      description: name identifies the template within the definition.
+                      minLength: 1
+                      pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                      type: string
+                  required:
+                  - apiVersion
+                  - kind
+                  - name
+                  type: object
+                minItems: 1
+                type: array
+                x-kubernetes-list-map-keys:
+                - name
+                x-kubernetes-list-type: map
+            required:
+            - resources
             type: object
           status:
             description: status defines the observed state of ResourceDefinition
