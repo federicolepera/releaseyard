@@ -49,14 +49,100 @@
     <h1 id="auth-signed-out-title">You’re signed out</h1>
     <p>Your dashboard session has ended. Sign in again to continue.</p>
   </section>
-  <main class="page" id="cloud">
-    <section class="intro hero" aria-labelledby="page-title"><div class="hero-copy"><p class="eyebrow">Cloud provisioning</p><h1 id="page-title">Cloud</h1><p class="lede">Create cloud resources from a governed golden path and follow their status through Crossplane.</p></div></section>
+  <main class="page page-cloud" id="cloud">
+    <section class="cloud-hero" aria-labelledby="page-title">
+      <div class="cloud-hero-copy">
+        <p class="eyebrow">Cloud provisioning</p>
+        <h1 id="page-title">Cloud</h1>
+        <p class="lede">Provision and manage cloud resources from curated definitions and track status through Crossplane.</p>
+      </div>
+      <div class="cloud-hero-actions">
+        <button id="refresh-cloud" class="button button-secondary refresh-button" type="button"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M16 8a6.5 6.5 0 0 0-11-3L3 7m0-4v4h4m-3 5a6.5 6.5 0 0 0 11 3l2-2m0 4v-4h-4"/></svg>Refresh cloud</button>
+        <button id="new-cloud-resource" class="button button-primary" type="button"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 4v12M4 10h12"/></svg>New resource</button>
+      </div>
+    </section>
     <div id="cloud-notice" class="notice" role="status" aria-live="polite" hidden></div>
-    <div class="page-tools"><button id="refresh-cloud" class="button button-secondary refresh-button" type="button"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M16 8a6.5 6.5 0 0 0-11-3L3 7m0-4v4h4m-3 5a6.5 6.5 0 0 0 11 3l2-2m0 4v-4h-4"/></svg>Refresh cloud</button><button id="new-cloud-resource" class="button button-primary" type="button">New resource</button></div>
 
     <section id="cloud-no-crossplane" class="panel" aria-labelledby="cloud-no-crossplane-title" hidden>
       <div class="panel-heading"><div><p class="eyebrow">Crossplane</p><h2 id="cloud-no-crossplane-title">Cloud provisioning is not available</h2></div></div>
       <p class="helper">Crossplane is not installed on the management cluster. Install Crossplane and restart the dashboard to enable cloud resources.</p>
+    </section>
+
+    <section id="cloud-dashboard">
+      <section class="cloud-kpis" aria-label="Cloud summary">
+        <article class="cloud-kpi">
+          <span class="cloud-kpi-icon"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3 3 7l7 4 7-4zM3 10l7 4 7-4M3 13l7 4 7-4"/></svg></span>
+          <div class="cloud-kpi-body"><p class="cloud-kpi-label">Active resources</p><strong id="cloud-kpi-resources" class="cloud-kpi-value">—</strong><p class="cloud-kpi-sub">Provisioned cloud resources</p></div>
+          <span class="cloud-kpi-arrow" aria-hidden="true">›</span>
+        </article>
+        <article class="cloud-kpi">
+          <span class="cloud-kpi-icon"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 3h7l3 3v11H5zM12 3v3h3M7.5 9h5M7.5 12h5"/></svg></span>
+          <div class="cloud-kpi-body"><p class="cloud-kpi-label">Resource definitions</p><strong id="cloud-kpi-definitions" class="cloud-kpi-value">—</strong><p class="cloud-kpi-sub">Available in catalog</p></div>
+          <span class="cloud-kpi-arrow" aria-hidden="true">›</span>
+        </article>
+        <article class="cloud-kpi">
+          <span class="cloud-kpi-icon"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3a7 7 0 1 0 0 14 7 7 0 0 0 0-14zM10 7a3 3 0 1 0 0 6 3 3 0 0 0 0-6z"/></svg></span>
+          <div class="cloud-kpi-body"><p class="cloud-kpi-label">Cloud targets</p><strong id="cloud-kpi-targets" class="cloud-kpi-value">—</strong><p class="cloud-kpi-sub">Configured targets</p></div>
+          <span class="cloud-kpi-arrow" aria-hidden="true">›</span>
+        </article>
+        <article class="cloud-kpi">
+          <span class="cloud-kpi-icon"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M6 15h8a3 3 0 0 0 .4-6A4.5 4.5 0 0 0 6 10a2.5 2.5 0 0 0 0 5z"/></svg></span>
+          <div class="cloud-kpi-body"><p class="cloud-kpi-label">Providers / regions</p><strong id="cloud-kpi-providers" class="cloud-kpi-value">—</strong><p id="cloud-kpi-providers-sub" class="cloud-kpi-sub">—</p></div>
+          <span class="cloud-kpi-arrow" aria-hidden="true">›</span>
+        </article>
+      </section>
+
+      <div class="cloud-layout">
+        <div class="cloud-main">
+          <section class="panel cloud-resources-panel" aria-labelledby="cloud-resources-title">
+            <div class="cloud-panel-head">
+              <div class="cloud-panel-title"><span class="cloud-panel-icon"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3 3 7l7 4 7-4zM3 10l7 4 7-4M3 13l7 4 7-4"/></svg></span><h2 id="cloud-resources-title">Provisioned resources</h2><span id="cloud-resource-count" class="count">—</span></div>
+              <button id="cloud-reset-filters" class="cloud-link" type="button">View all resources →</button>
+            </div>
+            <p class="cloud-panel-sub">Cloud resources created from approved definitions and managed through Crossplane.</p>
+            <div class="cloud-filters">
+              <label class="cloud-search"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.8" cy="8.8" r="5.5"/><path d="m13 13 4 4"/></svg><span class="visually-hidden">Search resources</span><input id="cloud-search" type="search" placeholder="Search resources…" autocomplete="off"></label>
+              <select id="cloud-status-filter" aria-label="Filter by status"><option value="">All statuses</option><option value="ready">Ready</option><option value="provisioning">Provisioning</option><option value="failed">Failed</option><option value="pending">Pending</option></select>
+              <select id="cloud-target-filter" aria-label="Filter by target"><option value="">All targets</option></select>
+              <select id="cloud-definition-filter" aria-label="Filter by definition"><option value="">All definitions</option></select>
+            </div>
+            <div class="cloud-table-wrap">
+              <table class="cloud-table">
+                <thead><tr>
+                  <th><button class="cloud-sort" type="button" data-sort="name">Name <span class="cloud-sort-arrow" aria-hidden="true">↕</span></button></th>
+                  <th><button class="cloud-sort" type="button" data-sort="definition">Definition <span class="cloud-sort-arrow" aria-hidden="true">↕</span></button></th>
+                  <th><button class="cloud-sort" type="button" data-sort="target">Target <span class="cloud-sort-arrow" aria-hidden="true">↕</span></button></th>
+                  <th><button class="cloud-sort" type="button" data-sort="status">Status <span class="cloud-sort-arrow" aria-hidden="true">↕</span></button></th>
+                  <th><button class="cloud-sort" type="button" data-sort="age">Age <span class="cloud-sort-arrow" aria-hidden="true">↕</span></button></th>
+                  <th>Actions</th>
+                </tr></thead>
+                <tbody id="cloud-resources"></tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+
+        <aside class="cloud-side">
+          <section class="panel cloud-side-panel" aria-labelledby="cloud-definitions-title">
+            <div class="cloud-side-head"><div class="cloud-side-title"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 3h7l3 3v11H5zM12 3v3h3M7.5 9h5M7.5 12h5"/></svg><h2 id="cloud-definitions-title">Definitions catalog</h2><span id="cloud-definition-count" class="count">—</span></div><button id="cloud-definitions-all" class="cloud-link" type="button">View catalog →</button></div>
+            <p class="cloud-side-sub">Create resources from curated definitions.</p>
+            <div id="cloud-definitions" class="cloud-side-list"></div>
+            <div class="cloud-side-more"><button id="cloud-definitions-more" class="cloud-link" type="button" hidden>View all definitions →</button></div>
+          </section>
+
+          <section class="panel cloud-side-panel" aria-labelledby="cloud-targets-title">
+            <div class="cloud-side-head"><div class="cloud-side-title"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="2.4"/><path d="M10 2.6v2.1M10 15.3v2.1M3.4 3.4 5 5M15 15l1.6 1.6M2.6 10h2.1M15.3 10h2.1M3.4 16.6 5 15M15 5l1.6-1.6"/></svg><h2 id="cloud-targets-title">Cloud targets</h2><span id="cloud-target-count" class="count">—</span></div><button id="cloud-targets-all" class="cloud-link" type="button">View all targets →</button></div>
+            <p class="cloud-side-sub">Destination environments for your resources.</p>
+            <div id="cloud-targets" class="cloud-side-list"></div>
+            <div class="cloud-side-more"><button id="cloud-targets-more" class="cloud-link" type="button" hidden>View all targets →</button></div>
+          </section>
+
+          <section class="panel cloud-side-panel" aria-labelledby="cloud-activity-title">
+            <div class="cloud-side-head"><div class="cloud-side-title"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3a7 7 0 1 0 0 14 7 7 0 0 0 0-14zM10 6v4l2.5 1.5"/></svg><h2 id="cloud-activity-title">Recent activity</h2></div><button id="cloud-activity-all" class="cloud-link" type="button">View all activity →</button></div>
+            <div id="cloud-activity" class="cloud-side-list"></div>
+          </section>
+        </aside>
+      </div>
     </section>
 
     <section id="cloud-create-view" class="panel create-panel" aria-labelledby="cloud-create-title" hidden>
@@ -70,21 +156,6 @@
         <fieldset id="cloud-values-fields" class="values-fields" hidden><legend>Configurable values</legend><p class="helper">Paths exposed by the selected definition.</p><div id="cloud-dynamic-fields" class="form-grid"></div></fieldset>
         <div class="form-actions"><p id="cloud-form-hint" class="helper">Choose a definition and a target to get started.</p><button id="cloud-submit" class="button button-primary" type="submit" disabled>Create resource</button></div>
       </form>
-    </section>
-
-    <section id="cloud-list-view">
-      <section class="panel" aria-labelledby="cloud-resources-title">
-        <div class="panel-heading"><div><p class="eyebrow">Resources</p><h2 id="cloud-resources-title">Cloud resources</h2></div><span id="cloud-resource-count" class="count">—</span></div>
-        <div id="cloud-resources" class="list-state" aria-live="polite">Loading cloud resources…</div>
-      </section>
-      <section class="panel" aria-labelledby="cloud-definitions-title">
-        <div class="panel-heading"><div><p class="eyebrow">Catalog</p><h2 id="cloud-definitions-title">Resource definitions</h2></div><span id="cloud-definition-count" class="count">—</span></div>
-        <div id="cloud-definitions" class="list-state" aria-live="polite">Loading resource definitions…</div>
-      </section>
-      <section class="panel" aria-labelledby="cloud-targets-title">
-        <div class="panel-heading"><div><p class="eyebrow">Targets</p><h2 id="cloud-targets-title">Cloud targets</h2></div><span id="cloud-target-count" class="count">—</span></div>
-        <div id="cloud-targets" class="list-state" aria-live="polite">Loading cloud targets…</div>
-      </section>
     </section>
 
     <section id="cloud-detail" class="panel cluster-detail" aria-labelledby="cloud-detail-title" hidden></section>

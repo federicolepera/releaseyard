@@ -35,7 +35,7 @@
       try { localStorage.setItem('idp-sidebar', next ? 'collapsed' : 'open'); } catch (_) { /* Storage can be unavailable. */ }
     });
   }
-  const state = { definitions: [], applications: [], clusters: [], selectedApplication: null, selectedCluster: null, selectedInstanceUID: '', detailTab: 'overview', deleting: false, deletionPending: new Set(), editingValues: false, valuesDraft: Object.create(null), savingValues: false, definitionQuery: '', definitionSort: 'name', definitionType: '', destinationMode: 'cluster', preview: null, previewController: null, previewSequence: 0, previewLoading: false, savingEnvironment: false, creating: false, teams: [], team: '', resourcesQuery: '', resourcesKind: '', resourcesStatus: '', resourcesExpanded: new Set(), resourcesLive: null, resourcesLiveKey: '', selectedResourceUID: '', resourcePanelTab: 'overview', activityRange: '24h', activityType: '', activitySource: '', activityQuery: '', cloudTargets: [], cloudDefinitions: [], cloudResources: [], selectedCloudResource: null, cloudCreating: false, cloudSaving: false, cloudDeleting: false, cloudResourcesError: '' };
+  const state = { definitions: [], applications: [], clusters: [], selectedApplication: null, selectedCluster: null, selectedInstanceUID: '', detailTab: 'overview', deleting: false, deletionPending: new Set(), editingValues: false, valuesDraft: Object.create(null), savingValues: false, definitionQuery: '', definitionSort: 'name', definitionType: '', destinationMode: 'cluster', preview: null, previewController: null, previewSequence: 0, previewLoading: false, savingEnvironment: false, creating: false, teams: [], team: '', resourcesQuery: '', resourcesKind: '', resourcesStatus: '', resourcesExpanded: new Set(), resourcesLive: null, resourcesLiveKey: '', selectedResourceUID: '', resourcePanelTab: 'overview', activityRange: '24h', activityType: '', activitySource: '', activityQuery: '', cloudTargets: [], cloudDefinitions: [], cloudResources: [], selectedCloudResource: null, cloudCreating: false, cloudSaving: false, cloudDeleting: false, cloudResourcesError: '', cloudSearch: '', cloudStatusFilter: '', cloudTargetFilter: '', cloudDefinitionFilter: '', cloudSort: { key: 'name', direction: 'asc' }, cloudDefinitionsExpanded: false, cloudTargetsExpanded: false, cloudActivityExpanded: false };
   state.selectedDefinition = null;
   state.canCreateApps = false;
   state.canDeleteApps = false;
@@ -3186,12 +3186,56 @@
   const logoutButton = $('#auth-logout');
   if (logoutButton) logoutButton.addEventListener('click', signOutLocally);
 
-  function cloudResourceReady(resource) {
-    const status = condition(resource, 'Ready');
-    if (!status) return { label: 'Pending', tone: 'neutral' };
-    if (status.status === 'True') return { label: 'Available', tone: 'good' };
-    if (status.status === 'False') return { label: status.reason || 'Not ready', tone: 'muted' };
-    return { label: status.reason || 'Unknown', tone: 'neutral' };
+  function cloudStatus(resource) {
+    const ready = condition(resource, 'Ready');
+    if (!ready) return { key: 'pending', label: 'Pending', tone: 'neutral', dot: '' };
+    if (ready.status === 'True') return { key: 'ready', label: 'Ready', tone: 'good', dot: 'good' };
+    if (ready.reason === 'Creating') return { key: 'provisioning', label: 'Provisioning', tone: 'info', dot: 'info' };
+    if (ready.status === 'False') return { key: 'failed', label: 'Failed', tone: 'error', dot: 'error' };
+    return { key: 'pending', label: ready.reason || 'Pending', tone: 'neutral', dot: '' };
+  }
+
+  function relativeAge(value) {
+    const date = Date.parse(value || '');
+    if (!Number.isFinite(date)) return '—';
+    const seconds = Math.max(0, Math.round((Date.now() - date) / 1000));
+    if (seconds < 60) return `${seconds}s`;
+    const minutes = Math.round(seconds / 60);
+    if (minutes < 60) return `${minutes}m`;
+    const hours = Math.round(minutes / 60);
+    if (hours < 24) return `${hours}h`;
+    return `${Math.round(hours / 24)}d`;
+  }
+
+  function formatCloudTime(value) {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return '—';
+    return new Intl.DateTimeFormat('en', { dateStyle: 'medium', timeStyle: 'short' }).format(date);
+  }
+
+  function cloudTargetInfo(name) {
+    const target = state.cloudTargets.find((item) => item.metadata?.name === name);
+    if (!target) return { name: name || '—', provider: '', region: '' };
+    return { name: target.metadata?.name || '—', provider: target.spec?.provider || '', region: target.spec?.region || '' };
+  }
+
+  function cloudIcon(kind, className = '') {
+    const span = element('span', className || 'cloud-row-icon');
+    span.setAttribute('aria-hidden', 'true');
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 20 20');
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    const paths = {
+      box: 'M10 3 3 7l7 4 7-4zM3 10l7 4 7-4M3 13l7 4 7-4',
+      document: 'M5 3h7l3 3v11H5zM12 3v3h3M7.5 9h5M7.5 12h5',
+      target: 'M10 3a7 7 0 1 0 0 14 7 7 0 0 0 0-14zM10 7a3 3 0 1 0 0 6 3 3 0 0 0 0-6z',
+      cloud: 'M6 15h8a3 3 0 0 0 .4-6A4.5 4.5 0 0 0 6 10a2.5 2.5 0 0 0 0 5z',
+      clock: 'M10 3a7 7 0 1 0 0 14 7 7 0 0 0 0-14zM10 6v4l2.5 1.5'
+    };
+    path.setAttribute('d', paths[kind] || paths.cloud);
+    svg.append(path);
+    span.append(svg);
+    return span;
   }
 
   function sortByName(items) {
@@ -3203,6 +3247,301 @@
     option.value = value;
     option.textContent = label;
     return option;
+  }
+
+  function cloudActivityEntries() {
+    const entries = [];
+    state.cloudResources.forEach((resource) => {
+      const name = resource.metadata?.name;
+      if (!name) return;
+      if (resource.metadata?.creationTimestamp) entries.push({ at: resource.metadata.creationTimestamp, text: `Created ${name}`, tone: '' });
+      const ready = condition(resource, 'Ready');
+      if (ready?.lastTransitionTime) {
+        const status = cloudStatus(resource);
+        const text = status.key === 'ready' ? `${name} is ready` : status.key === 'failed' ? `${name} provisioning failed` : `${name} provisioning started`;
+        entries.push({ at: ready.lastTransitionTime, text, tone: status.dot });
+      }
+    });
+    return entries.sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
+  }
+
+  function sortCloudResources(items) {
+    const { key, direction } = state.cloudSort;
+    const factor = direction === 'desc' ? -1 : 1;
+    return [...items].sort((a, b) => {
+      let left;
+      let right;
+      if (key === 'age') {
+        left = Date.parse(a.metadata?.creationTimestamp || '');
+        right = Date.parse(b.metadata?.creationTimestamp || '');
+      } else if (key === 'status') {
+        left = cloudStatus(a).label;
+        right = cloudStatus(b).label;
+      } else if (key === 'definition') {
+        left = a.spec?.definitionRef?.name || '';
+        right = b.spec?.definitionRef?.name || '';
+      } else if (key === 'target') {
+        left = a.spec?.targetRef?.name || '';
+        right = b.spec?.targetRef?.name || '';
+      } else {
+        left = a.metadata?.name || '';
+        right = b.metadata?.name || '';
+      }
+      if (typeof left === 'number' && typeof right === 'number') return (left - right) * factor;
+      return String(left).localeCompare(String(right)) * factor;
+    });
+  }
+
+  function filteredCloudResources() {
+    const query = state.cloudSearch.trim().toLowerCase();
+    const resources = state.cloudResources.filter((resource) => {
+      if (query) {
+        const haystack = [resource.metadata?.name, resource.spec?.definitionRef?.name, resource.spec?.targetRef?.name].filter(Boolean).join(' ').toLowerCase();
+        if (!haystack.includes(query)) return false;
+      }
+      if (state.cloudStatusFilter && cloudStatus(resource).key !== state.cloudStatusFilter) return false;
+      if (state.cloudTargetFilter && resource.spec?.targetRef?.name !== state.cloudTargetFilter) return false;
+      if (state.cloudDefinitionFilter && resource.spec?.definitionRef?.name !== state.cloudDefinitionFilter) return false;
+      return true;
+    });
+    return sortCloudResources(resources);
+  }
+
+  function renderCloudKpis() {
+    $('#cloud-kpi-resources').textContent = String(state.cloudResources.length);
+    $('#cloud-kpi-definitions').textContent = String(state.cloudDefinitions.length);
+    $('#cloud-kpi-targets').textContent = String(state.cloudTargets.length);
+    const pairs = new Set(state.cloudTargets.map((target) => `${target.spec?.provider || ''}/${target.spec?.region || ''}`).filter((pair) => pair !== '/'));
+    $('#cloud-kpi-providers').textContent = String(pairs.size);
+    const names = state.cloudTargets.map((target) => target.metadata?.name).filter(Boolean);
+    $('#cloud-kpi-providers-sub').textContent = names.length ? names.join(', ') : 'No targets configured';
+  }
+
+  function fillCloudFilter(select, allLabel, values) {
+    if (!select) return;
+    const current = select.value;
+    select.replaceChildren(cloudOption(allLabel, ''), ...values.map((value) => cloudOption(value, value)));
+    select.value = values.includes(current) ? current : '';
+  }
+
+  function renderCloudFilters() {
+    fillCloudFilter($('#cloud-target-filter'), 'All targets', state.cloudTargets.map((target) => target.metadata?.name).filter(Boolean));
+    fillCloudFilter($('#cloud-definition-filter'), 'All definitions', state.cloudDefinitions.map((definition) => definition.metadata?.name).filter(Boolean));
+    state.cloudTargetFilter = $('#cloud-target-filter')?.value || '';
+    state.cloudDefinitionFilter = $('#cloud-definition-filter')?.value || '';
+  }
+
+  function updateCloudSortHeaders() {
+    document.querySelectorAll('.cloud-sort').forEach((button) => {
+      const active = button.dataset.sort === state.cloudSort.key;
+      const arrow = button.querySelector('.cloud-sort-arrow');
+      if (arrow) arrow.textContent = active ? (state.cloudSort.direction === 'asc' ? '↑' : '↓') : '↕';
+      button.setAttribute('aria-sort', active ? (state.cloudSort.direction === 'asc' ? 'ascending' : 'descending') : 'none');
+    });
+  }
+
+  function cloudRowMenu(resource) {
+    const menu = document.createElement('details');
+    menu.className = 'detail-menu';
+    const toggle = element('summary', 'detail-menu-toggle res-row-toggle');
+    toggle.setAttribute('aria-label', `Actions for ${resource.metadata?.name || 'resource'}`);
+    toggle.title = 'Resource actions';
+    toggle.append(dotsIcon());
+    const list = element('div', 'detail-menu-list');
+    const open = element('button', 'detail-menu-item', 'Open details');
+    open.type = 'button';
+    open.addEventListener('click', () => { menu.open = false; openCloudResource(resource); });
+    const remove = element('button', 'detail-menu-item detail-menu-danger', state.cloudDeleting ? 'Deleting…' : 'Delete resource');
+    remove.type = 'button';
+    remove.disabled = !state.canDeleteResources || state.cloudDeleting;
+    if (!state.canDeleteResources) remove.title = 'You do not have permission to delete cloud resources.';
+    remove.addEventListener('click', () => { menu.open = false; deleteCloudResource(resource); });
+    list.append(open, remove);
+    menu.append(toggle, list);
+    return menu;
+  }
+
+  function renderCloudTable() {
+    const root = $('#cloud-resources');
+    if (!root) return;
+    root.replaceChildren();
+    const total = state.cloudResources.length;
+    $('#cloud-resource-count').textContent = String(total);
+    const resources = filteredCloudResources();
+    if (!total) {
+      const row = document.createElement('tr');
+      const cell = element('td', 'cloud-empty', state.cloudResourcesError || 'No cloud resources yet. Create one from a definition to get started.');
+      cell.colSpan = 6;
+      row.append(cell);
+      root.append(row);
+      return;
+    }
+    if (!resources.length) {
+      const row = document.createElement('tr');
+      const cell = element('td', 'cloud-empty', 'No resources match these filters.');
+      cell.colSpan = 6;
+      row.append(cell);
+      root.append(row);
+      return;
+    }
+    resources.forEach((resource) => {
+      const row = document.createElement('tr');
+      row.className = 'cloud-row';
+      const name = resource.metadata?.name || 'Unnamed resource';
+      const status = cloudStatus(resource);
+      const target = cloudTargetInfo(resource.spec?.targetRef?.name);
+
+      const nameCell = element('td', 'cloud-cell-name');
+      const nameWrap = element('div', 'cloud-name-cell');
+      nameWrap.append(cloudIcon('box'));
+      const open = element('button', 'cloud-name-button', name);
+      open.type = 'button';
+      open.addEventListener('click', () => openCloudResource(resource));
+      nameWrap.append(open);
+      nameCell.append(nameWrap);
+
+      const definitionCell = element('td', 'cloud-cell-muted', resource.spec?.definitionRef?.name || '—');
+      const targetCell = element('td');
+      const targetWrap = element('div', 'cloud-target-cell');
+      targetWrap.append(element('span', 'cloud-target-name', target.name));
+      const targetMeta = [target.provider, target.region].filter(Boolean).join(' · ');
+      if (targetMeta) targetWrap.append(element('span', 'cloud-target-meta', targetMeta));
+      targetCell.append(targetWrap);
+
+      const statusCell = element('td', 'cloud-cell-status');
+      statusCell.append(badge(status.label, status.tone));
+      const ageCell = element('td', 'cloud-cell-muted', relativeAge(resource.metadata?.creationTimestamp));
+      const actionsCell = element('td', 'cloud-cell-actions');
+      actionsCell.append(cloudRowMenu(resource));
+
+      row.append(nameCell, definitionCell, targetCell, statusCell, ageCell, actionsCell);
+      row.addEventListener('click', (event) => {
+        if (event.target.closest('button, summary, a, details, input, select')) return;
+        openCloudResource(resource);
+      });
+      root.append(row);
+    });
+  }
+
+  function renderCloudDefinitions() {
+    const root = $('#cloud-definitions');
+    if (!root) return;
+    root.replaceChildren();
+    $('#cloud-definition-count').textContent = String(state.cloudDefinitions.length);
+    const expanded = state.cloudDefinitionsExpanded;
+    const items = expanded ? state.cloudDefinitions : state.cloudDefinitions.slice(0, 3);
+    if (!state.cloudDefinitions.length) {
+      root.append(element('p', 'empty', 'No resource definitions available.'));
+    } else {
+      items.forEach((definition) => {
+        const item = element('article', 'cloud-catalog-item');
+        const text = element('div', 'cloud-catalog-text');
+        text.append(element('h3', 'cloud-catalog-name', definition.metadata?.name || 'Unnamed definition'));
+        text.append(element('p', 'cloud-catalog-desc', definition.spec?.description || 'No description provided.'));
+        const create = element('button', 'button button-secondary cloud-catalog-action', 'Create resource');
+        create.type = 'button';
+        create.disabled = !state.canCreateResources || !state.cloudProvisioning;
+        create.addEventListener('click', () => openCloudCreate(definition.metadata?.name));
+        item.append(cloudIcon('document', 'cloud-catalog-icon'), text, create);
+        root.append(item);
+      });
+    }
+    const more = state.cloudDefinitions.length > 3;
+    const moreButton = $('#cloud-definitions-more');
+    if (moreButton) {
+      moreButton.hidden = !more;
+      moreButton.parentElement.hidden = !more;
+      moreButton.textContent = expanded ? 'Show less' : 'View all definitions →';
+    }
+    const allButton = $('#cloud-definitions-all');
+    if (allButton) allButton.textContent = expanded ? 'Show less' : 'View catalog →';
+  }
+
+  function renderCloudTargets() {
+    const root = $('#cloud-targets');
+    if (!root) return;
+    root.replaceChildren();
+    $('#cloud-target-count').textContent = String(state.cloudTargets.length);
+    const expanded = state.cloudTargetsExpanded;
+    const items = expanded ? state.cloudTargets : state.cloudTargets.slice(0, 3);
+    if (!state.cloudTargets.length) {
+      root.append(element('p', 'empty', 'No cloud targets available.'));
+    } else {
+      items.forEach((target) => {
+        const item = element('article', 'cloud-target-item');
+        const text = element('div', 'cloud-target-text');
+        const name = target.metadata?.name || 'Unnamed target';
+        const local = /localstack/i.test(name) || /localstack/i.test(target.spec?.providerConfigRef?.name || '');
+        const label = local ? 'Local' : String(target.spec?.provider || 'Cloud').toUpperCase();
+        const titleRow = element('div', 'cloud-target-title');
+        titleRow.append(element('h3', 'cloud-target-name', name), badge(label, local ? 'good' : 'neutral'));
+        text.append(titleRow);
+        text.append(element('p', 'cloud-target-desc', `${target.spec?.provider || 'Cloud'} · ${target.spec?.region || 'No region'}`));
+        item.append(cloudIcon('cloud', 'cloud-target-icon'), text);
+        root.append(item);
+      });
+    }
+    const more = state.cloudTargets.length > 3;
+    const moreButton = $('#cloud-targets-more');
+    if (moreButton) {
+      moreButton.hidden = !more;
+      moreButton.parentElement.hidden = !more;
+      moreButton.textContent = expanded ? 'Show less' : 'View all targets →';
+    }
+    const allButton = $('#cloud-targets-all');
+    if (allButton) allButton.textContent = expanded ? 'Show less' : 'View all targets →';
+  }
+
+  function renderCloudActivity() {
+    const root = $('#cloud-activity');
+    if (!root) return;
+    root.replaceChildren();
+    const entries = cloudActivityEntries();
+    const expanded = state.cloudActivityExpanded;
+    const items = expanded ? entries : entries.slice(0, 4);
+    if (!items.length) {
+      root.append(element('p', 'empty', 'No activity yet.'));
+    } else {
+      items.forEach((entry) => {
+        const item = element('article', 'cloud-activity-item');
+        item.append(element('span', `cloud-activity-dot${entry.tone ? ` ${entry.tone}` : ''}`));
+        const body = element('div', 'cloud-activity-body');
+        body.append(element('p', 'cloud-activity-text', entry.text), element('p', 'cloud-activity-time', formatCloudTime(entry.at)));
+        item.append(body);
+        root.append(item);
+      });
+    }
+    const allButton = $('#cloud-activity-all');
+    if (allButton) {
+      allButton.hidden = entries.length <= 4;
+      allButton.textContent = expanded ? 'Show less' : 'View all activity →';
+    }
+  }
+
+  function renderCloudCreateOptions() {
+    const definitionSelect = $('#cloud-definition');
+    const targetSelect = $('#cloud-target');
+    if (!definitionSelect || !targetSelect) return;
+    const currentDefinition = definitionSelect.value;
+    const currentTarget = targetSelect.value;
+    definitionSelect.replaceChildren(cloudOption('Select a definition', ''), ...state.cloudDefinitions.map((definition) => cloudOption(definition.metadata?.name || 'Unnamed definition', definition.metadata?.name || '')));
+    targetSelect.replaceChildren(cloudOption('Select a target', ''), ...state.cloudTargets.map((target) => cloudOption(target.metadata?.name || 'Unnamed target', target.metadata?.name || '')));
+    if (state.cloudDefinitions.some((definition) => definition.metadata?.name === currentDefinition)) definitionSelect.value = currentDefinition;
+    if (state.cloudTargets.some((target) => target.metadata?.name === currentTarget)) targetSelect.value = currentTarget;
+    updateCloudSubmit();
+  }
+
+  function renderCloud() {
+    if (!$('#cloud-resources')) return;
+    renderCloudKpis();
+    renderCloudFilters();
+    renderCloudTable();
+    renderCloudDefinitions();
+    renderCloudTargets();
+    renderCloudActivity();
+    renderCloudCreateOptions();
+    updateCloudSortHeaders();
+    if (state.selectedCloudResource) renderCloudResourceDetail();
   }
 
   async function refreshCloud() {
@@ -3225,7 +3564,7 @@
     if (state.selectedCloudResource) {
       const latest = state.cloudResources.find((item) => item.metadata?.uid === state.selectedCloudResource.metadata?.uid || item.metadata?.name === state.selectedCloudResource.metadata?.name);
       state.selectedCloudResource = latest || null;
-      if (!latest) { $('#cloud-detail').hidden = true; $('#cloud-list-view').hidden = false; }
+      if (!latest) { $('#cloud-detail').hidden = true; $('#cloud-dashboard').hidden = false; }
     }
     renderCloud();
     const failure = results.find((result) => result.status === 'rejected');
@@ -3233,105 +3572,6 @@
     else notice.hidden = true;
     if (button) button.disabled = false;
     return !failure;
-  }
-
-  function renderCloud() {
-    const resources = $('#cloud-resources');
-    if (!resources) return;
-    resources.replaceChildren();
-    $('#cloud-resource-count').textContent = String(state.cloudResources.length);
-    if (!state.cloudResources.length) {
-      resources.append(element('p', 'empty', state.cloudResourcesError || 'No cloud resources yet.'));
-    } else {
-      const list = element('div', 'resource-list');
-      state.cloudResources.forEach((resource) => {
-        const row = element('article', 'resource-row');
-        const details = element('div', 'resource-main');
-        const name = resource.metadata?.name || 'Unnamed resource';
-        const open = element('button', 'application-link', name);
-        open.type = 'button';
-        open.setAttribute('aria-label', `Open cloud resource ${name} details`);
-        open.addEventListener('click', () => openCloudResource(resource));
-        const heading = element('h3', 'resource-name');
-        heading.append(open);
-        details.append(heading);
-        const definition = resource.spec?.definitionRef?.name || 'Definition not specified';
-        const target = resource.spec?.targetRef?.name || 'Target not specified';
-        details.append(element('p', 'resource-meta', `${definition} · ${target} · ${resource.metadata?.namespace || '—'}`));
-        const outputs = Object.keys(resource.status?.outputs || {});
-        if (outputs.length) details.append(element('p', 'resource-meta', `${outputs.length} output${outputs.length === 1 ? '' : 's'}`));
-        const ready = cloudResourceReady(resource);
-        const side = element('div', 'resource-side');
-        side.append(badge(ready.label, ready.tone));
-        row.append(details, side);
-        list.append(row);
-      });
-      resources.append(list);
-    }
-    renderCloudDefinitions();
-    renderCloudTargets();
-    renderCloudCreateOptions();
-    if (state.selectedCloudResource) renderCloudResourceDetail();
-  }
-
-  function renderCloudDefinitions() {
-    const root = $('#cloud-definitions');
-    if (!root) return;
-    root.replaceChildren();
-    $('#cloud-definition-count').textContent = String(state.cloudDefinitions.length);
-    if (!state.cloudDefinitions.length) {
-      root.append(element('p', 'empty', 'No resource definitions available.'));
-      return;
-    }
-    const list = element('div', 'resource-list');
-    state.cloudDefinitions.forEach((definition) => {
-      const row = element('article', 'resource-row');
-      const details = element('div', 'resource-main');
-      details.append(element('h3', 'resource-name', definition.metadata?.name || 'Unnamed definition'));
-      if (definition.spec?.description) details.append(element('p', 'resource-meta', definition.spec.description));
-      const values = Array.isArray(definition.spec?.configurableValues) ? definition.spec.configurableValues : [];
-      const summary = values.length ? values.map((value) => `${value.path} (${value.type}${value.required ? ', required' : ''})`).join(' · ') : 'No configurable values';
-      details.append(element('p', 'resource-meta', summary));
-      row.append(details);
-      list.append(row);
-    });
-    root.append(list);
-  }
-
-  function renderCloudTargets() {
-    const root = $('#cloud-targets');
-    if (!root) return;
-    root.replaceChildren();
-    $('#cloud-target-count').textContent = String(state.cloudTargets.length);
-    if (!state.cloudTargets.length) {
-      root.append(element('p', 'empty', 'No cloud targets available.'));
-      return;
-    }
-    const list = element('div', 'resource-list');
-    state.cloudTargets.forEach((target) => {
-      const row = element('article', 'resource-row');
-      const details = element('div', 'resource-main');
-      details.append(element('h3', 'resource-name', target.metadata?.name || 'Unnamed target'));
-      const providerConfig = target.spec?.providerConfigRef;
-      const reference = providerConfig?.name ? `${providerConfig.namespace ? `${providerConfig.namespace}/` : ''}${providerConfig.name}` : '';
-      details.append(element('p', 'resource-meta', `${target.spec?.provider || '—'} · ${target.spec?.region || '—'}${reference ? ` · ${reference}` : ''}`));
-      row.append(details);
-      list.append(row);
-    });
-    root.append(list);
-  }
-
-  function renderCloudCreateOptions() {
-    const definitionSelect = $('#cloud-definition');
-    const targetSelect = $('#cloud-target');
-    if (!definitionSelect || !targetSelect) return;
-    const currentDefinition = definitionSelect.value;
-    const currentTarget = targetSelect.value;
-    definitionSelect.replaceChildren(cloudOption('Select a definition', ''), ...state.cloudDefinitions.map((definition) => cloudOption(definition.metadata?.name || 'Unnamed definition', definition.metadata?.name || '')));
-    targetSelect.replaceChildren(cloudOption('Select a target', ''), ...state.cloudTargets.map((target) => cloudOption(target.metadata?.name || 'Unnamed target', target.metadata?.name || '')));
-    if (state.cloudDefinitions.some((definition) => definition.metadata?.name === currentDefinition)) definitionSelect.value = currentDefinition;
-    if (state.cloudTargets.some((target) => target.metadata?.name === currentTarget)) targetSelect.value = currentTarget;
-    updateCloudSubmit();
   }
 
   function selectedCloudDefinition() {
@@ -3393,19 +3633,22 @@
     submit.disabled = !state.canCreateResources || state.cloudSaving || !name.value.trim() || !name.checkValidity() || !definition || !target;
   }
 
-  function openCloudCreate() {
+  function openCloudCreate(definitionName = '') {
     if (!state.canCreateResources) {
       showNotice('You do not have permission to create cloud resources.', 'error');
       return;
     }
     state.cloudCreating = true;
-    $('#cloud-list-view').hidden = true;
+    state.selectedCloudResource = null;
+    $('#cloud-dashboard').hidden = true;
+    $('#cloud-detail').hidden = true;
     $('#cloud-create-view').hidden = false;
     $('#cloud-name').value = '';
-    $('#cloud-definition').value = '';
+    $('#cloud-definition').value = definitionName || '';
     $('#cloud-target').value = '';
     $('#cloud-dynamic-fields').replaceChildren();
     $('#cloud-values-fields').hidden = true;
+    if (definitionName) renderCloudValueFields();
     updateCloudSubmit();
     $('#cloud-name').focus();
   }
@@ -3413,8 +3656,8 @@
   function closeCloudCreate() {
     state.cloudCreating = false;
     $('#cloud-create-view').hidden = true;
-    $('#cloud-list-view').hidden = false;
-    if (state.selectedCloudResource) renderCloudResourceDetail();
+    $('#cloud-detail').hidden = true;
+    $('#cloud-dashboard').hidden = false;
   }
 
   function setNestedValue(target, path, value) {
@@ -3488,19 +3731,41 @@
 
   function openCloudResource(resource) {
     state.selectedCloudResource = resource;
-    $('#cloud-list-view').hidden = true;
+    $('#cloud-dashboard').hidden = true;
     $('#cloud-create-view').hidden = true;
+    $('#cloud-detail').hidden = false;
     renderCloudResourceDetail();
     $('#cloud-detail .back-button')?.focus();
   }
 
   function closeCloudResource() {
-    const name = state.selectedCloudResource?.metadata?.name;
     state.selectedCloudResource = null;
     $('#cloud-detail').hidden = true;
-    $('#cloud-list-view').hidden = false;
-    const links = [...document.querySelectorAll('#cloud-resources .application-link')];
-    (links.find((item) => item.textContent === name) || links[0] || $('#refresh-cloud'))?.focus();
+    $('#cloud-create-view').hidden = true;
+    $('#cloud-dashboard').hidden = false;
+  }
+
+  async function deleteCloudResource(resource) {
+    if (state.cloudDeleting) return;
+    if (!window.confirm(`Delete cloud resource “${resource.metadata?.name}”? The composed cloud objects will be deleted too.`)) return;
+    state.cloudDeleting = true;
+    try {
+      const response = await apiFetch(`/api/resources/${encodeURIComponent(resource.metadata.name)}`, { method: 'DELETE' });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(body.error || `Delete failed (${response.status})`);
+      }
+      state.selectedCloudResource = null;
+      $('#cloud-detail').hidden = true;
+      $('#cloud-dashboard').hidden = false;
+      await refreshCloud();
+      showNotice(`Cloud resource “${resource.metadata.name}” deleted.`, 'success');
+    } catch (error) {
+      showNotice(error.message || 'Could not delete the cloud resource.', 'error');
+    } finally {
+      state.cloudDeleting = false;
+      renderCloudTable();
+    }
   }
 
   function renderCloudResourceDetail() {
@@ -3516,9 +3781,9 @@
     const title = element('h2', '', safe(resource.metadata?.name));
     title.id = 'cloud-detail-title';
     root.append(title);
-    const ready = cloudResourceReady(resource);
+    const status = cloudStatus(resource);
     const summary = element('div', 'cluster-summary');
-    summary.append(element('span', 'cluster-summary-label', 'Status'), badge(ready.label, ready.tone));
+    summary.append(element('span', 'cluster-summary-label', 'Status'), badge(status.label, status.tone));
     if (resource.metadata?.namespace) summary.append(element('span', 'cluster-summary-label', `Namespace: ${resource.metadata.namespace}`));
     root.append(summary);
     root.append(element('p', 'resource-meta', `${resource.spec?.definitionRef?.name || '—'} · ${resource.spec?.targetRef?.name || '—'}`));
@@ -3573,46 +3838,64 @@
       const remove = element('button', 'button button-secondary', state.cloudDeleting ? 'Deleting…' : 'Delete resource');
       remove.type = 'button';
       remove.disabled = state.cloudDeleting;
-      remove.addEventListener('click', async () => {
-        if (state.cloudDeleting) return;
-        if (!window.confirm(`Delete cloud resource “${resource.metadata?.name}”? The composed cloud objects will be deleted too.`)) return;
-        state.cloudDeleting = true;
-        remove.disabled = true;
-        remove.textContent = 'Deleting…';
-        try {
-          const response = await apiFetch(`/api/resources/${encodeURIComponent(resource.metadata.name)}`, { method: 'DELETE' });
-          if (!response.ok) {
-            const body = await response.json().catch(() => ({}));
-            throw new Error(body.error || `Delete failed (${response.status})`);
-          }
-          state.selectedCloudResource = null;
-          $('#cloud-detail').hidden = true;
-          $('#cloud-list-view').hidden = false;
-          await refreshCloud();
-          showNotice(`Cloud resource “${resource.metadata.name}” deleted.`, 'success');
-        } catch (error) {
-          showNotice(error.message || 'Could not delete the cloud resource.', 'error');
-        } finally {
-          state.cloudDeleting = false;
-          remove.disabled = false;
-          remove.textContent = 'Delete resource';
-          renderCloudResourceDetail();
-        }
-      });
+      remove.addEventListener('click', () => deleteCloudResource(resource));
       actions.append(element('p', 'helper', 'Deleting the request cascades to the cloud objects it owns.'), remove);
       root.append(actions);
+    }
+  }
+
+  function toggleCloudSection(section) {
+    if (section === 'definitions') {
+      state.cloudDefinitionsExpanded = !state.cloudDefinitionsExpanded;
+      renderCloudDefinitions();
+    } else if (section === 'targets') {
+      state.cloudTargetsExpanded = !state.cloudTargetsExpanded;
+      renderCloudTargets();
+    } else if (section === 'activity') {
+      state.cloudActivityExpanded = !state.cloudActivityExpanded;
+      renderCloudActivity();
     }
   }
 
   async function initCloud() {
     const create = $('#new-cloud-resource');
     $('#refresh-cloud').addEventListener('click', refreshCloud);
-    create.addEventListener('click', openCloudCreate);
+    create.addEventListener('click', () => openCloudCreate());
     $('#cancel-cloud-create').addEventListener('click', closeCloudCreate);
     $('#cloud-name').addEventListener('input', updateCloudSubmit);
     $('#cloud-definition').addEventListener('change', () => { renderCloudValueFields(); updateCloudSubmit(); });
     $('#cloud-target').addEventListener('change', updateCloudSubmit);
     $('#cloud-create-form').addEventListener('submit', submitCloudResource);
+    $('#cloud-search').addEventListener('input', (event) => { state.cloudSearch = event.currentTarget.value; renderCloudTable(); });
+    $('#cloud-status-filter').addEventListener('change', (event) => { state.cloudStatusFilter = event.currentTarget.value; renderCloudTable(); });
+    $('#cloud-target-filter').addEventListener('change', (event) => { state.cloudTargetFilter = event.currentTarget.value; renderCloudTable(); });
+    $('#cloud-definition-filter').addEventListener('change', (event) => { state.cloudDefinitionFilter = event.currentTarget.value; renderCloudTable(); });
+    $('#cloud-reset-filters').addEventListener('click', () => {
+      state.cloudSearch = '';
+      state.cloudStatusFilter = '';
+      state.cloudTargetFilter = '';
+      state.cloudDefinitionFilter = '';
+      $('#cloud-search').value = '';
+      $('#cloud-status-filter').value = '';
+      $('#cloud-target-filter').value = '';
+      $('#cloud-definition-filter').value = '';
+      renderCloudTable();
+    });
+    document.querySelectorAll('.cloud-sort').forEach((button) => {
+      button.addEventListener('click', () => {
+        const key = button.dataset.sort;
+        state.cloudSort = state.cloudSort.key === key
+          ? { key, direction: state.cloudSort.direction === 'asc' ? 'desc' : 'asc' }
+          : { key, direction: key === 'age' ? 'desc' : 'asc' };
+        renderCloudTable();
+        updateCloudSortHeaders();
+      });
+    });
+    $('#cloud-definitions-all').addEventListener('click', () => toggleCloudSection('definitions'));
+    $('#cloud-definitions-more').addEventListener('click', () => toggleCloudSection('definitions'));
+    $('#cloud-targets-all').addEventListener('click', () => toggleCloudSection('targets'));
+    $('#cloud-targets-more').addEventListener('click', () => toggleCloudSection('targets'));
+    $('#cloud-activity-all').addEventListener('click', () => toggleCloudSection('activity'));
     await refreshCloud();
     if (!state.cloudProvisioning) {
       $('#cloud-no-crossplane').hidden = false;
