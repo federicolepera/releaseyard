@@ -1,0 +1,10 @@
+apiVersion: platform.releaseyard.io/v1alpha1
+kind: CloudTarget
+metadata:
+  name: localstack
+spec:
+  provider: aws
+  region: eu-west-1
+  providerConfigRef:
+    name: localstack
+    namespace: releaseyard-team-platform

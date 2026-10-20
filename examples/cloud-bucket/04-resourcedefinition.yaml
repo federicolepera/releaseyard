@@ -1,0 +1,27 @@
+apiVersion: platform.releaseyard.io/v1alpha1
+kind: ResourceDefinition
+metadata:
+  name: aws-bucket
+spec:
+  description: An S3 bucket managed by Crossplane.
+  configurableValues:
+    - path: bucketName
+      type: string
+      required: true
+  resources:
+    - name: bucket
+      apiVersion: s3.aws.m.upbound.io/v1beta1
+      kind: Bucket
+      base:
+        spec:
+          managementPolicies:
+            - "*"
+      mappings:
+        - from: values.bucketName
+          to: "metadata.annotations[crossplane.io/external-name]"
+        - from: target.region
+          to: spec.forProvider.region
+  outputs:
+    - name: arn
+      template: bucket
+      from: status.atProvider.arn
