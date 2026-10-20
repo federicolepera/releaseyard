@@ -4,6 +4,12 @@ metadata:
   labels:
     app.kubernetes.io/name: idp
     app.kubernetes.io/managed-by: kustomize
-  name: resource-sample
+  name: demo-bucket
+  namespace: releaseyard-team-platform
 spec:
-  # TODO(user): Add fields here
+  definitionRef:
+    name: aws-bucket
+  targetRef:
+    name: localstack
+  values:
+    bucketName: demo-bucket

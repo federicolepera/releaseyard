@@ -130,6 +130,11 @@ type ResourceOutput struct {
 	// +kubebuilder:validation:MinLength=1
 	Name string `json:"name"`
 
+	// template names the ResourceTemplate the output is read from. When empty
+	// the first template is used.
+	// +optional
+	Template string `json:"template,omitempty"`
+
 	// from is a path on the composed resource, e.g. status.atProvider.arn.
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinLength=1

@@ -100,6 +100,11 @@ spec:
                       description: name is the output key exposed on Resource.status.outputs.
                       minLength: 1
                       type: string
+                    template:
+                      description: |-
+                        template names the ResourceTemplate the output is read from. When empty
+                        the first template is used.
+                      type: string
                   required:
                   - from
                   - name
