@@ -1182,7 +1182,7 @@ html[data-theme="dark"] .badge-info { background: #163a52; color: #9ed3ff; }
 .card-head { display: flex; width: 100%; align-items: flex-start; gap: 12px; }
 .card-icon { display: grid; flex: 0 0 auto; width: 38px; height: 38px; place-items: center; border: 1px solid #d5ebe3; border-radius: 9px; background: #edf7f3; color: var(--accent); }
 .card-icon svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.6; }
-.card-name { flex: 1 1 auto; min-width: 0; color: var(--ink); font-family: "Avenir Next", Avenir, "Segoe UI", sans-serif; font-size: 16px; font-weight: 800; line-height: 1.25; letter-spacing: -.01em; overflow-wrap: anywhere; }
+.card-name { flex: 1 1 auto; min-width: 0; color: var(--ink); font-family: "Avenir Next", Avenir, "Segoe UI", sans-serif; font-size: 16px; font-weight: 760; line-height: 1.25; letter-spacing: -.01em; overflow-wrap: anywhere; }
 .card-type { flex: 0 0 auto; max-width: 46%; padding: 4px 9px; overflow: hidden; border: 1px solid transparent; border-radius: 6px; background: #eef1f2; color: #5d6870; font-size: 10px; font-weight: 800; line-height: 1.2; letter-spacing: .02em; text-overflow: ellipsis; white-space: nowrap; }
 .card-desc { display: -webkit-box; overflow: hidden; margin: 0; color: var(--muted); font-size: 12.5px; line-height: 1.55; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .card-config { display: flex; width: 100%; align-items: center; gap: 6px; margin-top: auto; padding-top: 12px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; }
