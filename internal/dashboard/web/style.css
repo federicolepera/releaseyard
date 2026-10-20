@@ -1378,3 +1378,21 @@ html[data-theme="dark"] .apps-row-toggle:hover { background: #1b3039; }
 }
 html[data-theme="dark"] .apps-kpi-icon-nodes { background: #162a45; color: #8ab6ff; }
 html[data-theme="dark"] .clusters-name-link, html[data-theme="dark"] .clusters-node-cell { color: #e5eef0; }
+
+/* Cloud resource detail */
+.page.page-cloud.is-detail-open { width: min(calc(100% - 56px), 1760px); margin-top: 24px; }
+.page.page-cloud.is-detail-open #cloud-hero { display: none; }
+#cloud-detail { width: 100%; margin: 0; padding: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
+.cloud-detail-description { margin: 2px 0 0; max-width: 760px; color: var(--muted); font-size: .9rem; line-height: 1.55; overflow-wrap: anywhere; }
+.cloud-config-values { max-height: 220px; }
+.cloud-manifest { max-height: 50vh; margin-top: 10px; }
+.cloud-count-pill { padding: 3px 9px; border: 1px solid var(--line); border-radius: 999px; background: var(--paper); color: var(--muted); font-size: .75rem; font-weight: 600; white-space: nowrap; }
+.cloud-output-value { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.cloud-output-value code { overflow-wrap: anywhere; }
+@media (max-width: 900px) {
+  .page.page-cloud.is-detail-open { width: calc(100% - 40px); margin-left: 20px; }
+}
+@media (max-width: 640px) {
+  .page.page-cloud.is-detail-open { width: calc(100% - 28px); margin-left: 14px; }
+}
+html[data-theme="dark"] .cloud-count-pill { border-color: #2a3e47; background: #1a2a31; color: #a4b4bd; }

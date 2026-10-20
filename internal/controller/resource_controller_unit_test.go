@@ -2,9 +2,11 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -197,5 +199,52 @@ func TestResourceReconcileReportsReadyAndOutputs(t *testing.T) {
 	}
 	if applied.Status.Outputs["arn"] != "arn:aws:s3:::logs-bucket" {
 		t.Fatalf("unexpected outputs: %#v", applied.Status.Outputs)
+	}
+}
+
+type conflictOnceClient struct {
+	client.Client
+	remaining int
+}
+
+func (c *conflictOnceClient) Update(ctx context.Context, obj client.Object, opts ...client.UpdateOption) error {
+	if c.remaining > 0 && obj.GetName() == "logs-bucket" {
+		c.remaining--
+		return apierrors.NewConflict(schema.GroupResource{Group: bucketGVK.Group, Resource: "buckets"}, obj.GetName(), errors.New("injected conflict"))
+	}
+	return c.Client.Update(ctx, obj, opts...)
+}
+
+func TestResourceReconcileRetriesManagedUpdateConflict(t *testing.T) {
+	resource := testResource()
+	resource.Spec.Values = &apiextensionsv1.JSON{Raw: []byte(`{"bucketName":"logs-bucket"}`)}
+	r, c := newResourceTestReconciler(t, resource, testDefinition(), testTarget())
+	reconcileResource(t, r)
+
+	// Simulate the provider changing the managed spec between reconciliation
+	// attempts so the next apply must update the object.
+	bucket := &unstructured.Unstructured{}
+	bucket.SetGroupVersionKind(bucketGVK)
+	key := types.NamespacedName{Namespace: resourceTestNamespace, Name: "logs-bucket"}
+	if err := c.Get(context.Background(), key, bucket); err != nil {
+		t.Fatalf("get composed bucket: %v", err)
+	}
+	if err := unstructured.SetNestedField(bucket.Object, "us-east-1", "spec", "forProvider", "region"); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Update(context.Background(), bucket); err != nil {
+		t.Fatalf("seed composed bucket change: %v", err)
+	}
+
+	conflicting := &conflictOnceClient{Client: c, remaining: 1}
+	r.Client = conflicting
+	reconcileResource(t, r)
+
+	if conflicting.remaining != 0 {
+		t.Fatalf("managed update conflict was not retried")
+	}
+	condition := resourceCondition(t, c)
+	if condition == nil || condition.Reason == resourceReasonApplyFailed {
+		t.Fatalf("conflict was not retried: %#v", condition)
 	}
 }

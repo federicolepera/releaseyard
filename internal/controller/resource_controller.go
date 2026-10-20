@@ -30,6 +30,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -61,6 +62,7 @@ type ResourceReconciler struct {
 // +kubebuilder:rbac:groups=platform.releaseyard.io,resources=resourcedefinitions,verbs=get;list;watch
 // +kubebuilder:rbac:groups=platform.releaseyard.io,resources=cloudtargets,verbs=get;list;watch
 // +kubebuilder:rbac:groups=s3.aws.m.upbound.io,resources=buckets,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=ec2.aws.m.upbound.io,resources=instances,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile resolves the ResourceDefinition and CloudTarget for a Resource,
 // applies the managed resources they describe and reports their status.
@@ -96,8 +98,11 @@ func (r *ResourceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	for _, template := range definition.Spec.Resources {
 		managed, ref, err := r.applyTemplate(ctx, &resource, target, template)
 		if err != nil {
-			return ctrl.Result{}, r.setCondition(ctx, &resource, metav1.ConditionFalse, resourceReasonApplyFailed,
-				fmt.Sprintf("Could not apply %q: %v", template.Name, err))
+			if setErr := r.setCondition(ctx, &resource, metav1.ConditionFalse, resourceReasonApplyFailed,
+				fmt.Sprintf("Could not apply %q: %v", template.Name, err)); setErr != nil {
+				return ctrl.Result{}, setErr
+			}
+			return ctrl.Result{RequeueAfter: resourceRequeueInterval}, nil
 		}
 		composed = append(composed, ref)
 		managedResources = append(managedResources, managed)
@@ -133,12 +138,15 @@ func (r *ResourceReconciler) applyTemplate(
 	desiredAnnotations := managed.GetAnnotations()
 	desiredOwnerReferences := managed.GetOwnerReferences()
 
-	if _, err := controllerutil.CreateOrUpdate(ctx, r.Client, managed, func() error {
-		managed.Object["spec"] = desiredSpec
-		managed.SetLabels(mergeStringMap(managed.GetLabels(), desiredLabels))
-		managed.SetAnnotations(mergeStringMap(managed.GetAnnotations(), desiredAnnotations))
-		managed.SetOwnerReferences(desiredOwnerReferences)
-		return nil
+	if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		_, err := controllerutil.CreateOrUpdate(ctx, r.Client, managed, func() error {
+			managed.Object["spec"] = desiredSpec
+			managed.SetLabels(mergeStringMap(managed.GetLabels(), desiredLabels))
+			managed.SetAnnotations(mergeStringMap(managed.GetAnnotations(), desiredAnnotations))
+			managed.SetOwnerReferences(desiredOwnerReferences)
+			return nil
+		})
+		return err
 	}); err != nil {
 		return nil, platformv1alpha1.ComposedResource{}, err
 	}

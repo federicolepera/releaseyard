@@ -35,7 +35,7 @@
       try { localStorage.setItem('idp-sidebar', next ? 'collapsed' : 'open'); } catch (_) { /* Storage can be unavailable. */ }
     });
   }
-  const state = { definitions: [], applications: [], clusters: [], clusterQuery: '', clusterStatus: '', selectedApplication: null, selectedCluster: null, selectedInstanceUID: '', detailTab: 'overview', deleting: false, deletionPending: new Set(), editingValues: false, valuesDraft: Object.create(null), savingValues: false, definitionQuery: '', definitionSort: 'name', definitionType: '', definitionView: 'grid', destinationMode: 'cluster', preview: null, previewController: null, previewSequence: 0, previewLoading: false, savingEnvironment: false, creating: false, teams: [], team: '', resourcesQuery: '', resourcesKind: '', resourcesStatus: '', resourcesExpanded: new Set(), resourcesLive: null, resourcesLiveKey: '', selectedResourceUID: '', resourcePanelTab: 'overview', activityRange: '24h', activityType: '', activitySource: '', activityQuery: '', applicationQuery: '', applicationCluster: '', applicationNamespace: '', applicationStatus: '', applicationSort: { key: 'name', direction: 'asc' }, cloudTargets: [], cloudDefinitions: [], cloudResources: [], selectedCloudResource: null, cloudCreating: false, cloudSaving: false, cloudDeleting: false, cloudResourcesError: '', cloudSearch: '', cloudStatusFilter: '', cloudTargetFilter: '', cloudDefinitionFilter: '', cloudSort: { key: 'name', direction: 'asc' }, cloudDefinitionsExpanded: false, cloudTargetsExpanded: false, cloudActivityExpanded: false };
+  const state = { definitions: [], applications: [], clusters: [], clusterQuery: '', clusterStatus: '', selectedApplication: null, selectedCluster: null, selectedInstanceUID: '', detailTab: 'overview', deleting: false, deletionPending: new Set(), editingValues: false, valuesDraft: Object.create(null), savingValues: false, definitionQuery: '', definitionSort: 'name', definitionType: '', definitionView: 'grid', destinationMode: 'cluster', preview: null, previewController: null, previewSequence: 0, previewLoading: false, savingEnvironment: false, creating: false, teams: [], team: '', resourcesQuery: '', resourcesKind: '', resourcesStatus: '', resourcesExpanded: new Set(), resourcesLive: null, resourcesLiveKey: '', selectedResourceUID: '', resourcePanelTab: 'overview', activityRange: '24h', activityType: '', activitySource: '', activityQuery: '', applicationQuery: '', applicationCluster: '', applicationNamespace: '', applicationStatus: '', applicationSort: { key: 'name', direction: 'asc' }, cloudTargets: [], cloudDefinitions: [], cloudResources: [], selectedCloudResource: null, cloudDetailTab: 'overview', cloudCreating: false, cloudSaving: false, cloudDeleting: false, cloudResourcesError: '', cloudSearch: '', cloudStatusFilter: '', cloudTargetFilter: '', cloudDefinitionFilter: '', cloudSort: { key: 'name', direction: 'asc' }, cloudDefinitionsExpanded: false, cloudTargetsExpanded: false, cloudActivityExpanded: false };
   state.selectedDefinition = null;
   state.canCreateApps = false;
   state.canDeleteApps = false;
@@ -889,6 +889,7 @@
     namespace: 'M12 3 3 7l9 4 9-4-9-4zM3 12l9 4 9-4M3 17l9 4 9-4',
     cluster: 'M4 4h16v6H4zM4 14h16v6H4zM7.5 7h.01M7.5 17h.01',
     definition: 'M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8zM14 3v5h5',
+    cloud: 'M6 15h8a3 3 0 0 0 .4-6A4.5 4.5 0 0 0 6 10a2.5 2.5 0 0 0 0 5z',
   };
 
   function metaIcon(kind) {
@@ -3881,7 +3882,7 @@
     if (state.selectedCloudResource) {
       const latest = state.cloudResources.find((item) => item.metadata?.uid === state.selectedCloudResource.metadata?.uid || item.metadata?.name === state.selectedCloudResource.metadata?.name);
       state.selectedCloudResource = latest || null;
-      if (!latest) { $('#cloud-detail').hidden = true; $('#cloud-dashboard').hidden = false; }
+      if (!latest) { $('#cloud-detail').hidden = true; $('#cloud-dashboard').hidden = false; document.querySelector('.page-cloud')?.classList.remove('is-detail-open'); }
     }
     renderCloud();
     const failure = results.find((result) => result.status === 'rejected');
@@ -4048,9 +4049,11 @@
 
   function openCloudResource(resource) {
     state.selectedCloudResource = resource;
+    state.cloudDetailTab = 'overview';
     $('#cloud-dashboard').hidden = true;
     $('#cloud-create-view').hidden = true;
     $('#cloud-detail').hidden = false;
+    document.querySelector('.page-cloud')?.classList.add('is-detail-open');
     renderCloudResourceDetail();
     $('#cloud-detail .back-button')?.focus();
   }
@@ -4060,6 +4063,7 @@
     $('#cloud-detail').hidden = true;
     $('#cloud-create-view').hidden = true;
     $('#cloud-dashboard').hidden = false;
+    document.querySelector('.page-cloud')?.classList.remove('is-detail-open');
   }
 
   async function deleteCloudResource(resource) {
@@ -4072,9 +4076,7 @@
         const body = await response.json().catch(() => ({}));
         throw new Error(body.error || `Delete failed (${response.status})`);
       }
-      state.selectedCloudResource = null;
-      $('#cloud-detail').hidden = true;
-      $('#cloud-dashboard').hidden = false;
+      closeCloudResource();
       await refreshCloud();
       showNotice(`Cloud resource “${resource.metadata.name}” deleted.`, 'success');
     } catch (error) {
@@ -4085,79 +4087,254 @@
     }
   }
 
+  const CLOUD_DETAIL_TABS = [
+    { id: 'overview', label: 'Overview' },
+    { id: 'configuration', label: 'Configuration' },
+    { id: 'conditions', label: 'Conditions' },
+    { id: 'outputs', label: 'Outputs' },
+    { id: 'composed', label: 'Composed resources' },
+    { id: 'events', label: 'Events' },
+  ];
+
+  function cloudResourceDefinition(resource) {
+    const ref = resource.spec?.definitionRef?.name;
+    if (!ref) return null;
+    return state.cloudDefinitions.find((definition) => definition.metadata?.name === ref) || null;
+  }
+
+  function cloudResourceKind(resource) {
+    const composed = Array.isArray(resource.status?.composed) ? resource.status.composed[0] : null;
+    if (composed) return { apiVersion: composed.apiVersion || '', kind: composed.kind || '' };
+    const template = cloudResourceDefinition(resource)?.spec?.resources?.[0];
+    return { apiVersion: template?.apiVersion || '', kind: template?.kind || '' };
+  }
+
+  function cloudResourceProvider(resource) {
+    return cloudTargetInfo(resource.spec?.targetRef?.name).provider || '—';
+  }
+
+  function cloudResourceLastUpdated(resource) {
+    const conditions = Array.isArray(resource.status?.conditions) ? resource.status.conditions : [];
+    let latest = '';
+    conditions.forEach((condition) => {
+      if (String(condition.lastTransitionTime || '') > latest) latest = String(condition.lastTransitionTime || '');
+    });
+    return latest || resource.metadata?.creationTimestamp || '';
+  }
+
+  function cloudDetailMetaItem(iconKind, label, value) {
+    const item = element('span', 'detail-meta-item');
+    const icon = element('span', 'detail-meta-icon'); icon.append(metaIcon(iconKind));
+    const text = element('span', 'detail-meta-text');
+    text.append(element('span', 'detail-meta-label', label), element('span', 'detail-meta-value', safe(value)));
+    item.append(icon, text);
+    return item;
+  }
+
+  function cloudDetailMenu(resource) {
+    const menu = document.createElement('details'); menu.className = 'detail-menu';
+    const toggle = element('summary', 'detail-menu-toggle');
+    toggle.setAttribute('aria-label', 'More actions'); toggle.title = 'More actions';
+    toggle.append(dotsIcon());
+    const list = element('div', 'detail-menu-list');
+    const remove = element('button', 'detail-menu-item detail-menu-danger', state.cloudDeleting ? 'Deleting…' : 'Delete resource');
+    remove.type = 'button';
+    remove.disabled = !state.canDeleteResources || state.cloudDeleting;
+    if (!state.canDeleteResources) remove.title = 'You do not have permission to delete cloud resources.';
+    remove.addEventListener('click', () => { menu.open = false; deleteCloudResource(resource); });
+    list.append(remove); menu.append(toggle, list);
+    return menu;
+  }
+
+  function cloudConfigurationCard(resource) {
+    const { section, head } = ovSection('Configuration', 'Current spec values for this resource.');
+    const manifest = element('pre', 'res-yaml cloud-manifest', JSON.stringify(resource, null, 2));
+    manifest.hidden = true;
+    const toggle = element('button', 'button button-secondary', 'View manifest');
+    toggle.type = 'button';
+    toggle.addEventListener('click', () => {
+      manifest.hidden = !manifest.hidden;
+      toggle.textContent = manifest.hidden ? 'View manifest' : 'Hide manifest';
+    });
+    head.append(toggle);
+    const values = resource.spec?.values;
+    section.append(element('pre', 'res-yaml cloud-config-values', values && typeof values === 'object' && Object.keys(values).length ? JSON.stringify(values, null, 2) : '{}'));
+    section.append(manifest);
+    return section;
+  }
+
+  function cloudConditionsCard(resource) {
+    const { section } = ovSection('Conditions', 'Current status conditions for this resource.');
+    const conditions = Array.isArray(resource.status?.conditions) ? resource.status.conditions : [];
+    if (!conditions.length) { section.append(element('p', 'helper', 'No conditions reported yet.')); return section; }
+    const table = element('table', 'ov-table');
+    const thead = document.createElement('thead'); const headRow = document.createElement('tr');
+    ['Type', 'Status', 'Reason', 'Message', 'Last transition'].forEach((label) => headRow.append(element('th', '', label)));
+    thead.append(headRow); table.append(thead);
+    const tbody = document.createElement('tbody');
+    conditions.forEach((item) => {
+      const row = document.createElement('tr');
+      row.append(element('td', '', safe(item.type || '—')));
+      const statusCell = element('td', '');
+      statusCell.append(badge(item.status || 'Unknown', item.status === 'True' ? 'good' : item.status === 'False' ? 'error' : 'neutral'));
+      row.append(statusCell, element('td', '', safe(item.reason || '—')), element('td', '', safe(item.message || '—')), element('td', '', relativeTimeAgo(item.lastTransitionTime)));
+      tbody.append(row);
+    });
+    table.append(tbody); section.append(table);
+    return section;
+  }
+
+  function cloudOutputsCard(resource) {
+    const { section } = ovSection('Outputs', 'Connection details and generated values.');
+    const outputs = Object.entries(resource.status?.outputs || {}).sort(([a], [b]) => a.localeCompare(b));
+    if (!outputs.length) { section.append(element('p', 'helper', 'No outputs reported yet.')); return section; }
+    const table = element('table', 'ov-table');
+    const thead = document.createElement('thead'); const headRow = document.createElement('tr');
+    ['Name', 'Value'].forEach((label) => headRow.append(element('th', '', label)));
+    thead.append(headRow); table.append(thead);
+    const tbody = document.createElement('tbody');
+    outputs.forEach(([key, value]) => {
+      const row = document.createElement('tr');
+      const valueCell = element('td', '');
+      const wrap = element('span', 'cloud-output-value');
+      wrap.append(element('code', '', String(value)), copyIconButton(String(value)));
+      valueCell.append(wrap);
+      row.append(element('td', '', key), valueCell);
+      tbody.append(row);
+    });
+    table.append(tbody); section.append(table);
+    return section;
+  }
+
+  function cloudComposedCard(resource, status) {
+    const { section, head } = ovSection('Composed resources', 'Kubernetes resources managed by this composite resource.');
+    const composed = Array.isArray(resource.status?.composed) ? resource.status.composed : [];
+    head.append(element('span', 'cloud-count-pill', `${composed.length} ${composed.length === 1 ? 'resource' : 'resources'}`));
+    if (!composed.length) { section.append(element('p', 'helper', 'No managed resources reported yet.')); return section; }
+    const table = element('table', 'ov-table');
+    const thead = document.createElement('thead'); const headRow = document.createElement('tr');
+    ['Name', 'Kind', 'Namespace', 'Status'].forEach((label) => headRow.append(element('th', '', label)));
+    thead.append(headRow); table.append(thead);
+    const tbody = document.createElement('tbody');
+    composed.forEach((item) => {
+      const row = document.createElement('tr');
+      row.append(element('td', '', safe(item.name || '—')), element('td', '', safe(item.kind || '—')), element('td', '', safe(item.namespace || '—')));
+      const statusCell = element('td', '');
+      if (status.label === 'Ready') statusCell.append(badge('Ready', 'good'));
+      else statusCell.append(element('span', 'ov-dash', '—'));
+      row.append(statusCell); tbody.append(row);
+    });
+    table.append(tbody); section.append(table);
+    return section;
+  }
+
+  function cloudDetailsCard(resource, ctx) {
+    const { section } = ovSection('Resource details', 'Metadata and current state.');
+    const list = element('dl', 'ov-info');
+    const infoRow = (label, value) => { const row = element('div', 'ov-info-row'); row.append(element('dt', '', label), element('dd', '', safe(value))); return row; };
+    const kindValue = [ctx.kind.apiVersion, ctx.kind.kind].filter(Boolean).join(' ') || '—';
+    list.append(
+      infoRow('Name', resource.metadata?.name || '—'),
+      infoRow('Namespace', resource.metadata?.namespace || '—'),
+      infoRow('Provider', ctx.provider),
+      infoRow('Kind', kindValue),
+      infoRow('Created', relativeTimeAgo(resource.metadata?.creationTimestamp)),
+      infoRow('Last updated', relativeTimeAgo(cloudResourceLastUpdated(resource))),
+    );
+    const statusRow = element('div', 'ov-info-row');
+    statusRow.append(element('dt', '', 'Status'));
+    const statusValue = element('dd', '');
+    statusValue.append(badge(ctx.status.label, ctx.status.tone));
+    statusRow.append(statusValue); list.append(statusRow);
+    section.append(list);
+    return section;
+  }
+
+  function cloudCrossplaneCard(resource, ctx) {
+    const { section } = ovSection('Crossplane reference', 'Managed resource identity.');
+    const list = element('dl', 'ov-info');
+    const infoRow = (label, value) => { const row = element('div', 'ov-info-row'); row.append(element('dt', '', label), element('dd', '', safe(value))); return row; };
+    list.append(
+      infoRow('API Version', ctx.kind.apiVersion || '—'),
+      infoRow('Kind', ctx.kind.kind || '—'),
+      infoRow('Metadata name', resource.metadata?.name || '—'),
+    );
+    section.append(list);
+    return section;
+  }
+
+  function renderCloudOverview(panel, resource, ctx) {
+    const grid = element('div', 'overview-grid');
+    const main = element('div', 'overview-main');
+    const side = element('div', 'overview-side');
+    main.append(cloudConfigurationCard(resource), cloudConditionsCard(resource), cloudOutputsCard(resource), cloudComposedCard(resource, ctx.status));
+    side.append(cloudDetailsCard(resource, ctx), cloudCrossplaneCard(resource, ctx));
+    grid.append(main, side);
+    panel.append(grid);
+  }
+
   function renderCloudResourceDetail() {
     const resource = state.selectedCloudResource;
     if (!resource) return;
     const root = $('#cloud-detail');
     root.replaceChildren();
     root.hidden = false;
-    const back = element('button', 'back-button', '← Back to cloud resources');
-    back.type = 'button';
-    back.addEventListener('click', closeCloudResource);
-    root.append(back, element('p', 'eyebrow', 'Cloud resource'));
-    const title = element('h2', '', safe(resource.metadata?.name));
-    title.id = 'cloud-detail-title';
-    root.append(title);
+    const definition = cloudResourceDefinition(resource);
+    const kind = cloudResourceKind(resource);
+    const provider = cloudResourceProvider(resource);
     const status = cloudStatus(resource);
-    const summary = element('div', 'cluster-summary');
-    summary.append(element('span', 'cluster-summary-label', 'Status'), badge(status.label, status.tone));
-    if (resource.metadata?.namespace) summary.append(element('span', 'cluster-summary-label', `Namespace: ${resource.metadata.namespace}`));
-    root.append(summary);
-    root.append(element('p', 'resource-meta', `${resource.spec?.definitionRef?.name || '—'} · ${resource.spec?.targetRef?.name || '—'}`));
 
-    root.append(element('h3', 'values-title', 'Values'));
-    const values = resource.spec?.values;
-    root.append(element('pre', 'res-yaml', values ? JSON.stringify(values, null, 2) : 'No values.'));
+    const header = element('div', 'detail-header');
+    const topbar = element('div', 'detail-topbar');
+    const back = element('button', 'back-button', '← Back to cloud resources');
+    back.type = 'button'; back.addEventListener('click', closeCloudResource);
+    const tools = element('div', 'detail-tools');
+    const refresh = element('button', 'button button-secondary', 'Refresh');
+    refresh.type = 'button';
+    refresh.addEventListener('click', async () => { refresh.disabled = true; try { await refreshCloud(); } finally { refresh.disabled = false; } });
+    tools.append(refresh, cloudDetailMenu(resource));
+    topbar.append(back, tools);
 
-    const conditions = Array.isArray(resource.status?.conditions) ? resource.status.conditions : [];
-    root.append(element('h3', 'values-title', 'Conditions'));
-    if (!conditions.length) root.append(element('p', 'empty', 'No conditions reported yet.'));
-    else {
-      const list = element('ul', 'cluster-node-list');
-      conditions.forEach((item) => {
-        const row = element('li', 'cluster-node');
-        row.append(element('span', 'cluster-node-name', `${item.type}: ${item.status}`));
-        if (item.reason) row.append(badge(item.reason, item.status === 'True' ? 'good' : item.status === 'False' ? 'muted' : 'neutral'));
-        if (item.message) row.append(element('span', 'resource-meta', item.message));
-        list.append(row);
-      });
-      root.append(list);
-    }
+    const titleRow = element('div', 'detail-title-row');
+    const title = element('h1', 'detail-title', safe(resource.metadata?.name || 'Unnamed resource'));
+    title.id = 'cloud-detail-title';
+    titleRow.append(title, badge(status.label, status.tone));
 
-    const outputs = Object.entries(resource.status?.outputs || {});
-    root.append(element('h3', 'values-title', 'Outputs'));
-    if (!outputs.length) root.append(element('p', 'empty', 'No outputs reported yet.'));
-    else {
-      const list = element('ul', 'cluster-node-list');
-      outputs.forEach(([key, value]) => {
-        const row = element('li', 'cluster-node');
-        row.append(element('span', 'cluster-node-name', key), element('code', '', String(value)));
-        list.append(row);
-      });
-      root.append(list);
-    }
+    const meta = element('div', 'detail-meta');
+    const metaEntries = [
+      ['namespace', 'Namespace', resource.metadata?.namespace],
+      ['cloud', 'Provider', provider],
+      ['definition', 'Kind', [kind.apiVersion, kind.kind].filter(Boolean).join(' ')],
+    ].filter((entry) => entry[2]);
+    metaEntries.forEach((entry, index) => {
+      if (index > 0) meta.append(element('span', 'detail-meta-divider'));
+      meta.append(cloudDetailMetaItem(entry[0], entry[1], entry[2]));
+    });
 
-    const composed = Array.isArray(resource.status?.composed) ? resource.status.composed : [];
-    root.append(element('h3', 'values-title', 'Composed resources'));
-    if (!composed.length) root.append(element('p', 'empty', 'No managed resources reported yet.'));
-    else {
-      const list = element('ul', 'cluster-node-list');
-      composed.forEach((item) => {
-        const row = element('li', 'cluster-node');
-        row.append(element('span', 'cluster-node-name', `${item.kind}/${item.name}`), element('span', 'resource-meta', item.namespace || '—'));
-        list.append(row);
-      });
-      root.append(list);
-    }
+    header.append(topbar, titleRow);
+    header.append(element('p', 'cloud-detail-description', definition?.spec?.description || 'Cloud resource managed by Crossplane.'));
+    header.append(meta);
+    root.append(header);
 
-    if (state.canDeleteResources) {
-      const actions = element('div', 'form-actions');
-      const remove = element('button', 'button button-secondary', state.cloudDeleting ? 'Deleting…' : 'Delete resource');
-      remove.type = 'button';
-      remove.disabled = state.cloudDeleting;
-      remove.addEventListener('click', () => deleteCloudResource(resource));
-      actions.append(element('p', 'helper', 'Deleting the request cascades to the cloud objects it owns.'), remove);
-      root.append(actions);
+    const tabs = element('nav', 'detail-tabs');
+    tabs.setAttribute('aria-label', 'Cloud resource sections');
+    CLOUD_DETAIL_TABS.forEach((tab) => {
+      const button = element('button', `detail-tab${state.cloudDetailTab === tab.id ? ' is-active' : ''}`, tab.label);
+      button.type = 'button'; button.setAttribute('role', 'tab');
+      button.setAttribute('aria-selected', state.cloudDetailTab === tab.id ? 'true' : 'false');
+      button.addEventListener('click', () => { state.cloudDetailTab = tab.id; renderCloudResourceDetail(); });
+      tabs.append(button);
+    });
+    const panel = element('div', 'detail-panel');
+    root.append(tabs, panel);
+
+    if (state.cloudDetailTab === 'overview') {
+      renderCloudOverview(panel, resource, { definition, kind, provider, status });
+    } else {
+      const label = CLOUD_DETAIL_TABS.find((tab) => tab.id === state.cloudDetailTab)?.label || 'This';
+      const placeholder = element('section', 'ov-section');
+      placeholder.append(element('h4', 'ov-section-title', label), element('p', 'helper', `${label} view will be available next.`));
+      panel.append(placeholder);
     }
   }
 
