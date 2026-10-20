@@ -24,16 +24,36 @@ import (
 // EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
-// CloudTargetSpec defines the desired state of CloudTarget
+// CloudTargetSpec defines the desired state of CloudTarget.
 type CloudTargetSpec struct {
-	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
-	// The following markers will use OpenAPI v3 schema to validate the value
-	// More info: https://book.kubebuilder.io/reference/markers/crd-validation.html
+	// provider is the cloud provider this target belongs to.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Enum=aws
+	Provider string `json:"provider"`
 
-	// foo is an example field of CloudTarget. Edit cloudtarget_types.go to remove/update
-	// +optional
-	Foo *string `json:"foo,omitempty"`
+	// region is the default region for resources that use this target.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=63
+	Region string `json:"region"`
+
+	// providerConfigRef points at the Crossplane ProviderConfig that supplies
+	// credentials and the endpoint for this target.
+	// +kubebuilder:validation:Required
+	ProviderConfigRef ProviderConfigReference `json:"providerConfigRef"`
+}
+
+// ProviderConfigReference identifies a Crossplane ProviderConfig.
+type ProviderConfigReference struct {
+	// name is the ProviderConfig name.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	Name string `json:"name"`
+
+	// namespace is the namespace that contains the ProviderConfig.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	Namespace string `json:"namespace"`
 }
 
 // CloudTargetStatus defines the observed state of CloudTarget.

@@ -39,10 +39,38 @@ spec:
           spec:
             description: spec defines the desired state of CloudTarget
             properties:
-              foo:
-                description: foo is an example field of CloudTarget. Edit cloudtarget_types.go
-                  to remove/update
+              provider:
+                description: provider is the cloud provider this target belongs to.
+                enum:
+                - aws
                 type: string
+              providerConfigRef:
+                description: |-
+                  providerConfigRef points at the Crossplane ProviderConfig that supplies
+                  credentials and the endpoint for this target.
+                properties:
+                  name:
+                    description: name is the ProviderConfig name.
+                    minLength: 1
+                    type: string
+                  namespace:
+                    description: namespace is the namespace that contains the ProviderConfig.
+                    minLength: 1
+                    type: string
+                required:
+                - name
+                - namespace
+                type: object
+              region:
+                description: region is the default region for resources that use this
+                  target.
+                maxLength: 63
+                minLength: 1
+                type: string
+            required:
+            - provider
+            - providerConfigRef
+            - region
             type: object
           status:
             description: status defines the observed state of CloudTarget
