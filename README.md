@@ -8,7 +8,7 @@
 <div align="center">
 
 <p align="center">
-  A Kubernetes-native platform that turns a curated Helm catalog into self-service application delivery across clusters, with a real-time dashboard and optional cloud provisioning.
+  A Kubernetes-native internal developer platform that turns a curated Helm catalog into self-service application delivery across clusters, with a real-time dashboard and optional cloud provisioning.
 </p>
 
 <div align="center">
@@ -20,22 +20,20 @@
 </div>
 
 ## Table of Contents
+
 - [What is ReleaseYard?](#what-is-releaseyard)
 - [How it works](#how-it-works)
 - [Dashboard](#dashboard)
-- [Application placement](#application-placement)
-- [Optional cloud provisioning](#optional-cloud-provisioning)
+- [Application delivery](#application-delivery)
+- [Optional cloud resources](#optional-cloud-resources)
 - [Quickstart](#quickstart)
   - [Local Kind demo](#local-kind-demo)
   - [Helm chart](#helm-chart)
   - [YAML bundle](#yaml-bundle)
 - [Configuration](#configuration)
-  - [Cluster](#cluster)
-  - [ApplicationDefinition](#applicationdefinition)
-  - [Application](#application)
-  - [Cloud resources](#cloud-resources)
 - [Authentication & authorization](#authentication--authorization)
 - [Observability](#observability)
+- [Documentation](#documentation)
 - [Development](#development)
 - [Contributing](#contributing)
 - [Disclaimer](#disclaimer)
@@ -43,37 +41,35 @@
 
 ## What is ReleaseYard?
 
-**ReleaseYard** is a Kubernetes operator **and** a web dashboard that turn a
-curated Helm catalog into self-service application deployment across one or
-more Kubernetes clusters. A platform team registers target clusters and
-publishes reusable templates; a team then picks a template from the catalog and
-creates an `Application`. The operator installs, updates, and uninstalls the
-matching Helm release on the selected cluster.
+**ReleaseYard** is a Kubernetes operator and web dashboard for platform teams. It
+turns a curated Helm catalog into self-service application delivery across one
+or more Kubernetes clusters. A platform team registers clusters and publishes
+reusable templates; a team picks a template and creates an `Application`. The
+operator installs, updates, and removes the matching Helm release on the
+selected cluster.
 
-It features:
+It is built around a small set of ideas:
 
-- **Kubernetes-native API**: everything is a CRD on the management cluster, so
-  the platform is GitOps-friendly and has no proprietary state store.
-- **Curated catalog**: `ApplicationDefinition` pins a chart, its defaults, and
-  the *only* value paths an `Application` may override.
-- **Multi-cluster delivery**: install on a single `Cluster` or fan out to every
-  cluster matching an environment.
-- **Safe installs**: chart bytes are fetched and pinned by SHA-256 digest before
-  Helm ever sees them, and the manager only talks to allowed chart hosts.
-- **Real-time dashboard**: browse the catalog, create and manage Applications,
-  inspect live workloads, logs, CPU/memory, and activity.
-- **RBAC-driven authorization**: users sign in with OIDC (or a local
-  administrator) and the management cluster's Kubernetes RBAC decides what they
-  may do.
-- **Team isolation**: teams live in `releaseyard-team-<group>` namespaces and
-  are granted exactly the definitions and clusters they need.
-- **Optional cloud provisioning**: request cloud resources through
-  `CloudTarget` / `ResourceDefinition` / `Resource` and let Crossplane create
-  them. Crossplane is never bundled with ReleaseYard.
+- **Kubernetes-native API**: everything is a CRD on the management cluster. No
+  proprietary state store, and the platform is GitOps-friendly.
+- **Curated catalog**: an `ApplicationDefinition` pins a chart, its defaults,
+  and the only values an `Application` may override.
+- **Multi-cluster delivery**: target one `Cluster` or snapshot every cluster
+  matching an environment.
+- **Safe installs**: chart bytes are verified by SHA-256 before Helm sees them,
+  and the manager only downloads from allowed chart hosts.
+- **Real-time dashboard**: browse the catalog, create Applications, inspect live
+  workloads, logs, CPU/memory, and activity.
+- **Kubernetes RBAC**: users sign in with OIDC (or the local administrator) and
+  the management cluster decides what they may do.
+- **Team isolation**: teams live in `releaseyard-team-<group>` namespaces.
+- **Optional cloud provisioning**: `CloudTarget`, `ResourceDefinition`, and
+  `Resource` can create cloud objects through Crossplane. Crossplane is never
+  bundled with ReleaseYard.
 
 ## How it works
 
-```
+```text
  ApplicationDefinition ──┐
  Cluster ────────────────┼──► ReleaseYard operator ──► managed clusters (Helm)
  Application ────────────┘
@@ -91,7 +87,7 @@ resources:
 | `Cluster` | Cluster | A target workload cluster, reached through a kubeconfig Secret. |
 | `ApplicationDefinition` | Cluster | A pinned Helm chart plus defaults and the typed value surface. |
 | `Application` | Namespaced | A request to deploy that chart on one cluster or an environment. |
-| `CloudTarget` | Cluster | Where cloud resources should be created (provider, region, credentials). |
+| `CloudTarget` | Cluster | Where cloud resources should be created: provider, region, credentials. |
 | `ResourceDefinition` | Cluster | A golden path for a cloud resource: templates, mappings, and outputs. |
 | `Resource` | Namespaced | A team request for a cloud resource, rendered into Crossplane objects. |
 
@@ -100,50 +96,51 @@ and verifies the chart, and installs a Helm release named after the team and the
 Application. It keeps the release in sync on updates and uninstalls it when the
 `Application` is deleted.
 
+Read more in [Architecture](docs/architecture.md).
+
 ## Dashboard
 
-The dashboard is a web UI for platform admins and teams. It includes:
+The dashboard is the front door for platform admins and teams:
 
-- **Catalog**: browse validated Application Definitions and create Applications.
-- **Applications**: manage every Application owned by the signed-in user.
+- **Catalog**: browse validated `ApplicationDefinition`s and create Applications.
+- **Applications**: manage Applications owned by the signed-in user.
 - **Clusters**: see registered target clusters, connectivity, and nodes.
-- **Cloud**: when Crossplane is installed, browse the available cloud targets and
-  resource definitions and create or delete `Resource` requests from the
-  dashboard.
-- **Application detail**: four tabs for a running Application.
-  - **Overview**: status, placement, release information, and recent activity.
-  - **Configuration**: the definition contract, overrides, rendered YAML, and change history.
-  - **Observability**: live resources, Pod logs, and Pod CPU/memory usage.
-  - **Activity**: Kubernetes events, warnings, and the latest deployment.
-- **Administration**: Identity provider, Cluster access, Access definitions, and
-  Access applications for the built-in local administrator or authorized OIDC
-  groups.
+- **Cloud**: when Crossplane is installed, browse cloud targets and resource
+  definitions, and create or delete `Resource` requests.
+- **Application detail**: Overview, Resources, Configuration, Observability, and
+  Activity tabs, including live resource YAML, Pod logs, and CPU/memory.
+- **Administration**: Identity provider, Access definitions, Cluster access, and
+  Access applications. The panel materializes Kubernetes RBAC; it does not keep
+  a separate permission model.
 
-The dashboard starts with **local administrator authentication only**; no
-identity provider is required to install it. OIDC can be configured later from
-the Administration page, without a restart.
+A fresh installation starts with **local administrator authentication only**.
+OIDC can be configured later from the Administration page, without a restart.
 
-## Application placement
+See the [Dashboard documentation](docs/dashboard.md).
+
+## Application delivery
 
 An `Application` can target one cluster or an environment:
 
 - **One cluster**: set `spec.clusterRef`. The Application produces one Helm
   release on that cluster.
-- **All clusters in an environment**: set `spec.environment`. ReleaseYard takes
+- **All clusters in an environment**: set `spec.environment`. ReleaseYard stores
   an immutable snapshot of the matching `Cluster` names and UIDs at creation
-  time and produces one Helm release per target.
+  time and produces one release per target.
 
 The release namespace can be selected with `spec.releaseNamespace` when the
 definition allows it; otherwise the definition's `spec.release.namespace` is
-used. Release names are built from the team namespace token and the Application
-name, so different teams can use the same Application name safely.
+used. Release names combine the team namespace token and the Application name,
+so different teams can use the same Application name safely.
 
-## Optional cloud provisioning
+See [Applications](docs/applications.md) for the full contract and lifecycle.
+
+## Optional cloud resources
 
 ReleaseYard can expose cloud resources through the same self-service model. The
-integration is intentionally **optional** and **separate**: Crossplane is
-installed and operated by the platform team, while ReleaseYard only creates
-Managed Resources through the Kubernetes API.
+integration is intentionally **optional** and **separate**: the platform team
+installs and operates Crossplane, while ReleaseYard only creates managed
+resources through the Kubernetes API.
 
 > [!IMPORTANT]
 > The ReleaseYard Helm chart never installs Crossplane. Do not add it as a
@@ -154,32 +151,21 @@ The model has three pieces:
 - **`CloudTarget`** — *where* to create resources: provider, region, and a
   reference to a namespaced Crossplane `ProviderConfig` with credentials and
   endpoint.
-- **`ResourceDefinition`** — *what* to create: one or more managed-resource
-  templates, a static `base`, mappings from `values.*` / `target.*` into the
-  managed resource, and outputs read back from its status.
-- **`Resource`** — the team request: a definition reference, a target
-  reference, and the allowed values.
+- **`ResourceDefinition`** — *what* to create: managed-resource templates, a
+  static `base`, mappings from `values.*` / `target.*`, and outputs read from
+  status.
+- **`Resource`** — the team request: definition, target, and allowed values.
 
-For the local demo, [`examples/cloud-bucket/`](examples/cloud-bucket/) contains
-the full sequence:
+The local demo in [`examples/cloud-bucket/`](examples/cloud-bucket/) shows the
+full sequence for an S3 bucket. The real-AWS EC2 example is in
+[`examples/aws-ec2/`](examples/aws-ec2/).
 
-```text
-00-provider.yaml        Crossplane AWS S3 provider
-01-secret.yaml          fake LocalStack credentials
-02-providerconfig.yaml  credentials + LocalStack endpoint
-03-cloudtarget.yaml     ReleaseYard CloudTarget
-04-resourcedefinition.yaml  ReleaseYard ResourceDefinition
-05-resource.yaml        ReleaseYard Resource -> S3 bucket
-```
-
-`hack/setup-crossplane-localstack.sh` wires a Crossplane provider to a local
-LocalStack instance. It is a development helper only: LocalStack accepts any
-credentials and the provider is configured to skip real AWS checks. Never use
-that endpoint or those settings in production.
+See [Cloud resources](docs/cloud-resources.md) for prerequisites, credentials,
+and the Crossplane contract.
 
 ## Quickstart
 
-Requirements: Docker, `kubectl`, Kind, Go, Helm and Python 3.
+Requirements: Docker, `kubectl`, Kind, Go, Helm, and Python 3.
 
 ### Local Kind demo
 
@@ -199,7 +185,7 @@ kind load docker-image releaseyard-controller:dev --name releaseyard-a
 kind load docker-image releaseyard-dashboard:dev --name releaseyard-a
 ```
 
-Install the controller manager with the chart:
+Install the controller with the chart:
 
 ```bash
 helm upgrade --install idp dist/chart \
@@ -209,8 +195,7 @@ helm upgrade --install idp dist/chart \
   --set manager.allowedChartHosts=chartmuseum.chartmuseum.svc.cluster.local:8080
 ```
 
-Deploy the dashboard with the local kustomization (it expects the
-`releaseyard-dashboard:dev` image loaded above):
+Deploy the dashboard with the local kustomization:
 
 ```bash
 kubectl --context kind-releaseyard-a apply -k config/dashboard
@@ -233,7 +218,7 @@ kubectl --context kind-releaseyard-a apply -f config/samples/platform_v1alpha1_a
 kubectl --context kind-releaseyard-a apply -f config/samples/platform_v1alpha1_application.yaml
 ```
 
-Open the dashboard at `http://127.0.0.1:8080` with a port-forward:
+Open the dashboard at `http://127.0.0.1:8080`:
 
 ```bash
 kubectl --context kind-releaseyard-a -n idp-system port-forward service/releaseyard-dashboard 8080:8080
@@ -247,12 +232,13 @@ kubectl --context kind-releaseyard-a -n idp-system get secret releaseyard-dashbo
 ```
 
 To try the optional cloud flow, install Crossplane on `releaseyard-a`, run
-`bash hack/setup-crossplane-localstack.sh`, then apply the manifests in
-`examples/cloud-bucket/` in order.
+`bash hack/setup-crossplane-localstack.sh`, then apply
+`examples/cloud-bucket/03-cloudtarget.yaml` through `05-resource.yaml`. The
+setup script installs LocalStack, the S3 provider, the credentials Secret, and
+the `ProviderConfig`.
 
-After code changes, `hack/deploy-controller-kind.sh` and
-`hack/deploy-dashboard-kind.sh` rebuild the image, load it into Kind, and roll
-the existing Deployment.
+See [Getting started](docs/getting-started.md) for the same flow with more
+detail and cleanup commands.
 
 ### Helm chart
 
@@ -268,187 +254,86 @@ Enable the dashboard with `dashboard.enabled=true` and set
 `dashboard.image.repository`, `dashboard.image.tag`, and `dashboard.publicURL`.
 With the default chart naming the dashboard Service is `<release>-dashboard`
 (for example `idp-dashboard`) and the local administrator Secret is
-`<release>-dashboard-local-admin`. The chart can also create an optional Ingress
-when an Ingress class, hostname, and TLS Secret are available.
+`<release>-dashboard-local-admin`.
+
+See [Configuration](docs/configuration.md) for the important values.
 
 ### YAML bundle
 
-Generate a single installable manifest and apply it:
+Generate a single controller manifest and apply it:
 
 ```bash
 make build-installer IMG=<registry>/releaseyard-controller:<tag>
 kubectl apply -f dist/install.yaml
 ```
 
+The bundle contains the CRDs and the controller, not the optional dashboard.
+
 ## Configuration
 
-### Cluster
+The main configuration surfaces are:
 
-A `Cluster` points at a kubeconfig Secret in the manager's credentials
-namespace. The Secret must contain the kubeconfig under the `kubeconfig` key:
+- **`ApplicationDefinition`** — chart repository, name, pinned version, release
+  namespace, defaults, and `configurableValues`.
+- **`Application`** — definition reference, one placement (`clusterRef` or
+  `environment`), optional `releaseNamespace`, and values.
+- **`CloudTarget` / `ResourceDefinition` / `Resource`** — the optional cloud
+  contract.
+- **Helm values** — manager image, allowed chart hosts, RBAC helpers, dashboard
+  image/public URL, metrics, and optional Ingress.
 
-```yaml
-apiVersion: platform.releaseyard.io/v1alpha1
-kind: Cluster
-metadata:
-  name: releaseyard-managed-a
-spec:
-  kubeconfigSecretRef:
-    name: releaseyard-managed-a-kubeconfig
-```
-
-### ApplicationDefinition
-
-An `ApplicationDefinition` is the catalog entry. It pins the chart, the release
-namespace, defaults, and the typed paths an `Application` may override:
-
-```yaml
-apiVersion: platform.releaseyard.io/v1alpha1
-kind: ApplicationDefinition
-metadata:
-  name: releaseyard-demo
-spec:
-  description: Demo application
-  chart:
-    repository: http://chartmuseum.chartmuseum.svc.cluster.local:8080
-    name: releaseyard-demo
-    version: 0.2.0
-  release:
-    namespace: applications
-    allowNamespaceOverride: true
-  defaults:
-    replicaCount: 1
-    image:
-      repository: nginx
-      tag: 1.27-alpine
-  configurableValues:
-    - path: image.repository
-      type: string
-    - path: image.tag
-      type: string
-    - path: replicaCount
-      type: integer
-      minimum: 1
-      maximum: 10
-```
-
-Only the paths listed in `configurableValues` are accepted from an
-`Application`; the definition's `defaults` supply the rest.
-
-### Application
-
-```yaml
-apiVersion: platform.releaseyard.io/v1alpha1
-kind: Application
-metadata:
-  name: demo
-  namespace: releaseyard-team-platform
-spec:
-  applicationDefinitionRef:
-    name: releaseyard-demo
-  clusterRef:
-    name: releaseyard-managed-a
-  values:
-    replicaCount: 2
-    image:
-      tag: 1.27-alpine
-```
-
-Use `spec.environment` instead of `spec.clusterRef` to target every matching
-cluster. Both `applicationDefinitionRef` and the placement choice are immutable
-after creation.
-
-### Cloud resources
-
-```yaml
-apiVersion: platform.releaseyard.io/v1alpha1
-kind: CloudTarget
-metadata:
-  name: localstack
-spec:
-  provider: aws
-  region: eu-west-1
-  providerConfigRef:
-    name: localstack
-    namespace: releaseyard-team-platform
----
-apiVersion: platform.releaseyard.io/v1alpha1
-kind: ResourceDefinition
-metadata:
-  name: aws-bucket
-spec:
-  description: An S3 bucket managed by Crossplane.
-  configurableValues:
-    - path: bucketName
-      type: string
-      required: true
-  resources:
-    - name: bucket
-      apiVersion: s3.aws.m.upbound.io/v1beta1
-      kind: Bucket
-      base:
-        spec:
-          managementPolicies:
-            - "*"
-      mappings:
-        - from: values.bucketName
-          to: "metadata.annotations[crossplane.io/external-name]"
-        - from: target.region
-          to: spec.forProvider.region
-  outputs:
-    - name: arn
-      template: bucket
-      from: status.atProvider.arn
----
-apiVersion: platform.releaseyard.io/v1alpha1
-kind: Resource
-metadata:
-  name: demo-bucket
-  namespace: releaseyard-team-platform
-spec:
-  definitionRef:
-    name: aws-bucket
-  targetRef:
-    name: localstack
-  values:
-    bucketName: demo-bucket
-```
-
-The `Resource` status reports the composed objects, the collected `outputs`, and
-a `Ready` condition. Managed resources are owned by the `Resource`, so deleting
-the request cascades to the cloud objects.
+Examples are in [`config/samples/`](config/samples/). Full details are in
+[Configuration](docs/configuration.md).
 
 ## Authentication & authorization
 
-- **Local administrator** — the chart bootstraps a named Secret with a bcrypt
-  hash and a generated initial password. The password is never stored in Helm
-  values or printed in logs. Sign in as `admin` and change the configuration
-  from the dashboard.
+- **Local administrator** — the chart bootstraps a Secret with a bcrypt hash and
+  a generated initial password. Sign in as `admin` and change the dashboard
+  configuration. The password is never stored in Helm values or printed in logs.
 - **OIDC** — configure issuer URL, client ID, and client secret from the
-  Administration page. The dashboard stores them in a dedicated Secret and
-  applies them immediately, without a restart.
+  Administration page. The dashboard stores them in a Secret and applies them
+  immediately, without a restart.
 - **Authorization** — the dashboard impersonates the signed-in user, so the
   management cluster's Kubernetes RBAC is the source of truth. Any user may read
   the catalog; writes require the corresponding RBAC permission.
-- **Administration area** — available to the local administrator and to OIDC
-  groups listed in `dashboard.adminGroups` (with `rbac.helpers.enabled=true`
-  binding the shipped dashboard admin role).
+- **Administration** — available to the local administrator and to OIDC groups
+  listed in `dashboard.adminGroups` (requires `rbac.helpers.enabled=true`).
 - **Helper roles** — the chart can install admin/editor/viewer roles for
   Applications, Application Definitions, and Clusters when
   `rbac.helpers.enabled=true`.
 
+See [Access control](docs/access-control.md) for the full model.
+
 ## Observability
 
-The Application detail page shows live resources, Pod logs, and Pod CPU/memory
-read from the managed cluster. CPU/memory requires `metrics-server` on the
-managed cluster; when it is absent the dashboard reports that instead of
-failing. `hack/setup-managed-metrics.sh` installs it on the Kind workload
-clusters.
+The Application detail page reads live data from the target cluster:
 
-The controller manager exposes Prometheus metrics on its secure metrics endpoint
-when `metrics.enabled=true`. The dashboard also ships an Overview with recent
-activity and a per-Application Activity timeline built from Kubernetes events
-(note that Kubernetes event retention is cluster-defined and usually short).
+- resource YAML with status (Secrets excluded);
+- Pod logs;
+- per-Pod CPU and memory from `metrics.k8s.io`;
+- Kubernetes events and recent deployment activity.
+
+CPU/memory requires `metrics-server` on the managed cluster. When it is absent,
+the dashboard reports that instead of failing. `hack/setup-managed-metrics.sh`
+installs it on the Kind workload clusters.
+
+The controller manager exposes Prometheus metrics on its secure endpoint when
+`metrics.enabled=true`. See [Observability](docs/observability.md).
+
+## Documentation
+
+| Topic | Description |
+|-------|-------------|
+| [Getting started](docs/getting-started.md) | Local Kind demo, Helm install, dashboard access, cleanup |
+| [Architecture](docs/architecture.md) | Control plane, CRDs, reconciliation, safety model |
+| [Dashboard](docs/dashboard.md) | Pages, detail tabs, and administration |
+| [Applications](docs/applications.md) | Catalog contract, placement, values, release lifecycle |
+| [Cloud resources](docs/cloud-resources.md) | Crossplane integration, targets, definitions, examples |
+| [Access control](docs/access-control.md) | Local admin, OIDC, impersonation, team namespaces, RBAC |
+| [Observability](docs/observability.md) | Live resources, logs, metrics, events, Prometheus |
+| [Configuration](docs/configuration.md) | CRD fields and Helm values |
+| [Development](docs/development.md) | Build, test, lint, e2e, local workflows |
+| [Troubleshooting](docs/troubleshooting.md) | Common failures and fixes |
 
 ## Development
 
@@ -465,6 +350,8 @@ The end-to-end suite creates its own Kind cluster, deploys the manager, and
 checks the manager, the metrics endpoint, and the `Resource` controller. The
 chart has a separate workflow that lints and installs the chart to catch
 distribution drift.
+
+See [Development](docs/development.md) for local image rebuilds and test details.
 
 ## Contributing
 
