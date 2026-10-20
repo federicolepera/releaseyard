@@ -54,7 +54,10 @@ var _ = Describe("Resource Controller", func() {
 						Name:      resourceName,
 						Namespace: resourceNamespace,
 					},
-					// TODO(user): Specify other spec details if needed.
+					Spec: platformv1alpha1.ResourceSpec{
+						DefinitionRef: platformv1alpha1.LocalReference{Name: "missing-definition"},
+						TargetRef:     platformv1alpha1.LocalReference{Name: "missing-target"},
+					},
 				}
 				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
 			}

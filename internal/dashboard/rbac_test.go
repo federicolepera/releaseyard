@@ -51,11 +51,11 @@ func TestWriteUsesImpersonatedClient(t *testing.T) {
 	}
 
 	auth := newAuthHandler(k8s, testNamespace, publicURL, "", "", factory, "", "")
-	runtime, err := discoverOIDCRuntime(context.Background(), issuer, redirect, testOIDCClientID, "secret")
+	discoveredRuntime, err := discoverOIDCRuntime(context.Background(), issuer, redirect, testOIDCClientID, "secret")
 	if err != nil {
 		t.Fatalf("discover runtime: %v", err)
 	}
-	auth.oidc.Store(runtime)
+	auth.oidc.Store(discoveredRuntime)
 	handler := securityHeaders(auth.middleware(NewHandler(k8s, testNamespace)))
 
 	login := beginTestLogin(t, handler, provider)

@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"strconv"
 	"time"
 
@@ -276,9 +277,7 @@ func mergeStringMap(existing, desired map[string]string) map[string]string {
 	if existing == nil {
 		existing = map[string]string{}
 	}
-	for key, value := range desired {
-		existing[key] = value
-	}
+	maps.Copy(existing, desired)
 	return existing
 }
 

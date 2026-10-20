@@ -127,11 +127,11 @@ func buildOIDCRuntime(ctx context.Context, config identityProviderConfig, public
 	if err != nil {
 		return nil, errors.New("issuer URL must be an absolute HTTP(S) URL without user info, query, or fragment")
 	}
-	if issuer.Scheme == "http" && !isDevelopmentHost(issuer.Hostname()) {
+	if issuer.Scheme == schemeHTTP && !isDevelopmentHost(issuer.Hostname()) {
 		return nil, errors.New("HTTP issuer is allowed only for localhost development hosts")
 	}
 	redirect := *publicURL
-	redirect.Path = "/auth/callback"
+	redirect.Path = authCallbackPath
 	return discoverOIDCRuntime(ctx, issuer, &redirect, config.ClientID, config.ClientSecret)
 }
 
@@ -184,7 +184,7 @@ func (a *authHandler) callbackURL() string {
 		return ""
 	}
 	u := *a.publicURL
-	u.Path = "/auth/callback"
+	u.Path = authCallbackPath
 	return u.String()
 }
 
@@ -231,7 +231,7 @@ func (a *authHandler) putIdentityProvider(w http.ResponseWriter, r *http.Request
 		return
 	}
 	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
-	if err != nil || mediaType != "application/json" {
+	if err != nil || mediaType != mediaTypeJSON {
 		writeError(w, http.StatusUnsupportedMediaType, "Content-Type application/json is required")
 		return
 	}

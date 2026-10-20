@@ -62,6 +62,13 @@ const (
 	applicationWorkloadDaemonSetKind   = "DaemonSet"
 	applicationWorkloadJobKind         = "Job"
 	applicationWorkloadCronJobKind     = "CronJob"
+	appsAPIVersion                     = "apps/v1"
+	batchAPIVersion                    = "batch/v1"
+	coreAPIVersion                     = "v1"
+	applicationPodTerminatingReason    = "PodTerminating"
+	applicationObservationUnavailable  = "ObservationUnavailable"
+	applicationNoWorkloadsReason       = "NoWorkloads"
+	applicationReleaseAbsentCondition  = "ReleaseAbsent"
 	applicationWorkloadDegraded        = "Degraded"
 	applicationWorkloadProgressing     = "Progressing"
 	applicationWorkloadHealthy         = "Healthy"
@@ -159,22 +166,6 @@ func (r *ApplicationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return r.reconcileEnvironmentApply(ctx, &app)
 	}
 	return r.reconcileApply(ctx, &app)
-}
-
-func appHasBoundInstances(app *platformv1alpha1.Application) bool {
-	return app.Status.Binding != nil || app.Status.EnvironmentBinding != nil || len(app.Status.Instances) > 0
-}
-
-func (r *ApplicationReconciler) pendingEnvironment(ctx context.Context, app *platformv1alpha1.Application) (ctrl.Result, error) {
-	setWorkloadCondition(app, metav1.ConditionUnknown, "EnvironmentModePending", "Environment-mode workload health is pending multi-target reconciliation support")
-	setApplicationCondition(app, metav1.ConditionUnknown, "EnvironmentModePending", "Environment-mode reconciliation is pending multi-target support")
-	if err := r.persistStatus(ctx, app, app.Generation); err != nil {
-		if errors.Is(err, errStaleApplicationSnapshot) || apierrors.IsNotFound(err) {
-			return ctrl.Result{RequeueAfter: staleInputRequeue}, nil
-		}
-		return ctrl.Result{}, err
-	}
-	return ctrl.Result{RequeueAfter: applicationRequeue}, nil
 }
 
 func (r *ApplicationReconciler) reconcileApply(ctx context.Context, app *platformv1alpha1.Application) (ctrl.Result, error) {
@@ -284,7 +275,7 @@ func (r *ApplicationReconciler) reconcileApply(ctx context.Context, app *platfor
 	resources, inventoryErr := r.collectResources(ctx, cfg, result.Manifest, app.Status.Binding.ReleaseNamespace)
 	if inventoryErr != nil {
 		setInventoryCondition(app, metav1.ConditionFalse, "CollectionFailed", "Application resource inventory could not be refreshed")
-		setWorkloadCondition(app, metav1.ConditionUnknown, "ObservationUnavailable", "Workload health could not be observed")
+		setWorkloadCondition(app, metav1.ConditionUnknown, applicationObservationUnavailable, "Workload health could not be observed")
 		ctrl.LoggerFrom(ctx).Info("Application resource inventory collection failed")
 	} else {
 		app.Status.Resources = resources
@@ -479,7 +470,7 @@ func (r *ApplicationReconciler) reconcileDelete(ctx context.Context, app *platfo
 }
 
 func (r *ApplicationReconciler) fail(ctx context.Context, app *platformv1alpha1.Application, reason, message string) (ctrl.Result, error) {
-	setWorkloadCondition(app, metav1.ConditionUnknown, "ObservationUnavailable", "Workload health could not be observed")
+	setWorkloadCondition(app, metav1.ConditionUnknown, applicationObservationUnavailable, "Workload health could not be observed")
 	changed := setApplicationCondition(app, metav1.ConditionFalse, reason, message)
 	if changed {
 		r.recordEvent(app, corev1.EventTypeWarning, reason, message)
@@ -504,7 +495,7 @@ func (r *ApplicationReconciler) recordSupersededSuccess(ctx context.Context, att
 		return ctrl.Result{RequeueAfter: staleInputRequeue}, nil
 	}
 	current.Status.Applied = applied.DeepCopy()
-	setWorkloadCondition(&current, metav1.ConditionUnknown, "ObservationUnavailable", "Workload health could not be observed")
+	setWorkloadCondition(&current, metav1.ConditionUnknown, applicationObservationUnavailable, "Workload health could not be observed")
 	if changed := setApplicationCondition(&current, metav1.ConditionFalse, reason, message); changed {
 		r.recordEvent(&current, corev1.EventTypeWarning, reason, message)
 	}
@@ -526,55 +517,56 @@ func aggregateWorkloadHealth(resources []platformv1alpha1.ApplicationResource) (
 	deploymentUIDs, statefulSetUIDs, daemonSetUIDs := map[types.UID]bool{}, map[types.UID]bool{}, map[types.UID]bool{}
 	replicaSetDeploymentUIDs := map[types.UID]types.UID{}
 	for _, r := range resources {
-		if r.APIVersion == "apps/v1" && r.Kind == applicationWorkloadDeploymentKind {
+		switch {
+		case r.APIVersion == appsAPIVersion && r.Kind == applicationWorkloadDeploymentKind:
 			deploymentUIDs[r.UID] = true
 			if r.Deployment != nil {
 				states = append(states, r.Deployment.State)
 			}
-		}
-		if r.APIVersion == "apps/v1" && r.Kind == applicationWorkloadStatefulSetKind && r.StatefulSet != nil {
+		case r.APIVersion == appsAPIVersion && r.Kind == applicationWorkloadStatefulSetKind && r.StatefulSet != nil:
 			statefulSetUIDs[r.UID] = true
 			states = append(states, r.StatefulSet.State)
-		}
-		if r.APIVersion == "apps/v1" && r.Kind == applicationWorkloadDaemonSetKind && r.DaemonSet != nil {
+		case r.APIVersion == appsAPIVersion && r.Kind == applicationWorkloadDaemonSetKind && r.DaemonSet != nil:
 			daemonSetUIDs[r.UID] = true
 			states = append(states, r.DaemonSet.State)
-		}
-		if r.APIVersion == "apps/v1" && r.Kind == applicationWorkloadReplicaSetKind {
+		case r.APIVersion == appsAPIVersion && r.Kind == applicationWorkloadReplicaSetKind:
 			replicaSetDeploymentUIDs[r.UID] = r.ParentUID
-		}
-		if r.APIVersion == "batch/v1" && r.Kind == applicationWorkloadJobKind && r.Job != nil && r.ParentUID == "" {
+		case r.APIVersion == batchAPIVersion && r.Kind == applicationWorkloadJobKind && r.Job != nil && r.ParentUID == "":
 			states = append(states, r.Job.State)
 		}
 	}
 	for _, r := range resources {
-		if r.APIVersion != "v1" || r.Kind != applicationWorkloadPodKind || r.Pod == nil {
+		if !podCoversWorkload(r, deploymentUIDs, statefulSetUIDs, daemonSetUIDs, replicaSetDeploymentUIDs) || r.Pod.Reason == applicationPodTerminatingReason {
 			continue
 		}
-		covered := r.ParentUID == ""
-		if parent, ok := replicaSetDeploymentUIDs[r.ParentUID]; ok && deploymentUIDs[parent] {
-			covered = true
-		}
-		covered = covered || statefulSetUIDs[r.ParentUID] || daemonSetUIDs[r.ParentUID]
-		if covered {
-			if r.Pod.Reason != "PodTerminating" {
-				states = append(states, r.Pod.State)
-			}
-		}
+		states = append(states, r.Pod.State)
 	}
 	if len(states) == 0 {
-		return metav1.ConditionUnknown, "NoWorkloads", "No covered workloads were observed"
+		return metav1.ConditionUnknown, applicationNoWorkloadsReason, "No covered workloads were observed"
 	}
 	if slices.Contains(states, applicationWorkloadDegraded) {
 		return metav1.ConditionFalse, applicationWorkloadDegraded, "One or more workloads are degraded"
 	}
 	if slices.Contains(states, applicationWorkloadUnknown) {
-		return metav1.ConditionUnknown, "ObservationUnavailable", "Workload health is unknown"
+		return metav1.ConditionUnknown, applicationObservationUnavailable, "Workload health is unknown"
 	}
 	if slices.Contains(states, applicationWorkloadProgressing) {
 		return metav1.ConditionFalse, applicationWorkloadProgressing, "One or more workloads are progressing"
 	}
 	return metav1.ConditionTrue, applicationWorkloadHealthy, "All covered workloads are healthy"
+}
+
+func podCoversWorkload(r platformv1alpha1.ApplicationResource, deploymentUIDs, statefulSetUIDs, daemonSetUIDs map[types.UID]bool, replicaSetDeploymentUIDs map[types.UID]types.UID) bool {
+	if r.APIVersion != coreAPIVersion || r.Kind != applicationWorkloadPodKind || r.Pod == nil {
+		return false
+	}
+	if r.ParentUID == "" {
+		return true
+	}
+	if parent, ok := replicaSetDeploymentUIDs[r.ParentUID]; ok && deploymentUIDs[parent] {
+		return true
+	}
+	return statefulSetUIDs[r.ParentUID] || daemonSetUIDs[r.ParentUID]
 }
 
 func (r *ApplicationReconciler) persistStatus(ctx context.Context, app *platformv1alpha1.Application, expectedGeneration int64) error {
@@ -762,7 +754,7 @@ func setInventoryCondition(app *platformv1alpha1.Application, status metav1.Cond
 func setCleanupComplete(app *platformv1alpha1.Application) {
 	meta.SetStatusCondition(&app.Status.Conditions, metav1.Condition{
 		Type: "CleanupComplete", Status: metav1.ConditionTrue, ObservedGeneration: app.Generation,
-		Reason: "ReleaseAbsent", Message: "Remote Helm release is absent",
+		Reason: applicationReleaseAbsentCondition, Message: "Remote Helm release is absent",
 		LastTransitionTime: metav1.Now(),
 	})
 }

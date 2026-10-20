@@ -192,7 +192,7 @@ func validClusterDNSSubdomain(name string) bool {
 	if len(name) == 0 || len(name) > 253 || !dnsSubdomainPattern.MatchString(name) || len(validation.IsDNS1123Subdomain(name)) != 0 {
 		return false
 	}
-	for _, label := range strings.Split(name, ".") {
+	for label := range strings.SplitSeq(name, ".") {
 		if len(label) > 63 {
 			return false
 		}

@@ -80,6 +80,7 @@ func (r *ApplicationReconciler) reconcileEnvironmentDelete(ctx context.Context, 
 	return r.removeEnvironmentFinalizer(ctx, app)
 }
 
+//nolint:gocyclo // orchestration handler; splitting would obscure the sequential flow.
 func (r *ApplicationReconciler) cleanupEnvironmentInstance(ctx context.Context, app *platformv1alpha1.Application, target platformv1alpha1.ApplicationEnvironmentTarget, inst *platformv1alpha1.ApplicationInstanceStatus) (ctrl.Result, bool, bool, error) {
 	b := inst.Binding
 	var ok bool
@@ -159,7 +160,7 @@ func (r *ApplicationReconciler) cleanupEnvironmentInstance(ctx context.Context, 
 	if err != nil {
 		return ctrl.Result{}, false, true, nil
 	}
-	meta.SetStatusCondition(&inst.Conditions, metav1.Condition{Type: "ReleaseAbsent", Status: metav1.ConditionTrue, ObservedGeneration: app.Generation, Reason: "Uninstalled", Message: "Remote Helm release is absent", LastTransitionTime: metav1.Now()})
+	meta.SetStatusCondition(&inst.Conditions, metav1.Condition{Type: applicationReleaseAbsentCondition, Status: metav1.ConditionTrue, ObservedGeneration: app.Generation, Reason: "Uninstalled", Message: "Remote Helm release is absent", LastTransitionTime: metav1.Now()})
 	if err := r.persistStatus(ctx, app, app.Generation); err != nil {
 		result, persistErr := environmentPersistFailure(err)
 		return result, false, false, persistErr
@@ -189,7 +190,7 @@ func reselectEnvironmentInstance(app *platformv1alpha1.Application, target platf
 func releaseAbsent(inst *platformv1alpha1.ApplicationInstanceStatus) bool {
 	c := metav1.Condition{}
 	for i := range inst.Conditions {
-		if inst.Conditions[i].Type == "ReleaseAbsent" {
+		if inst.Conditions[i].Type == applicationReleaseAbsentCondition {
 			c = inst.Conditions[i]
 			break
 		}

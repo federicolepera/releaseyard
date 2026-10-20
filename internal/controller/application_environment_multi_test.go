@@ -66,10 +66,9 @@ func (h *environmentHostHelm) Uninstall(context.Context, helmrelease.Request) (h
 }
 
 type environmentMultiClaims struct {
-	claims     map[types.UID]releaseclaim.Claim
-	identities []releaseclaim.Identity
-	acquired   []releaseclaim.Identity
-	verified   []releaseclaim.Identity
+	claims   map[types.UID]releaseclaim.Claim
+	acquired []releaseclaim.Identity
+	verified []releaseclaim.Identity
 }
 
 func newEnvironmentMultiClaims() *environmentMultiClaims {

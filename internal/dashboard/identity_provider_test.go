@@ -209,7 +209,7 @@ func TestIdentityProviderAdminSaveAndDelete(t *testing.T) {
 }
 
 func TestIdentityProviderAdminWithoutImpersonationIsPrivileged(t *testing.T) {
-	handler, provider, _ := newOIDCTestHandler(t, []string{"releaseyard:developers"}, "http://"+testDashboardHost+"/auth/callback")
+	handler, provider := newOIDCTestHandler(t, []string{"releaseyard:developers"}, "http://"+testDashboardHost+"/auth/callback")
 	login := beginTestLogin(t, handler, provider)
 	callback := finishTestLogin(t, handler, login)
 	var cookie *http.Cookie

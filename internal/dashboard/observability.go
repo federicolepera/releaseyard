@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -131,7 +131,7 @@ func applicationScopeOf(app *platformv1alpha1.Application) (applicationScope, er
 
 func (s applicationScope) belongsTo(pod string) bool {
 	for _, item := range s.resources {
-		if item.Kind == "Pod" && item.Name == pod {
+		if item.Kind == podKind && item.Name == pod {
 			return true
 		}
 	}
@@ -141,11 +141,11 @@ func (s applicationScope) belongsTo(pod string) bool {
 func (s applicationScope) podNames() []string {
 	names := make([]string, 0)
 	for _, item := range s.resources {
-		if item.Kind == "Pod" && item.Name != "" {
+		if item.Kind == podKind && item.Name != "" {
 			names = append(names, item.Name)
 		}
 	}
-	sort.Strings(names)
+	slices.Sort(names)
 	return names
 }
 
@@ -292,11 +292,11 @@ func (s *server) listApplicationResources(w http.ResponseWriter, r *http.Request
 		}
 		items = append(items, view)
 	}
-	sort.Slice(items, func(i, j int) bool {
-		if items[i].Kind != items[j].Kind {
-			return items[i].Kind < items[j].Kind
+	slices.SortFunc(items, func(a, b applicationResourceView) int {
+		if a.Kind != b.Kind {
+			return strings.Compare(a.Kind, b.Kind)
 		}
-		return items[i].Name < items[j].Name
+		return strings.Compare(a.Name, b.Name)
 	})
 	writeJSON(w, http.StatusOK, applicationResourcesResponse{
 		ClusterName: scope.clusterName,
@@ -469,7 +469,7 @@ func (s *server) applicationPodMetrics(w http.ResponseWriter, r *http.Request) {
 		totalMem.Add(memory)
 		usage = append(usage, entry)
 	}
-	sort.Slice(usage, func(i, j int) bool { return usage[i].Pod < usage[j].Pod })
+	slices.SortFunc(usage, func(a, b podUsage) int { return strings.Compare(a.Pod, b.Pod) })
 	requested.Available = true
 	requested.Pods = usage
 	requested.TotalCPUmil = totalCPU.MilliValue()
@@ -483,16 +483,16 @@ func (s *server) applicationPodMetrics(w http.ResponseWriter, r *http.Request) {
 // controller only records resources that were successfully applied.
 func summarizeResource(obj *unstructured.Unstructured) (status, tone, ready string) {
 	switch obj.GetKind() {
-	case "Pod":
+	case podKind:
 		phase, _, _ := unstructured.NestedString(obj.Object, "status", "phase")
 		ready = podReadyString(obj)
 		switch phase {
-		case "Running":
-			return "Running", "good", ready
+		case statusRunning:
+			return statusRunning, toneGood, ready
 		case "Succeeded":
-			return "Completed", "good", ready
-		case "Pending":
-			return "Pending", "muted", ready
+			return "Completed", toneGood, ready
+		case statusPending:
+			return statusPending, toneMuted, ready
 		case "Failed":
 			return "Failed", "error", ready
 		default:
@@ -503,17 +503,17 @@ func summarizeResource(obj *unstructured.Unstructured) (status, tone, ready stri
 		readyValue := int64Field(obj, 0, "status", "readyReplicas")
 		ready = fmt.Sprintf("%d/%d", readyValue, desired)
 		if desired > 0 && readyValue >= desired {
-			return "Healthy", "good", ready
+			return statusHealthy, toneGood, ready
 		}
-		return "Progressing", "muted", ready
+		return "Progressing", toneMuted, ready
 	case "DaemonSet":
 		desired := int64Field(obj, 0, "status", "desiredNumberScheduled")
 		readyValue := int64Field(obj, 0, "status", "numberReady")
 		ready = fmt.Sprintf("%d/%d", readyValue, desired)
 		if desired > 0 && readyValue >= desired {
-			return "Healthy", "good", ready
+			return statusHealthy, toneGood, ready
 		}
-		return "Progressing", "muted", ready
+		return "Progressing", toneMuted, ready
 	case "Job":
 		completions := int64Field(obj, 1, "spec", "completions")
 		succeeded := int64Field(obj, 0, "status", "succeeded")
@@ -522,21 +522,21 @@ func summarizeResource(obj *unstructured.Unstructured) (status, tone, ready stri
 		}
 		ready = fmt.Sprintf("%d/%d", succeeded, completions)
 		if succeeded >= completions {
-			return "Complete", "good", ready
+			return "Complete", toneGood, ready
 		}
-		return "Running", "muted", ready
+		return statusRunning, toneMuted, ready
 	case "PersistentVolumeClaim":
 		phase, _, _ := unstructured.NestedString(obj.Object, "status", "phase")
 		if phase == "" {
-			phase = "Pending"
+			phase = statusPending
 		}
-		tone := "muted"
+		tone := toneMuted
 		if phase == "Bound" {
-			tone = "good"
+			tone = toneGood
 		}
 		return phase, tone, "—"
 	default:
-		return "Healthy", "good", "—"
+		return statusHealthy, toneGood, "—"
 	}
 }
 
@@ -723,7 +723,7 @@ func (s *server) applicationResourceEvents(w http.ResponseWriter, r *http.Reques
 		}
 		events = append(events, entry)
 	}
-	sort.Slice(events, func(i, j int) bool { return events[i].LastSeen > events[j].LastSeen })
+	slices.SortFunc(events, func(a, b resourceEvent) int { return strings.Compare(b.LastSeen, a.LastSeen) })
 	if len(events) > maxObservableEvents {
 		events = events[:maxObservableEvents]
 	}

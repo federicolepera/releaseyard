@@ -78,7 +78,7 @@ func (a *authHandler) putDefinitionAccess(w http.ResponseWriter, r *http.Request
 		return
 	}
 	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
-	if err != nil || mediaType != "application/json" {
+	if err != nil || mediaType != mediaTypeJSON {
 		writeError(w, http.StatusUnsupportedMediaType, "Content-Type application/json is required")
 		return
 	}
@@ -189,8 +189,8 @@ func saveDefinitionAccess(ctx context.Context, k8s client.Client, group string, 
 	bindErr := k8s.Get(ctx, client.ObjectKey{Name: name}, binding)
 	desired := rbacv1.ClusterRoleBinding{
 		ObjectMeta: metav1.ObjectMeta{Name: name, Labels: labels, Annotations: annotations},
-		RoleRef:    rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: name},
-		Subjects:   []rbacv1.Subject{{Kind: "Group", APIGroup: rbacv1.GroupName, Name: group}},
+		RoleRef:    rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: rbacClusterRole, Name: name},
+		Subjects:   []rbacv1.Subject{{Kind: rbacSubjectGroup, APIGroup: rbacv1.GroupName, Name: group}},
 	}
 	switch {
 	case apierrors.IsNotFound(bindErr):
@@ -210,10 +210,10 @@ func saveDefinitionAccess(ctx context.Context, k8s client.Client, group string, 
 
 func definitionAccessRules(definitions []string) []rbacv1.PolicyRule {
 	return []rbacv1.PolicyRule{{
-		APIGroups:     []string{"platform.releaseyard.io"},
+		APIGroups:     []string{platformAPIGroup},
 		Resources:     []string{"applicationdefinitions"},
 		ResourceNames: definitions,
-		Verbs:         []string{"get"},
+		Verbs:         []string{verbGet},
 	}}
 }
 

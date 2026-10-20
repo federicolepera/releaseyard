@@ -15,8 +15,6 @@ import (
 	"sync"
 	"testing"
 	"time"
-
-	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 const (
@@ -139,7 +137,7 @@ func writeTestJSON(w http.ResponseWriter, value any) {
 	_ = json.NewEncoder(w).Encode(value)
 }
 
-func newOIDCTestHandler(t *testing.T, groups any, redirect string) (http.Handler, *fakeOIDCProvider, client.Client) {
+func newOIDCTestHandler(t *testing.T, groups any, redirect string) (http.Handler, *fakeOIDCProvider) {
 	t.Helper()
 	provider := newFakeOIDCProvider(t, groups)
 	_, k8s := testHandler(t)
@@ -150,7 +148,7 @@ func newOIDCTestHandler(t *testing.T, groups any, redirect string) (http.Handler
 	if err != nil {
 		t.Fatalf("construct OIDC handler: %v", err)
 	}
-	return handler, provider, k8s
+	return handler, provider
 }
 
 type loginResult struct {
@@ -237,7 +235,7 @@ func TestOIDCConfigurationFailsClosed(t *testing.T) {
 }
 
 func TestOIDCUnauthenticatedRoutesAndHealth(t *testing.T) {
-	handler, _, _ := newOIDCTestHandler(t, []string{loginGroup, adminGroup}, "http://"+testDashboardHost+"/auth/callback")
+	handler, _ := newOIDCTestHandler(t, []string{loginGroup, adminGroup}, "http://"+testDashboardHost+"/auth/callback")
 	for _, test := range []struct {
 		method string
 		path   string
@@ -267,7 +265,7 @@ func TestOIDCUnauthenticatedRoutesAndHealth(t *testing.T) {
 }
 
 func TestOIDCAdminSessionCSRFAndLogout(t *testing.T) {
-	handler, provider, _ := newOIDCTestHandler(t, []string{"users", loginGroup, adminGroup}, "http://"+testDashboardHost+"/auth/callback")
+	handler, provider := newOIDCTestHandler(t, []string{"users", loginGroup, adminGroup}, "http://"+testDashboardHost+"/auth/callback")
 	login := beginTestLogin(t, handler, provider)
 	response := finishTestLogin(t, handler, login)
 	if response.Code != http.StatusSeeOther || response.Header().Get("Location") != "/" {
@@ -381,7 +379,7 @@ func TestOIDCAdminSessionCSRFAndLogout(t *testing.T) {
 }
 
 func TestSessionCapabilitiesWithoutRBAC(t *testing.T) {
-	handler, provider, _ := newOIDCTestHandler(t, []string{"users"}, "http://"+testDashboardHost+"/auth/callback")
+	handler, provider := newOIDCTestHandler(t, []string{"users"}, "http://"+testDashboardHost+"/auth/callback")
 	login := beginTestLogin(t, handler, provider)
 	callback := finishTestLogin(t, handler, login)
 	if callback.Code != http.StatusSeeOther {
@@ -471,7 +469,7 @@ func TestClusterEnvironmentAuthorizationPathBoundary(t *testing.T) {
 
 func TestOIDCAllowsPlatformMemberAndRejectsBadNonce(t *testing.T) {
 	t.Run("any authenticated user", func(t *testing.T) {
-		handler, provider, _ := newOIDCTestHandler(t, []string{"/users", "/Administrators"}, "http://"+testDashboardHost+"/auth/callback")
+		handler, provider := newOIDCTestHandler(t, []string{"/users", "/Administrators"}, "http://"+testDashboardHost+"/auth/callback")
 		login := beginTestLogin(t, handler, provider)
 		response := finishTestLogin(t, handler, login)
 		if response.Code != http.StatusSeeOther {
@@ -504,7 +502,7 @@ func TestOIDCAllowsPlatformMemberAndRejectsBadNonce(t *testing.T) {
 		}
 	})
 	t.Run("wrong nonce", func(t *testing.T) {
-		handler, provider, _ := newOIDCTestHandler(t, []string{loginGroup, adminGroup}, "http://"+testDashboardHost+"/auth/callback")
+		handler, provider := newOIDCTestHandler(t, []string{loginGroup, adminGroup}, "http://"+testDashboardHost+"/auth/callback")
 		login := beginTestLogin(t, handler, provider)
 		provider.mu.Lock()
 		provider.nonceOverride = "wrong-nonce"
@@ -527,7 +525,7 @@ func TestOIDCAllowsPlatformMemberAndRejectsBadNonce(t *testing.T) {
 		{name: "wrong-typed groups", groups: "administrators", wantStatus: http.StatusUnauthorized},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			handler, provider, _ := newOIDCTestHandler(t, test.groups, "http://"+testDashboardHost+"/auth/callback")
+			handler, provider := newOIDCTestHandler(t, test.groups, "http://"+testDashboardHost+"/auth/callback")
 			provider.mu.Lock()
 			provider.audience = test.audience
 			provider.expiration = test.expiry
@@ -542,7 +540,7 @@ func TestOIDCAllowsPlatformMemberAndRejectsBadNonce(t *testing.T) {
 }
 
 func TestOIDCTransactionStateBindingAndReplay(t *testing.T) {
-	handler, provider, _ := newOIDCTestHandler(t, []string{loginGroup, adminGroup}, "http://"+testDashboardHost+"/auth/callback")
+	handler, provider := newOIDCTestHandler(t, []string{loginGroup, adminGroup}, "http://"+testDashboardHost+"/auth/callback")
 	login := beginTestLogin(t, handler, provider)
 	missingBinding := httptest.NewRequest(http.MethodGet, "http://"+testDashboardHost+"/auth/callback?state="+url.QueryEscape(login.state)+"&code=test-code", nil)
 	missingBindingResponse := httptest.NewRecorder()
@@ -600,7 +598,7 @@ func TestOIDCExpiredTransactionAndSession(t *testing.T) {
 }
 
 func TestOIDCHTTPSUsesSecureCookies(t *testing.T) {
-	handler, provider, _ := newOIDCTestHandler(t, []string{loginGroup, adminGroup}, "https://dashboard.example/auth/callback")
+	handler, provider := newOIDCTestHandler(t, []string{loginGroup, adminGroup}, "https://dashboard.example/auth/callback")
 	login := beginTestLoginAt(t, handler, provider, "https", "dashboard.example")
 	response := finishTestLoginAt(t, handler, login, "https", "dashboard.example")
 	if response.Code != http.StatusSeeOther {

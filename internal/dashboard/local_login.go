@@ -33,12 +33,12 @@ func (a *authHandler) localLogin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "Invalid username or password")
 		return
 	}
-	csrfToken, err := randomOpaque(32)
+	csrfToken, err := randomOpaque()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Could not create session")
 		return
 	}
-	sessionID, err := randomOpaque(32)
+	sessionID, err := randomOpaque()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Could not create session")
 		return

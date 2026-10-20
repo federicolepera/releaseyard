@@ -173,7 +173,7 @@ func newAuthHandler(k8s client.Client, namespace string, publicURL *url.URL, loc
 	return &authHandler{
 		localHashPath:          localHashPath,
 		publicURL:              publicURL,
-		secureCookie:           publicURL.Scheme == "https",
+		secureCookie:           publicURL.Scheme == schemeHTTPS,
 		k8s:                    k8s,
 		namespace:              namespace,
 		teamNamespacePrefix:    teamNamespacePrefix,
@@ -240,7 +240,7 @@ func validateLocalAuthConfig(config LocalAuthConfig) (*url.URL, error) {
 	if err != nil || publicURL.Path != "" {
 		return nil, errors.New("dashboard public URL must be an absolute HTTP(S) URL without path, user info, query, or fragment")
 	}
-	if publicURL.Scheme == "http" && !isDevelopmentHost(publicURL.Hostname()) {
+	if publicURL.Scheme == schemeHTTP && !isDevelopmentHost(publicURL.Hostname()) {
 		return nil, errors.New("HTTP dashboard public URL is allowed only for localhost development hosts")
 	}
 	return publicURL, nil
@@ -255,13 +255,13 @@ func validateOIDCConfig(config OIDCConfig) (*url.URL, *url.URL, error) {
 		return nil, nil, errors.New("OIDC issuer URL must be an absolute HTTP(S) URL without user info, query, or fragment")
 	}
 	redirect, err := parseAbsoluteURL(config.RedirectURL)
-	if err != nil || redirect.Path != "/auth/callback" {
+	if err != nil || redirect.Path != authCallbackPath {
 		return nil, nil, errors.New("OIDC redirect URL must be an absolute HTTP(S) URL ending in /auth/callback")
 	}
-	if issuer.Scheme == "http" && !isDevelopmentHost(issuer.Hostname()) {
+	if issuer.Scheme == schemeHTTP && !isDevelopmentHost(issuer.Hostname()) {
 		return nil, nil, errors.New("HTTP OIDC issuer is allowed only for localhost development hosts")
 	}
-	if redirect.Scheme == "http" && (!isDevelopmentHost(redirect.Hostname()) || issuer.Scheme != "http" || !isDevelopmentHost(issuer.Hostname())) {
+	if redirect.Scheme == schemeHTTP && (!isDevelopmentHost(redirect.Hostname()) || issuer.Scheme != schemeHTTP || !isDevelopmentHost(issuer.Hostname())) {
 		return nil, nil, errors.New("HTTP OIDC redirect is allowed only with localhost development issuer and redirect hosts")
 	}
 	return issuer, redirect, nil
@@ -269,7 +269,7 @@ func validateOIDCConfig(config OIDCConfig) (*url.URL, *url.URL, error) {
 
 func parseAbsoluteURL(raw string) (*url.URL, error) {
 	u, err := url.Parse(raw)
-	if err != nil || !u.IsAbs() || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Scheme != "http" && u.Scheme != "https") {
+	if err != nil || !u.IsAbs() || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Scheme != schemeHTTP && u.Scheme != schemeHTTPS) {
 		return nil, errors.New("invalid absolute URL")
 	}
 	return u, nil
@@ -284,6 +284,7 @@ func isDevelopmentHost(host string) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
+//nolint:gocyclo // orchestration handler; splitting would obscure the sequential flow.
 func (a *authHandler) middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
@@ -304,7 +305,7 @@ func (a *authHandler) middleware(next http.Handler) http.Handler {
 
 		// The login page and its assets are public. When only OIDC is
 		// available the login page is skipped entirely.
-		if r.Method == http.MethodGet && (r.URL.Path == "/login" || isLocalPublicAsset(r.URL.Path)) {
+		if r.Method == http.MethodGet && (r.URL.Path == loginPath || isLocalPublicAsset(r.URL.Path)) {
 			if !a.canonicalHost(r) {
 				writeError(w, http.StatusBadRequest, "Request host is not allowed")
 				return
@@ -313,7 +314,7 @@ func (a *authHandler) middleware(next http.Handler) http.Handler {
 				http.Redirect(w, r, "/auth/login", http.StatusSeeOther)
 				return
 			}
-			if r.URL.Path == "/login" {
+			if r.URL.Path == loginPath {
 				http.Redirect(w, r, "/login.html", http.StatusSeeOther)
 				return
 			}
@@ -328,7 +329,7 @@ func (a *authHandler) middleware(next http.Handler) http.Handler {
 			}
 			if !a.oidcAvailable() {
 				if a.localAvailable() {
-					http.Redirect(w, r, "/login", http.StatusSeeOther)
+					http.Redirect(w, r, loginPath, http.StatusSeeOther)
 					return
 				}
 				writeError(w, http.StatusNotFound, "Authentication is not configured")
@@ -337,13 +338,13 @@ func (a *authHandler) middleware(next http.Handler) http.Handler {
 			a.login(w, r)
 			return
 		}
-		if r.Method == http.MethodGet && r.URL.Path == "/auth/callback" {
+		if r.Method == http.MethodGet && r.URL.Path == authCallbackPath {
 			if !a.canonicalHost(r) {
 				writeError(w, http.StatusBadRequest, "Request host is not allowed")
 				return
 			}
 			if !a.oidcAvailable() {
-				http.Redirect(w, r, "/login", http.StatusSeeOther)
+				http.Redirect(w, r, loginPath, http.StatusSeeOther)
 				return
 			}
 			a.callback(w, r)
@@ -460,7 +461,7 @@ func (a *authHandler) unauthorized(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if a.localAvailable() {
-		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		http.Redirect(w, r, loginPath, http.StatusSeeOther)
 		return
 	}
 	http.Redirect(w, r, "/auth/login", http.StatusSeeOther)
@@ -481,7 +482,7 @@ func isApplicationItemPath(path string) bool {
 
 func isClusterEnvironmentPath(path string) bool {
 	parts := strings.Split(path, "/")
-	return len(parts) == 5 && parts[1] == "api" && parts[2] == "clusters" && parts[3] != "" && parts[4] == "environment"
+	return len(parts) == 5 && parts[1] == "api" && parts[2] == resourceClusters && parts[3] != "" && parts[4] == "environment"
 }
 
 func isStateChangingMethod(method string) bool {
@@ -494,17 +495,17 @@ func (a *authHandler) login(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "Identity provider is not available")
 		return
 	}
-	binding, err := randomOpaque(32)
+	binding, err := randomOpaque()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Could not start authentication")
 		return
 	}
-	state, err := randomOpaque(32)
+	state, err := randomOpaque()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Could not start authentication")
 		return
 	}
-	nonce, err := randomOpaque(32)
+	nonce, err := randomOpaque()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Could not start authentication")
 		return
@@ -587,12 +588,12 @@ func (a *authHandler) callback(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "Authentication failed")
 		return
 	}
-	csrfToken, err := randomOpaque(32)
+	csrfToken, err := randomOpaque()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Could not create session")
 		return
 	}
-	sessionID, err := randomOpaque(32)
+	sessionID, err := randomOpaque()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Could not create session")
 		return
@@ -685,12 +686,12 @@ func (a *authHandler) logout(w http.ResponseWriter, r *http.Request) {
 
 	// Local sessions have no upstream IdP session to terminate.
 	if session.authMethod != authMethodOIDC {
-		writeJSON(w, http.StatusOK, map[string]string{"logoutUrl": "/login"})
+		writeJSON(w, http.StatusOK, map[string]string{logoutURLField: loginPath})
 		return
 	}
 	runtime := a.oidc.Load()
 	if runtime == nil {
-		writeJSON(w, http.StatusOK, map[string]string{"logoutUrl": "/login"})
+		writeJSON(w, http.StatusOK, map[string]string{logoutURLField: loginPath})
 		return
 	}
 
@@ -700,7 +701,7 @@ func (a *authHandler) logout(w http.ResponseWriter, r *http.Request) {
 	if runtime.endSessionEndpoint == "" {
 		// The IdP did not advertise an end_session_endpoint. Return the login
 		// page so the browser at least leaves the dashboard.
-		writeJSON(w, http.StatusOK, map[string]string{"logoutUrl": "/login"})
+		writeJSON(w, http.StatusOK, map[string]string{logoutURLField: loginPath})
 		return
 	}
 	logoutURL, err := url.Parse(runtime.endSessionEndpoint)
@@ -716,7 +717,7 @@ func (a *authHandler) logout(w http.ResponseWriter, r *http.Request) {
 	}
 	logoutURL.RawQuery = q.Encode()
 
-	writeJSON(w, http.StatusOK, map[string]string{"logoutUrl": logoutURL.String()})
+	writeJSON(w, http.StatusOK, map[string]string{logoutURLField: logoutURL.String()})
 }
 
 func (a *authHandler) validCSRF(r *http.Request, session dashboardSession) bool {
@@ -750,8 +751,8 @@ func (a *authHandler) pruneSessionsLocked(now time.Time) {
 	}
 }
 
-func randomOpaque(size int) (string, error) {
-	value := make([]byte, size)
+func randomOpaque() (string, error) {
+	value := make([]byte, 32)
 	if _, err := rand.Read(value); err != nil {
 		return "", err
 	}

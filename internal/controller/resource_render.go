@@ -122,7 +122,7 @@ func nestedValue(root map[string]any, path string) (any, bool, error) {
 		return nil, false, fmt.Errorf("empty source path")
 	}
 	var current any = root
-	for _, segment := range strings.Split(path, ".") {
+	for segment := range strings.SplitSeq(path, ".") {
 		object, ok := current.(map[string]any)
 		if !ok {
 			return nil, false, nil

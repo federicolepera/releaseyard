@@ -11,8 +11,5 @@ import (
 func crossplaneInstalled(ctx context.Context, c client.Client) bool {
 	crd := apiextensionsv1.CustomResourceDefinition{}
 	err := c.Get(ctx, client.ObjectKey{Name: "compositions.apiextensions.crossplane.io"}, &crd)
-	if err != nil {
-		return false
-	}
-	return true
+	return err == nil
 }

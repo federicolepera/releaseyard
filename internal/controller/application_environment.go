@@ -149,6 +149,7 @@ func validateEnvironmentSnapshot(app *platformv1alpha1.Application) error {
 	return nil
 }
 
+//nolint:gocyclo // orchestration handler; splitting would obscure the sequential flow.
 func (r *ApplicationReconciler) applyEnvironmentTarget(ctx context.Context, app *platformv1alpha1.Application, definition *platformv1alpha1.ApplicationDefinition, snapshot platformv1alpha1.ApplicationEnvironmentTarget, namespace string, values map[string]any, chart platformv1alpha1.ApplicationChartIdentity, archive []byte, desired string) (ctrl.Result, bool, error) {
 	i := environmentInstanceIndex(app.Status.Instances, snapshot.Name)
 	if i < 0 {
@@ -287,7 +288,7 @@ func (r *ApplicationReconciler) applyEnvironmentTarget(ctx context.Context, app 
 	resources, err := r.collectResources(ctx, cfg, result.Manifest, namespace)
 	if err != nil {
 		setInstanceCondition(inst, "InventoryReady", metav1.ConditionFalse, "CollectionFailed", "Application resource inventory could not be refreshed")
-		setInstanceCondition(inst, "WorkloadHealthy", metav1.ConditionUnknown, "ObservationUnavailable", "Workload health could not be observed")
+		setInstanceCondition(inst, "WorkloadHealthy", metav1.ConditionUnknown, applicationObservationUnavailable, "Workload health could not be observed")
 	} else {
 		inst.Resources = resources
 		now := metav1.Now()
@@ -498,7 +499,7 @@ func aggregateEnvironmentStatus(app *platformv1alpha1.Application, targets []pla
 
 func aggregateEnvironmentHealth(conditions []metav1.Condition) (metav1.ConditionStatus, string, string) {
 	if len(conditions) == 0 {
-		return metav1.ConditionUnknown, "ObservationUnavailable", "Environment workload health is unknown"
+		return metav1.ConditionUnknown, applicationObservationUnavailable, "Environment workload health is unknown"
 	}
 	if slices.ContainsFunc(conditions, func(c metav1.Condition) bool {
 		return c.Status == metav1.ConditionFalse && c.Reason == applicationWorkloadDegraded
@@ -506,7 +507,7 @@ func aggregateEnvironmentHealth(conditions []metav1.Condition) (metav1.Condition
 		return metav1.ConditionFalse, applicationWorkloadDegraded, "One or more environment workloads are degraded"
 	}
 	if slices.ContainsFunc(conditions, func(c metav1.Condition) bool { return c.Status == metav1.ConditionUnknown }) {
-		return metav1.ConditionUnknown, "ObservationUnavailable", "Environment workload health is unknown"
+		return metav1.ConditionUnknown, applicationObservationUnavailable, "Environment workload health is unknown"
 	}
 	if slices.ContainsFunc(conditions, func(c metav1.Condition) bool { return c.Status == metav1.ConditionFalse }) {
 		return metav1.ConditionFalse, applicationWorkloadProgressing, "One or more environment workloads are progressing"

@@ -138,7 +138,7 @@ func TestUpdateClusterEnvironment(t *testing.T) {
 		Status:     platformv1alpha1.ClusterStatus{Conditions: []metav1.Condition{{Type: "Connected", Status: metav1.ConditionTrue}}},
 	}
 	h, c := testHandler(t, cluster)
-	w := patchClusterEnvironment(h, "/api/clusters/env-cluster/environment", `{"uid":"uid-1","resourceVersion":"7","environment":"production"}`)
+	w := patchClusterEnvironment(h, `{"uid":"uid-1","resourceVersion":"7","environment":"production"}`)
 	if w.Code != http.StatusOK {
 		t.Fatalf("PATCH status=%d body=%s", w.Code, w.Body)
 	}
@@ -149,7 +149,7 @@ func TestUpdateClusterEnvironment(t *testing.T) {
 	if stored.Labels[clusterEnvironmentLabel] != "production" || stored.Labels["keep"] != "yes" || stored.Spec.KubeconfigSecretRef.Name != "credentials" || len(stored.Status.Conditions) != 1 {
 		t.Fatalf("PATCH changed unexpected fields: %+v", stored)
 	}
-	if got := patchClusterEnvironment(h, "/api/clusters/env-cluster/environment", `{"uid":"uid-1","resourceVersion":"7","environment":null}`); got.Code != http.StatusConflict {
+	if got := patchClusterEnvironment(h, `{"uid":"uid-1","resourceVersion":"7","environment":null}`); got.Code != http.StatusConflict {
 		t.Fatalf("stale resourceVersion status=%d, want 409", got.Code)
 	}
 	stored.ResourceVersion = "8"
@@ -160,10 +160,10 @@ func TestUpdateClusterEnvironment(t *testing.T) {
 		t.Fatal(err)
 	}
 	currentVersion := stored.ResourceVersion
-	if got := patchClusterEnvironment(h, "/api/clusters/env-cluster/environment", fmt.Sprintf(`{"uid":"wrong","resourceVersion":%q,"environment":null}`, currentVersion)); got.Code != http.StatusConflict {
+	if got := patchClusterEnvironment(h, fmt.Sprintf(`{"uid":"wrong","resourceVersion":%q,"environment":null}`, currentVersion)); got.Code != http.StatusConflict {
 		t.Fatalf("stale UID status=%d, want 409", got.Code)
 	}
-	if got := patchClusterEnvironment(h, "/api/clusters/env-cluster/environment", fmt.Sprintf(`{"uid":"uid-1","resourceVersion":%q,"environment":null}`, currentVersion)); got.Code != http.StatusOK {
+	if got := patchClusterEnvironment(h, fmt.Sprintf(`{"uid":"uid-1","resourceVersion":%q,"environment":null}`, currentVersion)); got.Code != http.StatusOK {
 		t.Fatalf("remove environment status=%d body=%s", got.Code, got.Body)
 	}
 	if err := c.Get(context.Background(), client.ObjectKey{Name: "env-cluster"}, stored); err != nil {
@@ -201,7 +201,7 @@ func TestClusterEnvironmentRequestValidation(t *testing.T) {
 		}
 	}
 	large := fmt.Sprintf(`{"uid":"u","resourceVersion":"1","environment":"%s"}`, strings.Repeat("x", maxRequestBody))
-	if w := patchClusterEnvironment(h, "/api/clusters/env-cluster/environment", large); w.Code != http.StatusRequestEntityTooLarge {
+	if w := patchClusterEnvironment(h, large); w.Code != http.StatusRequestEntityTooLarge {
 		t.Fatalf("oversized body status=%d want=413", w.Code)
 	}
 }
@@ -351,8 +351,8 @@ func TestPreviewDigestChangesAfterClusterRecreation(t *testing.T) {
 	}
 }
 
-func patchClusterEnvironment(handler http.Handler, path, body string) *httptest.ResponseRecorder {
-	r := httptest.NewRequest(http.MethodPatch, path, strings.NewReader(body))
+func patchClusterEnvironment(handler http.Handler, body string) *httptest.ResponseRecorder {
+	r := httptest.NewRequest(http.MethodPatch, "/api/clusters/env-cluster/environment", strings.NewReader(body))
 	r.Header.Set("Content-Type", testJSONContentType)
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, r)

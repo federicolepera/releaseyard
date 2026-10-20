@@ -78,7 +78,7 @@ func (a *authHandler) putApplicationAccess(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
-	if err != nil || mediaType != "application/json" {
+	if err != nil || mediaType != mediaTypeJSON {
 		writeError(w, http.StatusUnsupportedMediaType, "Content-Type application/json is required")
 		return
 	}
@@ -176,8 +176,8 @@ func (a *authHandler) saveApplicationAccess(ctx context.Context, group string) e
 			Labels:      map[string]string{applicationAccessLabel: applicationAccessManagedBy},
 			Annotations: map[string]string{applicationAccessGroupAnno: group},
 		},
-		RoleRef:  rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: a.applicationEditorRole},
-		Subjects: []rbacv1.Subject{{Kind: "Group", APIGroup: rbacv1.GroupName, Name: group}},
+		RoleRef:  rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: rbacClusterRole, Name: a.applicationEditorRole},
+		Subjects: []rbacv1.Subject{{Kind: rbacSubjectGroup, APIGroup: rbacv1.GroupName, Name: group}},
 	}
 	bindErr := a.k8s.Get(ctx, client.ObjectKey{Namespace: namespace, Name: name}, binding)
 	switch {
@@ -220,7 +220,7 @@ func (a *authHandler) listApplicationAccess(ctx context.Context) ([]applicationA
 		}
 		group := ""
 		for _, subject := range binding.Subjects {
-			if subject.Kind == "Group" {
+			if subject.Kind == rbacSubjectGroup {
 				group = subject.Name
 				break
 			}

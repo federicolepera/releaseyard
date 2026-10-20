@@ -3,7 +3,7 @@ package dashboard
 import (
 	"context"
 	"net/http"
-	"sort"
+	"slices"
 	"strings"
 
 	authorizationv1 "k8s.io/api/authorization/v1"
@@ -75,13 +75,13 @@ func (a *authHandler) teamNamespacesForSession(ctx context.Context, session dash
 		if _, exists := seen[namespace]; exists {
 			continue
 		}
-		attributes := authorizationv1.ResourceAttributes{Namespace: namespace, Group: "platform.releaseyard.io", Resource: "applications", Verb: "list"}
+		attributes := authorizationv1.ResourceAttributes{Namespace: namespace, Group: platformAPIGroup, Resource: resourceApplications, Verb: "list"}
 		if selfSubjectAccessAllowed(ctx, impersonated, attributes) {
 			seen[namespace] = struct{}{}
 			teams = append(teams, namespace)
 		}
 	}
-	sort.Strings(teams)
+	slices.Sort(teams)
 	return teams
 }
 
@@ -168,14 +168,14 @@ func (a *authHandler) capabilities(ctx context.Context, session dashboardSession
 	}
 	allowed := func(verb string) bool {
 		for _, namespace := range namespaces {
-			attributes := authorizationv1.ResourceAttributes{Namespace: namespace, Group: "platform.releaseyard.io", Resource: "applications", Verb: verb}
+			attributes := authorizationv1.ResourceAttributes{Namespace: namespace, Group: platformAPIGroup, Resource: resourceApplications, Verb: verb}
 			if selfSubjectAccessAllowed(ctx, impersonated, attributes) {
 				return true
 			}
 		}
 		return false
 	}
-	clusters := authorizationv1.ResourceAttributes{Group: "platform.releaseyard.io", Resource: "clusters", Verb: "patch"}
+	clusters := authorizationv1.ResourceAttributes{Group: platformAPIGroup, Resource: resourceClusters, Verb: "patch"}
 	return dashboardCapabilities{
 		isAdmin:       selfSubjectAccessAllowed(ctx, impersonated, clusters),
 		canAdminister: selfSubjectAccessAllowed(ctx, impersonated, administerPermission),

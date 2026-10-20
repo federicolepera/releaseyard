@@ -156,7 +156,7 @@ func collectInventoryDescendants(ctx context.Context, client dynamic.Interface, 
 	}
 	parents := append([]inventoryIdentity(nil), rootIdentities...)
 	if needRS {
-		children, err := listOwnedInventoryObjects(ctx, client, schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "replicasets"}, "apps/v1", "ReplicaSet", namespaces, parents)
+		children, err := listOwnedInventoryObjects(ctx, client, schema.GroupVersionResource{Group: "apps", Version: coreAPIVersion, Resource: "replicasets"}, appsAPIVersion, "ReplicaSet", namespaces, parents)
 		if err != nil {
 			return err
 		}
@@ -166,7 +166,7 @@ func collectInventoryDescendants(ctx context.Context, client dynamic.Interface, 
 		parents = append(parents, children...)
 	}
 	if needJobs {
-		children, err := listOwnedInventoryObjects(ctx, client, schema.GroupVersionResource{Group: "batch", Version: "v1", Resource: "jobs"}, "batch/v1", applicationWorkloadJobKind, namespaces, parents)
+		children, err := listOwnedInventoryObjects(ctx, client, schema.GroupVersionResource{Group: "batch", Version: coreAPIVersion, Resource: "jobs"}, batchAPIVersion, applicationWorkloadJobKind, namespaces, parents)
 		if err != nil {
 			return err
 		}
@@ -176,7 +176,7 @@ func collectInventoryDescendants(ctx context.Context, client dynamic.Interface, 
 		parents = append(parents, children...)
 	}
 	if needPods {
-		children, err := listOwnedInventoryObjects(ctx, client, schema.GroupVersionResource{Version: "v1", Resource: "pods"}, "v1", "Pod", namespaces, parents)
+		children, err := listOwnedInventoryObjects(ctx, client, schema.GroupVersionResource{Version: coreAPIVersion, Resource: "pods"}, coreAPIVersion, "Pod", namespaces, parents)
 		if err != nil {
 			return err
 		}
@@ -191,24 +191,24 @@ func filterPodHealthProjections(resultByKey map[string]platformv1alpha1.Applicat
 	rootDeploymentUIDs, rootStatefulSetUIDs, rootDaemonSetUIDs, observedJobUIDs := map[types.UID]struct{}{}, map[types.UID]struct{}{}, map[types.UID]struct{}{}, map[types.UID]struct{}{}
 	replicaSetDeploymentUIDs := make(map[types.UID]types.UID)
 	for _, resource := range resultByKey {
-		if resource.APIVersion == "apps/v1" && resource.Kind == applicationWorkloadDeploymentKind && resource.UID != "" {
+		if resource.APIVersion == appsAPIVersion && resource.Kind == applicationWorkloadDeploymentKind && resource.UID != "" {
 			rootDeploymentUIDs[resource.UID] = struct{}{}
 		}
-		if resource.APIVersion == "apps/v1" && resource.Kind == applicationWorkloadStatefulSetKind && resource.UID != "" {
+		if resource.APIVersion == appsAPIVersion && resource.Kind == applicationWorkloadStatefulSetKind && resource.UID != "" {
 			rootStatefulSetUIDs[resource.UID] = struct{}{}
 		}
-		if resource.APIVersion == "apps/v1" && resource.Kind == applicationWorkloadDaemonSetKind && resource.UID != "" {
+		if resource.APIVersion == appsAPIVersion && resource.Kind == applicationWorkloadDaemonSetKind && resource.UID != "" {
 			rootDaemonSetUIDs[resource.UID] = struct{}{}
 		}
-		if resource.APIVersion == "batch/v1" && resource.Kind == applicationWorkloadJobKind && resource.Job != nil && resource.UID != "" {
+		if resource.APIVersion == batchAPIVersion && resource.Kind == applicationWorkloadJobKind && resource.Job != nil && resource.UID != "" {
 			observedJobUIDs[resource.UID] = struct{}{}
 		}
-		if resource.APIVersion == "apps/v1" && resource.Kind == applicationWorkloadReplicaSetKind {
+		if resource.APIVersion == appsAPIVersion && resource.Kind == applicationWorkloadReplicaSetKind {
 			replicaSetDeploymentUIDs[resource.UID] = resource.ParentUID
 		}
 	}
 	for key, resource := range resultByKey {
-		if resource.APIVersion != "v1" || resource.Kind != applicationWorkloadPodKind || resource.Pod == nil || resource.ParentUID == "" {
+		if resource.APIVersion != coreAPIVersion || resource.Kind != applicationWorkloadPodKind || resource.Pod == nil || resource.ParentUID == "" {
 			continue
 		}
 		deploymentUID, ok := replicaSetDeploymentUIDs[resource.ParentUID]
@@ -216,7 +216,7 @@ func filterPodHealthProjections(resultByKey map[string]platformv1alpha1.Applicat
 		_, statefulParent := rootStatefulSetUIDs[resource.ParentUID]
 		_, daemonParent := rootDaemonSetUIDs[resource.ParentUID]
 		_, jobParent := observedJobUIDs[resource.ParentUID]
-		if !(ok && deploymentParent) && !statefulParent && !daemonParent && !jobParent {
+		if (!ok || !deploymentParent) && !statefulParent && !daemonParent && !jobParent {
 			resource.Pod = nil
 		}
 		resultByKey[key] = resource
@@ -230,15 +230,15 @@ func foldOwnedPodHealth(resources map[string]platformv1alpha1.ApplicationResourc
 		if resource.UID == "" {
 			continue
 		}
-		if resource.APIVersion == "apps/v1" && ((resource.Kind == applicationWorkloadDeploymentKind && resource.Deployment != nil) || (resource.Kind == applicationWorkloadStatefulSetKind && resource.StatefulSet != nil) || (resource.Kind == applicationWorkloadDaemonSetKind && resource.DaemonSet != nil)) {
+		if resource.APIVersion == appsAPIVersion && ((resource.Kind == applicationWorkloadDeploymentKind && resource.Deployment != nil) || (resource.Kind == applicationWorkloadStatefulSetKind && resource.StatefulSet != nil) || (resource.Kind == applicationWorkloadDaemonSetKind && resource.DaemonSet != nil)) {
 			rootKeys[resource.UID] = key
 		}
-		if resource.APIVersion == "apps/v1" && resource.Kind == applicationWorkloadReplicaSetKind {
+		if resource.APIVersion == appsAPIVersion && resource.Kind == applicationWorkloadReplicaSetKind {
 			replicaSetParents[resource.UID] = resource.ParentUID
 		}
 	}
 	for _, pod := range resources {
-		if pod.APIVersion != "v1" || pod.Kind != applicationWorkloadPodKind || pod.Pod == nil || pod.Pod.Reason == "PodTerminating" || pod.ParentUID == "" {
+		if pod.APIVersion != coreAPIVersion || pod.Kind != applicationWorkloadPodKind || pod.Pod == nil || pod.Pod.Reason == applicationPodTerminatingReason || pod.ParentUID == "" {
 			continue
 		}
 		parentUID := pod.ParentUID
@@ -256,7 +256,8 @@ func foldOwnedPodHealth(resources map[string]platformv1alpha1.ApplicationResourc
 }
 
 func foldPodStateIntoParent(parent *platformv1alpha1.ApplicationResource, podState string) {
-	state, reason := parentWorkloadState(parent)
+	state, _ := parentWorkloadState(parent)
+	var reason string
 	if podState == applicationWorkloadDegraded {
 		state, reason = applicationWorkloadDegraded, "PodFailure"
 	} else if state == applicationWorkloadHealthy && podState == applicationWorkloadProgressing {
@@ -378,7 +379,7 @@ func listOwnedInventoryObjects(ctx context.Context, client dynamic.Interface, gv
 			if kind == applicationWorkloadPodKind {
 				child.pod = podHealth(obj)
 			}
-			if apiVersion == "batch/v1" && kind == applicationWorkloadJobKind && matched.apiVersion == "batch/v1" && matched.kind == applicationWorkloadCronJobKind {
+			if apiVersion == batchAPIVersion && kind == applicationWorkloadJobKind && matched.apiVersion == batchAPIVersion && matched.kind == applicationWorkloadCronJobKind {
 				child.job = jobHealth(obj, true, child.uid != "")
 			}
 			found = append(found, child)
@@ -396,7 +397,7 @@ func addInventoryIdentity(dst map[string]platformv1alpha1.ApplicationResource, i
 }
 
 func projectRootHealth(root *inventoryIdentity, obj *unstructured.Unstructured, exists bool) {
-	if root.apiVersion == "apps/v1" {
+	if root.apiVersion == appsAPIVersion {
 		switch root.kind {
 		case applicationWorkloadStatefulSetKind:
 			root.statefulSet = statefulSetHealth(obj, exists, root.uid != "")
@@ -404,17 +405,17 @@ func projectRootHealth(root *inventoryIdentity, obj *unstructured.Unstructured, 
 			root.daemonSet = daemonSetHealth(obj, exists, root.uid != "")
 		}
 	}
-	if root.apiVersion == "batch/v1" && root.kind == applicationWorkloadJobKind {
+	if root.apiVersion == batchAPIVersion && root.kind == applicationWorkloadJobKind {
 		root.job = jobHealth(obj, exists, root.uid != "")
 	}
-	if root.apiVersion == "apps/v1" && root.kind == applicationWorkloadDeploymentKind {
+	if root.apiVersion == appsAPIVersion && root.kind == applicationWorkloadDeploymentKind {
 		if exists {
 			root.deployment = deploymentHealth(obj)
 		} else {
 			root.deployment = &platformv1alpha1.ApplicationDeploymentHealth{State: applicationWorkloadProgressing, Reason: applicationResourceMissingReason}
 		}
 	}
-	if root.apiVersion == "v1" && root.kind == applicationWorkloadPodKind && exists {
+	if root.apiVersion == coreAPIVersion && root.kind == applicationWorkloadPodKind && exists {
 		root.pod = podHealth(obj)
 	}
 }
@@ -430,8 +431,6 @@ func optionalInt32(obj *unstructured.Unstructured, fields ...string) (*int32, bo
 	result := int32(value)
 	return &result, false
 }
-
-func int32PointerValue(value int32) *int32 { return &value }
 
 func statefulSetHealth(obj *unstructured.Unstructured, exists, hasUID bool) *platformv1alpha1.ApplicationStatefulSetHealth {
 	if !exists {
@@ -451,10 +450,10 @@ func statefulSetHealth(obj *unstructured.Unstructured, exists, hasUID bool) *pla
 	} else if observedFound && obj.GetGeneration() > 0 && observed >= obj.GetGeneration() && hasUID && desired != nil {
 		if *desired == 0 {
 			if ready == nil {
-				ready = int32PointerValue(0)
+				ready = new(int32(0))
 			}
 			if replicas == nil {
-				replicas = int32PointerValue(0)
+				replicas = new(int32(0))
 			}
 		}
 		if ready != nil && replicas != nil && *desired == *ready && *desired == *replicas {
@@ -478,14 +477,14 @@ func daemonSetHealth(obj *unstructured.Unstructured, exists, hasUID bool) *platf
 		state, reason = applicationWorkloadUnknown, applicationMalformedStatusReason
 	} else if observedFound && obj.GetGeneration() > 0 && observed >= obj.GetGeneration() && hasUID {
 		if desired == nil {
-			desired = int32PointerValue(0)
+			desired = new(int32(0))
 		}
 		if *desired == 0 {
 			if ready == nil {
-				ready = int32PointerValue(0)
+				ready = new(int32(0))
 			}
 			if current == nil {
-				current = int32PointerValue(0)
+				current = new(int32(0))
 			}
 		}
 		if *desired == 0 && (ready == nil || *ready == 0) && (current == nil || *current == 0) && (misscheduled == nil || *misscheduled == 0) {
@@ -600,7 +599,7 @@ func podHealth(obj *unstructured.Unstructured) *platformv1alpha1.ApplicationPodH
 	ready := applicationWorkloadUnknown
 	state, reason, message := applicationWorkloadProgressing, "PodStarting", "Pod is starting"
 	if obj.GetDeletionTimestamp() != nil {
-		return &platformv1alpha1.ApplicationPodHealth{Ready: ready, State: applicationWorkloadProgressing, Reason: "PodTerminating", Message: "Pod is terminating"}
+		return &platformv1alpha1.ApplicationPodHealth{Ready: ready, State: applicationWorkloadProgressing, Reason: applicationPodTerminatingReason, Message: "Pod is terminating"}
 	}
 	phase, _, _ := unstructured.NestedString(obj.Object, "status", "phase")
 	if phase == "Succeeded" {

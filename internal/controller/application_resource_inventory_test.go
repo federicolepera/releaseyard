@@ -18,8 +18,7 @@ import (
 )
 
 const (
-	appsAPIGroup   = "apps"
-	appsAPIVersion = "apps/v1"
+	appsAPIGroup = "apps"
 )
 
 func TestCollectApplicationResourcesIncludesChartRootsAndOwnedDescendants(t *testing.T) {
@@ -184,7 +183,7 @@ func TestAggregateWorkloadHealth(t *testing.T) {
 		{name: "statefulset pod failure", resources: []platformv1alpha1.ApplicationResource{{APIVersion: "apps/v1", Kind: "StatefulSet", UID: "ss", StatefulSet: &platformv1alpha1.ApplicationStatefulSetHealth{State: applicationWorkloadHealthy}}, {APIVersion: "v1", Kind: applicationWorkloadPodKind, ParentUID: "ss", Pod: &platformv1alpha1.ApplicationPodHealth{State: applicationWorkloadDegraded}}}, status: metav1.ConditionFalse, reason: applicationWorkloadDegraded},
 		{name: "daemonset pod failure", resources: []platformv1alpha1.ApplicationResource{{APIVersion: "apps/v1", Kind: "DaemonSet", UID: "ds", DaemonSet: &platformv1alpha1.ApplicationDaemonSetHealth{State: applicationWorkloadHealthy}}, {APIVersion: "v1", Kind: applicationWorkloadPodKind, ParentUID: "ds", Pod: &platformv1alpha1.ApplicationPodHealth{State: applicationWorkloadDegraded}}}, status: metav1.ConditionFalse, reason: applicationWorkloadDegraded},
 		{name: "terminating statefulset pod ignored", resources: []platformv1alpha1.ApplicationResource{{APIVersion: "apps/v1", Kind: "StatefulSet", UID: "ss", StatefulSet: &platformv1alpha1.ApplicationStatefulSetHealth{State: applicationWorkloadHealthy}}, {APIVersion: "v1", Kind: applicationWorkloadPodKind, ParentUID: "ss", Pod: &platformv1alpha1.ApplicationPodHealth{State: applicationWorkloadProgressing, Reason: "PodTerminating"}}}, status: metav1.ConditionTrue, reason: applicationWorkloadHealthy},
-		{name: "root job failed retry count is nonterminal", resources: []platformv1alpha1.ApplicationResource{{APIVersion: "batch/v1", Kind: "Job", UID: "j", Job: &platformv1alpha1.ApplicationJobHealth{Failed: int32Pointer(2), State: applicationWorkloadProgressing}}}, status: metav1.ConditionFalse, reason: applicationWorkloadProgressing},
+		{name: "root job failed retry count is nonterminal", resources: []platformv1alpha1.ApplicationResource{{APIVersion: "batch/v1", Kind: "Job", UID: "j", Job: &platformv1alpha1.ApplicationJobHealth{Failed: new(int32(2)), State: applicationWorkloadProgressing}}}, status: metav1.ConditionFalse, reason: applicationWorkloadProgressing},
 		{name: "job-owned failed pod does not aggregate separately", resources: []platformv1alpha1.ApplicationResource{{APIVersion: "batch/v1", Kind: "Job", UID: "j", Job: &platformv1alpha1.ApplicationJobHealth{State: applicationWorkloadProgressing}}, {APIVersion: "v1", Kind: applicationWorkloadPodKind, ParentUID: "j", Pod: &platformv1alpha1.ApplicationPodHealth{State: applicationWorkloadDegraded}}}, status: metav1.ConditionFalse, reason: applicationWorkloadProgressing},
 		{name: "cronjob history excluded", resources: []platformv1alpha1.ApplicationResource{{APIVersion: "batch/v1", Kind: "Job", UID: "j", ParentUID: "cron", Job: &platformv1alpha1.ApplicationJobHealth{State: applicationWorkloadDegraded}}}, status: metav1.ConditionUnknown, reason: "NoWorkloads"},
 		{name: "no workloads", status: metav1.ConditionUnknown, reason: "NoWorkloads"},
@@ -198,8 +197,6 @@ func TestAggregateWorkloadHealth(t *testing.T) {
 		})
 	}
 }
-
-func int32Pointer(value int32) *int32 { return &value }
 
 func TestDeploymentHealthProjection(t *testing.T) {
 	tests := []struct {

@@ -16,7 +16,6 @@ import (
 	"net/url"
 	"regexp"
 	"slices"
-	"sort"
 	"strings"
 	"sync"
 
@@ -40,6 +39,27 @@ const maxRequestBody = 64 << 10
 const (
 	clusterEnvironmentLabel = platformv1alpha1.ClusterEnvironmentLabelKey
 	maxEnvironmentTargets   = 32
+)
+
+const (
+	mediaTypeJSON        = "application/json"
+	rbacClusterRole      = "ClusterRole"
+	rbacSubjectGroup     = "Group"
+	platformAPIGroup     = "platform.releaseyard.io"
+	resourceApplications = "applications"
+	resourceClusters     = "clusters"
+	verbGet              = "get"
+	schemeHTTP           = "http"
+	schemeHTTPS          = "https"
+	authCallbackPath     = "/auth/callback"
+	loginPath            = "/login"
+	logoutURLField       = "logoutUrl"
+	podKind              = "Pod"
+	statusRunning        = "Running"
+	statusPending        = "Pending"
+	statusHealthy        = "Healthy"
+	toneGood             = "good"
+	toneMuted            = "muted"
 )
 
 var applicationNamePattern = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
@@ -115,7 +135,7 @@ func (s *server) listDefinitions(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "Could not load application definitions")
 		return
 	}
-	items.Items = filterReadable(r, "platform.releaseyard.io", "applicationdefinitions", "", items.Items, func(item platformv1alpha1.ApplicationDefinition) string { return item.Name })
+	items.Items = filterReadable(r, platformAPIGroup, "applicationdefinitions", "", items.Items, func(item platformv1alpha1.ApplicationDefinition) string { return item.Name })
 	if items.Items == nil {
 		items.Items = []platformv1alpha1.ApplicationDefinition{}
 	}
@@ -163,7 +183,7 @@ func readableNames(r *http.Request, group, resource, namespace string) (bool, ma
 	}
 	allowed := make(map[string]struct{})
 	for _, rule := range review.Status.ResourceRules {
-		if !ruleIncludes(rule.Verbs, "get") || !ruleIncludes(rule.APIGroups, group) || !ruleIncludes(rule.Resources, resource) {
+		if !ruleIncludes(rule.Verbs, verbGet) || !ruleIncludes(rule.APIGroups, group) || !ruleIncludes(rule.Resources, resource) {
 			continue
 		}
 		if len(rule.ResourceNames) == 0 {
@@ -293,7 +313,7 @@ func (s *server) listActivity(w http.ResponseWriter, r *http.Request) {
 		allowed, found := false, false
 		for _, candidate := range s.appNamespaces(r) {
 			attributes := authorizationv1.ResourceAttributes{
-				Group: "platform.releaseyard.io", Resource: "applications", Verb: "get",
+				Group: platformAPIGroup, Resource: resourceApplications, Verb: verbGet,
 				Namespace: candidate, Name: name,
 			}
 			if !selfSubjectAccessAllowed(r.Context(), impersonated, attributes) {
@@ -337,7 +357,7 @@ func (s *server) listActivity(w http.ResponseWriter, r *http.Request) {
 			Source: event.Source.Component, Count: event.Count, FirstSeen: first, LastSeen: last,
 		})
 	}
-	sort.Slice(entries, func(i, j int) bool { return entries[i].LastSeen.After(entries[j].LastSeen.Time) })
+	slices.SortFunc(entries, func(a, b activityEntry) int { return b.LastSeen.Compare(a.LastSeen.Time) })
 	writeJSON(w, http.StatusOK, map[string]any{"items": entries})
 }
 
@@ -347,7 +367,7 @@ func (s *server) listClusters(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "Could not load clusters")
 		return
 	}
-	items.Items = filterReadable(r, "platform.releaseyard.io", "clusters", "", items.Items, func(item platformv1alpha1.Cluster) string { return item.Name })
+	items.Items = filterReadable(r, platformAPIGroup, resourceClusters, "", items.Items, func(item platformv1alpha1.Cluster) string { return item.Name })
 	if items.Items == nil {
 		items.Items = []platformv1alpha1.Cluster{}
 	}
@@ -371,7 +391,7 @@ func (s *server) updateClusterEnvironment(w http.ResponseWriter, r *http.Request
 		return
 	}
 	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
-	if err != nil || mediaType != "application/json" {
+	if err != nil || mediaType != mediaTypeJSON {
 		writeError(w, http.StatusUnsupportedMediaType, "Content-Type application/json is required")
 		return
 	}
@@ -487,7 +507,7 @@ func resolveEnvironmentTargets(ctx context.Context, k8s client.Client, environme
 			Deleting:  cluster.DeletionTimestamp != nil,
 		})
 	}
-	sort.Slice(targets, func(i, j int) bool { return targets[i].Name < targets[j].Name })
+	slices.SortFunc(targets, func(a, b environmentTarget) int { return strings.Compare(a.Name, b.Name) })
 	hash := sha256.New()
 	writeDigestPart(hash, environment)
 	for _, target := range targets {
@@ -579,7 +599,7 @@ func (s *server) updateApplicationValues(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
-	if err != nil || mediaType != "application/json" {
+	if err != nil || mediaType != mediaTypeJSON {
 		writeError(w, http.StatusUnsupportedMediaType, "Content-Type application/json is required")
 		return
 	}
@@ -688,13 +708,14 @@ type createApplicationRequest struct {
 	Values           json.RawMessage `json:"values"`
 }
 
+//nolint:gocyclo // orchestration handler; splitting would obscure the sequential flow.
 func (s *server) createApplication(w http.ResponseWriter, r *http.Request) {
 	if !sameOrigin(r) {
 		writeError(w, http.StatusForbidden, "Request origin is not allowed")
 		return
 	}
 	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
-	if err != nil || mediaType != "application/json" {
+	if err != nil || mediaType != mediaTypeJSON {
 		writeError(w, http.StatusUnsupportedMediaType, "Content-Type application/json is required")
 		return
 	}
@@ -865,7 +886,7 @@ func sameOrigin(r *http.Request) bool {
 		return true
 	}
 	u, err := url.Parse(origin)
-	return err == nil && u.IsAbs() && u.Host != "" && strings.EqualFold(u.Host, r.Host) && (u.Scheme == "http" || u.Scheme == "https")
+	return err == nil && u.IsAbs() && u.Host != "" && strings.EqualFold(u.Host, r.Host) && (u.Scheme == schemeHTTP || u.Scheme == schemeHTTPS)
 }
 
 func writeError(w http.ResponseWriter, status int, message string) {
