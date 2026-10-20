@@ -39,25 +39,66 @@ spec:
           spec:
             description: spec defines the desired state of Resource
             properties:
-              foo:
-                description: foo is an example field of Resource. Edit resource_types.go
-                  to remove/update
-                type: string
+              definitionRef:
+                description: definitionRef references a cluster-scoped ResourceDefinition.
+                properties:
+                  name:
+                    minLength: 1
+                    type: string
+                required:
+                - name
+                type: object
+              targetRef:
+                description: targetRef references a cluster-scoped CloudTarget.
+                properties:
+                  name:
+                    minLength: 1
+                    type: string
+                required:
+                - name
+                type: object
+              values:
+                description: values are validated against the definition's configurableValues.
+                type: object
+                x-kubernetes-preserve-unknown-fields: true
+            required:
+            - definitionRef
+            - targetRef
             type: object
           status:
             description: status defines the observed state of Resource
             properties:
+              composed:
+                description: composed lists the managed resources created for this
+                  Resource.
+                items:
+                  description: ComposedResource identifies a managed resource created
+                    for a Resource.
+                  properties:
+                    apiVersion:
+                      description: apiVersion of the composed resource.
+                      type: string
+                    kind:
+                      description: kind of the composed resource.
+                      type: string
+                    name:
+                      description: name is the template name.
+                      type: string
+                    namespace:
+                      description: namespace of the composed resource.
+                      type: string
+                  required:
+                  - apiVersion
+                  - kind
+                  - name
+                  - namespace
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - name
+                x-kubernetes-list-type: map
               conditions:
-                description: |-
-                  conditions represent the current state of the Resource resource.
-                  Each condition has a unique type and reflects the status of a specific aspect of the resource.
-
-                  Standard condition types include:
-                  - "Available": the resource is fully functional
-                  - "Progressing": the resource is being created or updated
-                  - "Degraded": the resource failed to reach or maintain its desired state
-
-                  The status of each condition is one of True, False, or Unknown.
+                description: conditions represent the observed state of the Resource.
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.
@@ -116,6 +157,11 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
+              outputs:
+                additionalProperties:
+                  type: string
+                description: outputs are values read from the composed resources.
+                type: object
             type: object
         required:
         - spec

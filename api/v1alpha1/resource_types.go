@@ -17,6 +17,7 @@ limitations under the License.
 package v1alpha1
 
 import (
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 )
@@ -24,39 +25,66 @@ import (
 // EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
-// ResourceSpec defines the desired state of Resource
+// ResourceSpec defines the desired state of Resource.
 type ResourceSpec struct {
-	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
-	// The following markers will use OpenAPI v3 schema to validate the value
-	// More info: https://book.kubebuilder.io/reference/markers/crd-validation.html
+	// definitionRef references a cluster-scoped ResourceDefinition.
+	// +kubebuilder:validation:Required
+	DefinitionRef LocalReference `json:"definitionRef"`
 
-	// foo is an example field of Resource. Edit resource_types.go to remove/update
+	// targetRef references a cluster-scoped CloudTarget.
+	// +kubebuilder:validation:Required
+	TargetRef LocalReference `json:"targetRef"`
+
+	// values are validated against the definition's configurableValues.
+	// +kubebuilder:validation:Type=object
+	// +kubebuilder:pruning:PreserveUnknownFields
 	// +optional
-	Foo *string `json:"foo,omitempty"`
+	Values *apiextensionsv1.JSON `json:"values,omitempty"`
+}
+
+// LocalReference identifies an object by name.
+type LocalReference struct {
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	Name string `json:"name"`
 }
 
 // ResourceStatus defines the observed state of Resource.
 type ResourceStatus struct {
-	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
-
-	// For Kubernetes API conventions, see:
-	// https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md#typical-status-properties
-
-	// conditions represent the current state of the Resource resource.
-	// Each condition has a unique type and reflects the status of a specific aspect of the resource.
-	//
-	// Standard condition types include:
-	// - "Available": the resource is fully functional
-	// - "Progressing": the resource is being created or updated
-	// - "Degraded": the resource failed to reach or maintain its desired state
-	//
-	// The status of each condition is one of True, False, or Unknown.
+	// conditions represent the observed state of the Resource.
 	// +listType=map
 	// +listMapKey=type
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
+
+	// outputs are values read from the composed resources.
+	// +optional
+	Outputs map[string]string `json:"outputs,omitempty"`
+
+	// composed lists the managed resources created for this Resource.
+	// +listType=map
+	// +listMapKey=name
+	// +optional
+	Composed []ComposedResource `json:"composed,omitempty"`
+}
+
+// ComposedResource identifies a managed resource created for a Resource.
+type ComposedResource struct {
+	// name is the template name.
+	// +kubebuilder:validation:Required
+	Name string `json:"name"`
+
+	// apiVersion of the composed resource.
+	// +kubebuilder:validation:Required
+	APIVersion string `json:"apiVersion"`
+
+	// kind of the composed resource.
+	// +kubebuilder:validation:Required
+	Kind string `json:"kind"`
+
+	// namespace of the composed resource.
+	// +kubebuilder:validation:Required
+	Namespace string `json:"namespace"`
 }
 
 // +kubebuilder:object:root=true
