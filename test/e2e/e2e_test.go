@@ -1,5 +1,4 @@
 //go:build e2e
-// +build e2e
 
 /*
 Copyright 2026.
@@ -173,6 +172,101 @@ var _ = Describe("Manager", Ordered, func() {
 			Eventually(verifyControllerUp).Should(Succeed())
 		})
 
+		Context("Resource controller", func() {
+			It("reports a missing ResourceDefinition", func() {
+				By("creating a Resource whose definition does not exist")
+				manifest := `apiVersion: platform.releaseyard.io/v1alpha1
+kind: Resource
+metadata:
+  name: e2e-missing-refs
+  namespace: ` + namespace + `
+spec:
+  definitionRef:
+    name: e2e-missing-definition
+  targetRef:
+    name: e2e-missing-target
+`
+				Expect(applyManifest(manifest)).To(Succeed(), "Failed to create Resource")
+
+				DeferCleanup(func() {
+					cmd := exec.Command("kubectl", "delete", "resources.platform.releaseyard.io", "e2e-missing-refs",
+						"-n", namespace, "--ignore-not-found")
+					_, _ = utils.Run(cmd)
+				})
+
+				By("waiting for the DefinitionNotFound condition")
+				Eventually(expectResourceReason("e2e-missing-refs", "DefinitionNotFound"), 2*time.Minute).Should(Succeed())
+			})
+
+			It("reports a failed managed resource apply", func() {
+				By("creating a CloudTarget, ResourceDefinition and Resource")
+				manifest := `apiVersion: platform.releaseyard.io/v1alpha1
+kind: CloudTarget
+metadata:
+  name: e2e-target
+spec:
+  provider: aws
+  region: eu-west-1
+  providerConfigRef:
+    name: e2e-provider-config
+    namespace: ` + namespace + `
+---
+apiVersion: platform.releaseyard.io/v1alpha1
+kind: ResourceDefinition
+metadata:
+  name: e2e-definition
+spec:
+  description: E2E definition for an absent managed resource.
+  configurableValues:
+    - path: bucketName
+      type: string
+      required: true
+  resources:
+    - name: bucket
+      apiVersion: s3.aws.m.upbound.io/v1beta1
+      kind: Bucket
+      base:
+        spec:
+          managementPolicies:
+            - "*"
+      mappings:
+        - from: values.bucketName
+          to: "metadata.annotations[crossplane.io/external-name]"
+  outputs:
+    - name: arn
+      template: bucket
+      from: status.atProvider.arn
+---
+apiVersion: platform.releaseyard.io/v1alpha1
+kind: Resource
+metadata:
+  name: e2e-apply-failed
+  namespace: ` + namespace + `
+spec:
+  definitionRef:
+    name: e2e-definition
+  targetRef:
+    name: e2e-target
+  values:
+    bucketName: e2e-apply-failed
+`
+				Expect(applyManifest(manifest)).To(Succeed(), "Failed to create Resource test objects")
+
+				DeferCleanup(func() {
+					for _, args := range [][]string{
+						{"delete", "resources.platform.releaseyard.io", "e2e-apply-failed", "-n", namespace, "--ignore-not-found"},
+						{"delete", "cloudtargets.platform.releaseyard.io", "e2e-target", "--ignore-not-found"},
+						{"delete", "resourcedefinitions.platform.releaseyard.io", "e2e-definition", "--ignore-not-found"},
+					} {
+						_, _ = utils.Run(exec.Command("kubectl", args...))
+					}
+				})
+
+				By("waiting for the ApplyFailed condition")
+				Eventually(expectResourceReason("e2e-apply-failed", "ApplyFailed"), 2*time.Minute).Should(Succeed())
+			})
+		})
+
 		It("should ensure the metrics endpoint is serving metrics", func() {
 			By("creating a ClusterRoleBinding for the service account to allow access to metrics")
 			cmd := exec.Command("kubectl", "create", "clusterrolebinding", metricsRoleBindingName,
@@ -264,6 +358,8 @@ var _ = Describe("Manager", Ordered, func() {
 				g.Expect(err).NotTo(HaveOccurred(), "Failed to retrieve logs from curl pod")
 				g.Expect(metricsOutput).NotTo(BeEmpty())
 				g.Expect(metricsOutput).To(ContainSubstring("< HTTP/1.1 200 OK"))
+				g.Expect(metricsOutput).To(MatchRegexp(
+					`controller_runtime_reconcile_total\{controller="resource",result="success"\} [1-9][0-9]*`))
 			}
 			Eventually(verifyMetricsAvailable, 2*time.Minute).Should(Succeed())
 		})
@@ -336,4 +432,36 @@ type tokenRequest struct {
 	Status struct {
 		Token string `json:"token"`
 	} `json:"status"`
+}
+
+// applyManifest writes a manifest to a temporary file and applies it with kubectl.
+func applyManifest(manifest string) error {
+	file, err := os.CreateTemp("", "releaseyard-e2e-*.yaml")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = os.Remove(file.Name()) }()
+
+	if _, err := file.WriteString(manifest); err != nil {
+		_ = file.Close()
+		return err
+	}
+	if err := file.Close(); err != nil {
+		return err
+	}
+
+	_, err = utils.Run(exec.Command("kubectl", "apply", "-f", file.Name()))
+	return err
+}
+
+// expectResourceReason returns an assertion that the Resource Ready condition
+// carries the given reason.
+func expectResourceReason(name, reason string) func(g Gomega) {
+	return func(g Gomega) {
+		cmd := exec.Command("kubectl", "get", "resources.platform.releaseyard.io", name,
+			"-n", namespace, "-o", `jsonpath={.status.conditions[?(@.type=="Ready")].reason}`)
+		output, err := utils.Run(cmd)
+		g.Expect(err).NotTo(HaveOccurred(), "Failed to read Resource status")
+		g.Expect(output).To(Equal(reason))
+	}
 }
