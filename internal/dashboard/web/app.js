@@ -35,7 +35,7 @@
       try { localStorage.setItem('idp-sidebar', next ? 'collapsed' : 'open'); } catch (_) { /* Storage can be unavailable. */ }
     });
   }
-  const state = { definitions: [], applications: [], clusters: [], selectedApplication: null, selectedCluster: null, selectedInstanceUID: '', detailTab: 'overview', deleting: false, deletionPending: new Set(), editingValues: false, valuesDraft: Object.create(null), savingValues: false, definitionQuery: '', definitionSort: 'name', definitionType: '', definitionView: 'grid', destinationMode: 'cluster', preview: null, previewController: null, previewSequence: 0, previewLoading: false, savingEnvironment: false, creating: false, teams: [], team: '', resourcesQuery: '', resourcesKind: '', resourcesStatus: '', resourcesExpanded: new Set(), resourcesLive: null, resourcesLiveKey: '', selectedResourceUID: '', resourcePanelTab: 'overview', activityRange: '24h', activityType: '', activitySource: '', activityQuery: '', applicationQuery: '', applicationCluster: '', applicationNamespace: '', applicationStatus: '', applicationSort: { key: 'name', direction: 'asc' }, cloudTargets: [], cloudDefinitions: [], cloudResources: [], selectedCloudResource: null, cloudCreating: false, cloudSaving: false, cloudDeleting: false, cloudResourcesError: '', cloudSearch: '', cloudStatusFilter: '', cloudTargetFilter: '', cloudDefinitionFilter: '', cloudSort: { key: 'name', direction: 'asc' }, cloudDefinitionsExpanded: false, cloudTargetsExpanded: false, cloudActivityExpanded: false };
+  const state = { definitions: [], applications: [], clusters: [], clusterQuery: '', clusterStatus: '', selectedApplication: null, selectedCluster: null, selectedInstanceUID: '', detailTab: 'overview', deleting: false, deletionPending: new Set(), editingValues: false, valuesDraft: Object.create(null), savingValues: false, definitionQuery: '', definitionSort: 'name', definitionType: '', definitionView: 'grid', destinationMode: 'cluster', preview: null, previewController: null, previewSequence: 0, previewLoading: false, savingEnvironment: false, creating: false, teams: [], team: '', resourcesQuery: '', resourcesKind: '', resourcesStatus: '', resourcesExpanded: new Set(), resourcesLive: null, resourcesLiveKey: '', selectedResourceUID: '', resourcePanelTab: 'overview', activityRange: '24h', activityType: '', activitySource: '', activityQuery: '', applicationQuery: '', applicationCluster: '', applicationNamespace: '', applicationStatus: '', applicationSort: { key: 'name', direction: 'asc' }, cloudTargets: [], cloudDefinitions: [], cloudResources: [], selectedCloudResource: null, cloudCreating: false, cloudSaving: false, cloudDeleting: false, cloudResourcesError: '', cloudSearch: '', cloudStatusFilter: '', cloudTargetFilter: '', cloudDefinitionFilter: '', cloudSort: { key: 'name', direction: 'asc' }, cloudDefinitionsExpanded: false, cloudTargetsExpanded: false, cloudActivityExpanded: false };
   state.selectedDefinition = null;
   state.canCreateApps = false;
   state.canDeleteApps = false;
@@ -183,30 +183,55 @@
         : { label: 'Connection status unknown', tone: 'neutral' };
   }
 
+  function clusterStatusKey(cluster) {
+    const label = clusterConnection(cluster).label;
+    if (label === 'Connected') return 'connected';
+    if (label === 'Not connected') return 'disconnected';
+    return 'unknown';
+  }
+
+  function renderClusterKpis() {
+    const total = state.clusters.length;
+    const connected = state.clusters.filter((cluster) => clusterStatusKey(cluster) === 'connected').length;
+    const disconnected = state.clusters.filter((cluster) => clusterStatusKey(cluster) === 'disconnected').length;
+    const nodes = state.clusters.reduce((sum, cluster) => sum + (Array.isArray(cluster.status?.nodes) ? cluster.status.nodes.length : 0), 0);
+    const values = { total, connected, disconnected, nodes };
+    Object.entries(values).forEach(([key, value]) => { const target = $(`#cluster-kpi-${key}`); if (target) target.textContent = String(value); });
+  }
+
   function renderClustersPage() {
     const root = $('#clusters');
     if (!root) return;
+    renderClusterKpis();
+    const query = state.clusterQuery.trim().toLocaleLowerCase('en');
+    const clusters = state.clusters.filter((cluster) => {
+      const name = String(cluster.metadata?.name || '').toLocaleLowerCase('en');
+      return (!query || name.includes(query)) && (!state.clusterStatus || clusterStatusKey(cluster) === state.clusterStatus);
+    });
     root.replaceChildren();
-    $('#cluster-count').textContent = String(state.clusters.length);
     if (!state.clusters.length) {
-      root.append(element('p', 'empty', 'No clusters are enrolled yet.'));
+      const row = document.createElement('tr');
+      const cell = element('td', 'apps-empty', 'No clusters are enrolled yet.');
+      cell.colSpan = 2; row.append(cell); root.append(row);
+      if (state.selectedCluster) closeCluster();
+    } else if (!clusters.length) {
+      const row = document.createElement('tr');
+      const cell = element('td', 'apps-empty', 'No clusters match these filters.');
+      cell.colSpan = 2; row.append(cell); root.append(row);
     } else {
-      const list = element('div', 'resource-list');
-      state.clusters.forEach((cluster) => {
-        const row = element('article', 'resource-row');
-        const details = element('div', 'resource-main');
+      clusters.forEach((cluster) => {
+        const row = document.createElement('tr');
         const name = cluster.metadata?.name || 'Unnamed cluster';
-        const open = element('button', 'application-link', name);
+        const nameCell = document.createElement('td');
+        const open = element('button', 'application-link clusters-name-link', safe(name));
         open.type = 'button'; open.setAttribute('aria-label', `Open cluster ${name} details`);
         open.addEventListener('click', () => openCluster(cluster));
-        const heading = element('h3', 'resource-name'); heading.append(open); details.append(heading);
-        const environment = cluster.metadata?.labels?.['platform.releaseyard.io/environment'];
-        if (environment) details.append(element('p', 'resource-meta', `Environment: ${environment}`));
-        const status = clusterConnection(cluster);
-        const side = element('div', 'resource-side'); side.append(badge(status.label, status.tone));
-        row.append(details, side); list.append(row);
+        nameCell.append(open);
+        const nodes = Array.isArray(cluster.status?.nodes) ? cluster.status.nodes.length : null;
+        const nodesCell = element('td', 'clusters-node-cell', nodes === null ? '—' : String(nodes));
+        if (nodes !== null) nodesCell.title = `${nodes} ${nodes === 1 ? 'node' : 'nodes'}`;
+        row.append(nameCell, nodesCell); root.append(row);
       });
-      root.append(list);
     }
     if (state.selectedCluster) {
       const current = state.clusters.find((item) => item.metadata?.uid === state.selectedCluster.metadata?.uid || item.metadata?.name === state.selectedCluster.metadata?.name);
@@ -218,6 +243,7 @@
   function openCluster(cluster) {
     state.selectedCluster = cluster;
     $('#clusters-list-view').hidden = true;
+    document.querySelector('.page-clusters')?.classList.add('is-detail-open');
     renderClusterDetail();
     $('#cluster-detail .back-button').focus();
   }
@@ -226,6 +252,7 @@
     const name = state.selectedCluster?.metadata?.name;
     state.selectedCluster = null;
     $('#cluster-detail').hidden = true; $('#clusters-list-view').hidden = false;
+    document.querySelector('.page-clusters')?.classList.remove('is-detail-open');
     const links = [...$('#clusters').querySelectorAll('.application-link')];
     (links.find((item) => item.textContent === name) || links[0] || $('#refresh-clusters'))?.focus();
   }
@@ -308,13 +335,20 @@
       const selectedName = state.selectedCluster?.metadata?.name;
       state.clusters = await getList('/api/clusters');
       if (selectedName) state.selectedCluster = state.clusters.find((item) => item.metadata?.name === selectedName) || null;
-      if (selectedName && !state.selectedCluster) { $('#cluster-detail').hidden = true; $('#clusters-list-view').hidden = false; }
+      if (selectedName && !state.selectedCluster) { $('#cluster-detail').hidden = true; $('#clusters-list-view').hidden = false; document.querySelector('.page-clusters')?.classList.remove('is-detail-open'); }
       renderClustersPage();
       notice.hidden = true;
       return true;
     } catch (error) {
       showNotice(error.message || 'Could not load clusters. Try again.', 'error');
-      if (!state.clusters.length) $('#clusters').textContent = 'Cluster list unavailable.';
+      if (!state.clusters.length) {
+        const root = $('#clusters');
+        if (root) {
+          const row = document.createElement('tr');
+          const cell = element('td', 'apps-empty', 'Cluster list unavailable. Try again.');
+          cell.colSpan = 2; row.append(cell); root.replaceChildren(row);
+        }
+      }
       return false;
     } finally { button.disabled = false; }
   }
@@ -4304,6 +4338,8 @@
     refreshApplications();
   } else if ($('#clusters')) {
     $('#refresh-clusters').addEventListener('click', refreshClusterPage);
+    $('#cluster-search').addEventListener('input', (event) => { state.clusterQuery = event.currentTarget.value; renderClustersPage(); });
+    $('#cluster-status-filter').addEventListener('change', (event) => { state.clusterStatus = event.currentTarget.value; renderClustersPage(); });
     refreshClusterPage();
   } else if ($('#cloud')) {
     initCloud();

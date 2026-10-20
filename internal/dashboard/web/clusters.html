@@ -49,13 +49,51 @@
     <h1 id="auth-signed-out-title">You’re signed out</h1>
     <p>Your dashboard session has ended. Sign in again to continue.</p>
   </section>
-  <main class="page">
-    <section class="intro hero" aria-labelledby="page-title"><div class="hero-copy"><p class="eyebrow">Cluster inventory</p><h1 id="page-title">Clusters</h1><p class="lede">Review connection status and the latest node inventory reported by each cluster.</p></div><div class="hero-art" aria-hidden="true"><img class="platform-art" src="./platform-infrastructure.png" alt=""></div></section>
+  <main class="page page-clusters">
     <div id="clusters-notice" class="notice" role="status" aria-live="polite" hidden></div>
-    <div class="page-tools"><button id="refresh-clusters" class="button button-secondary refresh-button" type="button"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M16 8a6.5 6.5 0 0 0-11-3L3 7m0-4v4h4m-3 5a6.5 6.5 0 0 0 11 3l2-2m0 4v-4h-4"/></svg>Refresh clusters</button></div>
-    <section id="clusters-list-view" class="panel cluster-list-panel" aria-labelledby="clusters-title">
-      <div class="panel-heading"><div><p class="eyebrow">Inventory</p><h2 id="clusters-title">Enrolled clusters</h2></div><span id="cluster-count" class="count">—</span></div>
-      <div id="clusters" class="list-state" aria-live="polite">Loading clusters…</div>
+    <section id="clusters-list-view" class="clusters-view" aria-labelledby="page-title">
+      <section class="apps-hero hero" aria-labelledby="page-title">
+        <div class="apps-hero-copy">
+          <h1 id="page-title">Clusters</h1>
+          <p class="lede">Review the clusters enrolled in your platform and the nodes they report.</p>
+        </div>
+        <div class="apps-hero-art" aria-hidden="true"><img class="platform-art" src="./platform-infrastructure.png" alt=""></div>
+      </section>
+      <div class="apps-kpis">
+        <article class="apps-kpi">
+          <span class="apps-kpi-icon apps-kpi-icon-total" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m12 3 8 4.5-8 4.5-8-4.5L12 3Z"/><path d="m4 12 8 4.5 8-4.5"/><path d="m4 16.5 8 4.5 8-4.5"/></svg></span>
+          <div class="apps-kpi-body"><p class="apps-kpi-label">Total clusters</p><strong class="apps-kpi-value" id="cluster-kpi-total">—</strong></div>
+          <span class="apps-kpi-note">Enrolled</span>
+        </article>
+        <article class="apps-kpi">
+          <span class="apps-kpi-icon apps-kpi-icon-healthy" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m8 12 2.7 2.7L16 9"/></svg></span>
+          <div class="apps-kpi-body"><p class="apps-kpi-label">Connected</p><strong class="apps-kpi-value" id="cluster-kpi-connected">—</strong></div>
+          <span class="apps-kpi-note">Healthy connection</span>
+        </article>
+        <article class="apps-kpi">
+          <span class="apps-kpi-icon apps-kpi-icon-degraded" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3 2.8 20h18.4L12 3Z"/><path d="M12 9v4.5M12 17h.01"/></svg></span>
+          <div class="apps-kpi-body"><p class="apps-kpi-label">Not connected</p><strong class="apps-kpi-value" id="cluster-kpi-disconnected">—</strong></div>
+          <span class="apps-kpi-note">Needs attention</span>
+        </article>
+        <article class="apps-kpi">
+          <span class="apps-kpi-icon apps-kpi-icon-nodes" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="6" rx="1.5"/><rect x="3" y="14" width="18" height="6" rx="1.5"/><path d="M7 7h.01M7 17h.01"/></svg></span>
+          <div class="apps-kpi-body"><p class="apps-kpi-label">Nodes</p><strong class="apps-kpi-value" id="cluster-kpi-nodes">—</strong></div>
+          <span class="apps-kpi-note">Reported inventory</span>
+        </article>
+      </div>
+      <div class="apps-toolbar" role="search">
+        <label class="search-field apps-search"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.8" cy="8.8" r="5.5"/><path d="m13 13 4 4"/></svg><span class="visually-hidden">Search clusters</span><input id="cluster-search" type="search" placeholder="Search clusters..." autocomplete="off" aria-controls="clusters"></label>
+        <label class="apps-filter"><span>Status</span><select id="cluster-status-filter" aria-label="Filter by connection status"><option value="">All statuses</option><option value="connected">Connected</option><option value="disconnected">Not connected</option><option value="unknown">Unknown</option></select></label>
+        <button id="refresh-clusters" class="button button-secondary refresh-button" type="button"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M16 8a6.5 6.5 0 0 0-11-3L3 7m0-4v4h4m-3 5a6.5 6.5 0 0 0 11 3l2-2m0 4v-4h-4"/></svg>Refresh</button>
+      </div>
+      <div class="apps-table-panel">
+        <div class="apps-table-wrap">
+          <table class="apps-table clusters-table">
+            <thead><tr><th>Name</th><th>Nodes</th></tr></thead>
+            <tbody id="clusters" aria-live="polite"><tr><td class="apps-empty" colspan="2">Loading clusters…</td></tr></tbody>
+          </table>
+        </div>
+      </div>
     </section>
     <section id="cluster-detail" class="panel cluster-detail" aria-labelledby="cluster-detail-title" hidden></section>
     <footer>Management namespace: <code>idp-system</code></footer>
