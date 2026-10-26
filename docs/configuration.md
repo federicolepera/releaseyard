@@ -96,14 +96,27 @@ Exactly one of `clusterRef` or `environment` must be set.
 | Value | Default | Notes |
 |-------|---------|-------|
 | `dashboard.enabled` | `false` | Deploy the dashboard. |
+| `dashboard.replicas` | `1` | More than 1 requires `dashboard.sessionStore.type=redis`. |
 | `dashboard.image.repository` | `""` | Required when enabled. |
 | `dashboard.image.tag` | `""` | Required when enabled. |
 | `dashboard.publicURL` | `""` | Required when enabled; canonical base URL. |
+| `dashboard.sessionStore.type` | `memory` | `memory` or `redis`. Use `redis` in production and for HA. |
+| `dashboard.sessionStore.redis.address` | `""` | Required when type is `redis`. |
+| `dashboard.sessionStore.redis.username` | `""` | Optional Redis ACL user. |
+| `dashboard.sessionStore.redis.db` | `0` | Redis database index. |
+| `dashboard.sessionStore.redis.passwordSecret.name` | `""` | Existing Secret containing the Redis password. |
+| `dashboard.sessionStore.redis.passwordSecret.key` | `password` | Key in the Redis password Secret. |
+| `dashboard.sessionStore.redis.tls.enabled` | `false` | Use TLS for the Redis connection. |
+| `dashboard.sessionStore.redis.keyPrefix` | `releaseyard:dashboard:` | Key namespace in Redis. |
 | `dashboard.teamNamespacePrefix` | `releaseyard-team-` | Team namespace prefix. |
 | `dashboard.adminGroups` | `[]` | OIDC groups allowed in Administration. |
 | `dashboard.bootstrap.enabled` | `true` | Create the local administrator Secret. |
 | `dashboard.ingress.enabled` | `false` | Optional Ingress. Requires class, host, TLS. |
 | `dashboard.oidcLoopback.enabled` | `false` | Development-only loopback aid. |
+
+Redis is not deployed by the chart. Use a managed Redis or deploy one separately,
+and set `dashboard.sessionStore.type=redis`. The chart requires it when
+`dashboard.replicas` is greater than 1.
 
 OIDC is not configured through Helm values. Set it from the Administration page
 after installation.
@@ -117,6 +130,13 @@ after installation.
 | `metrics.secure` | `true` | HTTPS and authn/authz. |
 | `prometheus.enabled` | `false` | Create a ServiceMonitor. |
 | `networkPolicy.enabled` | `false` | Restrict metrics ingress. |
+
+### Admission
+
+| Value | Default | Notes |
+|-------|---------|-------|
+| `admission.enabled` | `true` | Enforce Application references with a ValidatingAdmissionPolicy. Requires Kubernetes 1.31+. |
+| `admission.failurePolicy` | `Fail` | Reject the create when the policy cannot be evaluated. |
 
 ### CRDs and lifecycle
 

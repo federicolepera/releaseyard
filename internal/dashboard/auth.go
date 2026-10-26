@@ -25,11 +25,9 @@ const (
 	loginBindingCookie = "dashboard-login-binding"
 	sessionCookie      = "dashboard-session"
 
-	loginTransactionTTL  = 5 * time.Minute
-	sessionIdleTTL       = 30 * time.Minute
-	sessionAbsoluteTTL   = 8 * time.Hour
-	maxLoginTransactions = 4096
-	maxSessions          = 4096
+	loginTransactionTTL = 5 * time.Minute
+	sessionIdleTTL      = 30 * time.Minute
+	sessionAbsoluteTTL  = 8 * time.Hour
 
 	// Startup discovery of the stored identity provider can race with the
 	// loopback sidecar or the identity provider itself. Retry briefly so a
@@ -50,6 +48,9 @@ type OIDCConfig struct {
 	// ApplicationEditorRole is the ClusterRole bound to a team group inside its
 	// namespace by the "Access applications" administration panel.
 	ApplicationEditorRole string
+	// SessionStore persists sessions and login transactions. When nil an
+	// in-memory store is used.
+	SessionStore SessionStore
 }
 
 // LocalAuthConfig configures the dashboard authentication. HashPath points at
@@ -69,6 +70,9 @@ type LocalAuthConfig struct {
 	// ClientFactory builds a Kubernetes client that impersonates the logged-in
 	// user, so that authorization is enforced by the management cluster's RBAC.
 	ClientFactory ImpersonatingClientFactory
+	// SessionStore persists sessions and login transactions. When nil an
+	// in-memory store is used.
+	SessionStore SessionStore
 }
 
 type loginTransaction struct {
@@ -112,10 +116,7 @@ type authHandler struct {
 	oidc                   atomic.Pointer[oidcRuntime]
 	clientFactory          ImpersonatingClientFactory
 	cloudProvisioning      bool
-
-	mu           sync.Mutex
-	transactions map[string]loginTransaction
-	sessions     map[string]dashboardSession
+	store                  SessionStore
 
 	clients sync.Map // identity key -> client.Client
 
@@ -152,7 +153,7 @@ func NewOIDCHandler(k8s client.Client, namespace string, config OIDCConfig) (htt
 	publicURL := *redirectURL
 	publicURL.Path = ""
 	publicURL.RawPath = ""
-	auth := newAuthHandler(k8s, namespace, &publicURL, "", "", nil, config.TeamNamespacePrefix, config.ApplicationEditorRole)
+	auth := newAuthHandler(k8s, namespace, &publicURL, "", "", nil, config.TeamNamespacePrefix, config.ApplicationEditorRole, config.SessionStore)
 	auth.oidc.Store(rt)
 	return securityHeaders(auth.middleware(NewHandler(k8s, namespace))), nil
 }
@@ -166,14 +167,17 @@ func NewLocalHandler(k8s client.Client, namespace string, config LocalAuthConfig
 	if err != nil {
 		return nil, err
 	}
-	auth := newAuthHandler(k8s, namespace, publicURL, config.HashPath, resolveIdentityProviderSecretName(config.IdentityProviderSecretName), config.ClientFactory, config.TeamNamespacePrefix, config.ApplicationEditorRole)
+	auth := newAuthHandler(k8s, namespace, publicURL, config.HashPath, resolveIdentityProviderSecretName(config.IdentityProviderSecretName), config.ClientFactory, config.TeamNamespacePrefix, config.ApplicationEditorRole, config.SessionStore)
 	auth.cloudProvisioning = crossplaneInstalled(context.Background(), k8s)
 	auth.reloadIdentityProvider(context.Background())
 	auth.retryIdentityProvider(context.Background())
 	return securityHeaders(auth.middleware(NewHandler(k8s, namespace))), nil
 }
 
-func newAuthHandler(k8s client.Client, namespace string, publicURL *url.URL, localHashPath, identityProviderSecret string, clientFactory ImpersonatingClientFactory, teamNamespacePrefix, applicationEditorRole string) *authHandler {
+func newAuthHandler(k8s client.Client, namespace string, publicURL *url.URL, localHashPath, identityProviderSecret string, clientFactory ImpersonatingClientFactory, teamNamespacePrefix, applicationEditorRole string, store SessionStore) *authHandler {
+	if store == nil {
+		store = newMemorySessionStore()
+	}
 	return &authHandler{
 		localHashPath:          localHashPath,
 		publicURL:              publicURL,
@@ -185,8 +189,7 @@ func newAuthHandler(k8s client.Client, namespace string, publicURL *url.URL, loc
 		identityProviderSecret: identityProviderSecret,
 		clientFactory:          clientFactory,
 		now:                    time.Now,
-		transactions:           make(map[string]loginTransaction),
-		sessions:               make(map[string]dashboardSession),
+		store:                  store,
 	}
 }
 
@@ -371,7 +374,11 @@ func (a *authHandler) middleware(next http.Handler) http.Handler {
 			return
 		}
 
-		session, ok := a.sessionFromRequest(w, r)
+		session, ok, err := a.sessionFromRequest(w, r)
+		if err != nil {
+			writeError(w, http.StatusServiceUnavailable, "Session store is unavailable")
+			return
+		}
 		if !ok {
 			a.unauthorized(w, r)
 			return
@@ -542,16 +549,15 @@ func (a *authHandler) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	verifier := oauth2.GenerateVerifier()
-	now := a.now()
-	a.mu.Lock()
-	a.pruneTransactionsLocked(now)
-	if len(a.transactions) >= maxLoginTransactions {
-		a.mu.Unlock()
-		writeError(w, http.StatusServiceUnavailable, "Authentication is busy")
+	transaction := loginTransaction{state: state, binding: binding, nonce: nonce, verifier: verifier, expires: a.now().Add(loginTransactionTTL)}
+	if err := a.store.PutTransaction(r.Context(), state, transaction, loginTransactionTTL); err != nil {
+		if errors.Is(err, errSessionCapacity) {
+			writeError(w, http.StatusServiceUnavailable, "Authentication is busy")
+		} else {
+			writeError(w, http.StatusServiceUnavailable, "Authentication store is unavailable")
+		}
 		return
 	}
-	a.transactions[state] = loginTransaction{state: state, binding: binding, nonce: nonce, verifier: verifier, expires: now.Add(loginTransactionTTL)}
-	a.mu.Unlock()
 	a.setCookie(w, loginBindingCookie, binding, int(loginTransactionTTL.Seconds()))
 	authURL := runtime.oauth.AuthCodeURL(state, oauth2.S256ChallengeOption(verifier), oidc.Nonce(nonce))
 	http.Redirect(w, r, authURL, http.StatusSeeOther)
@@ -569,8 +575,12 @@ func (a *authHandler) callback(w http.ResponseWriter, r *http.Request) {
 	if err == nil {
 		binding = bindingCookie.Value
 	}
-	transaction, ok := a.consumeTransaction(state, binding)
+	transaction, ok, err := a.consumeTransaction(r.Context(), state, binding)
 	a.clearCookie(w, loginBindingCookie)
+	if err != nil {
+		writeError(w, http.StatusServiceUnavailable, "Authentication store is unavailable")
+		return
+	}
 	if !ok || r.URL.Query().Get("code") == "" {
 		writeError(w, http.StatusBadRequest, "Invalid or expired authentication transaction")
 		return
@@ -648,57 +658,62 @@ func (a *authHandler) callback(w http.ResponseWriter, r *http.Request) {
 		authMethod:   authMethodOIDC,
 	}
 	a.authzCache.Delete(authorizationCacheKey(session))
-	a.mu.Lock()
-	a.pruneSessionsLocked(now)
-	if len(a.sessions) >= maxSessions {
-		a.mu.Unlock()
-		writeError(w, http.StatusServiceUnavailable, "Session capacity reached")
+	if err := a.store.PutSession(r.Context(), sessionID, session, sessionTTL(session, now)); err != nil {
+		if errors.Is(err, errSessionCapacity) {
+			writeError(w, http.StatusServiceUnavailable, "Session capacity reached")
+		} else {
+			writeError(w, http.StatusServiceUnavailable, "Session store is unavailable")
+		}
 		return
 	}
-	a.sessions[sessionID] = session
-	a.mu.Unlock()
 	a.setSessionCookie(w, sessionID, session)
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
-func (a *authHandler) consumeTransaction(state, binding string) (loginTransaction, bool) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	transaction, ok := a.transactions[state]
+func (a *authHandler) consumeTransaction(ctx context.Context, state, binding string) (loginTransaction, bool, error) {
+	transaction, ok, err := a.store.TakeTransaction(ctx, state)
+	if err != nil {
+		return loginTransaction{}, false, err
+	}
 	if !ok {
-		return loginTransaction{}, false
+		return loginTransaction{}, false, nil
 	}
-	delete(a.transactions, state)
 	if subtle.ConstantTimeCompare([]byte(state), []byte(transaction.state)) != 1 || subtle.ConstantTimeCompare([]byte(binding), []byte(transaction.binding)) != 1 || !a.now().Before(transaction.expires) {
-		return loginTransaction{}, false
+		return loginTransaction{}, false, nil
 	}
-	return transaction, true
+	return transaction, true, nil
 }
 
-func (a *authHandler) sessionFromRequest(w http.ResponseWriter, r *http.Request) (dashboardSession, bool) {
+func (a *authHandler) sessionFromRequest(w http.ResponseWriter, r *http.Request) (dashboardSession, bool, error) {
 	cookie, err := r.Cookie(sessionCookie)
 	if err != nil || cookie.Value == "" {
-		return dashboardSession{}, false
+		return dashboardSession{}, false, nil
+	}
+	session, ok, err := a.store.GetSession(r.Context(), cookie.Value)
+	if err != nil {
+		return dashboardSession{}, false, err
 	}
 	now := a.now()
-	a.mu.Lock()
-	session, ok := a.sessions[cookie.Value]
 	if !ok || !now.Before(session.expires) || !now.Before(session.lastActivity.Add(sessionIdleTTL)) {
-		delete(a.sessions, cookie.Value)
-		a.mu.Unlock()
+		_ = a.store.DeleteSession(r.Context(), cookie.Value)
 		a.clearCookie(w, sessionCookie)
-		return dashboardSession{}, false
+		return dashboardSession{}, false, nil
 	}
 	session.lastActivity = now
-	a.sessions[cookie.Value] = session
-	a.mu.Unlock()
-	remaining := min(session.expires.Sub(now), sessionIdleTTL)
+	if err := a.store.PutSession(r.Context(), cookie.Value, session, sessionTTL(session, now)); err != nil {
+		return dashboardSession{}, false, err
+	}
+	remaining := sessionTTL(session, now)
 	a.setCookie(w, sessionCookie, cookie.Value, int(remaining.Seconds()))
-	return session, true
+	return session, true, nil
 }
 
 func (a *authHandler) logout(w http.ResponseWriter, r *http.Request) {
-	session, ok := a.sessionFromRequest(w, r)
+	session, ok, err := a.sessionFromRequest(w, r)
+	if err != nil {
+		writeError(w, http.StatusServiceUnavailable, "Session store is unavailable")
+		return
+	}
 	if !ok {
 		writeError(w, http.StatusUnauthorized, "Authentication required")
 		return
@@ -710,9 +725,10 @@ func (a *authHandler) logout(w http.ResponseWriter, r *http.Request) {
 
 	// 1. Delete the local dashboard session and clear its cookie.
 	if cookie, err := r.Cookie(sessionCookie); err == nil {
-		a.mu.Lock()
-		delete(a.sessions, cookie.Value)
-		a.mu.Unlock()
+		if err := a.store.DeleteSession(r.Context(), cookie.Value); err != nil {
+			writeError(w, http.StatusServiceUnavailable, "Session store is unavailable")
+			return
+		}
 	}
 	a.clearCookie(w, sessionCookie)
 
@@ -767,20 +783,12 @@ func (a *authHandler) originMatchesRedirect(raw string) bool {
 	return err == nil && origin.IsAbs() && origin.User == nil && origin.Path == "" && origin.RawQuery == "" && origin.Fragment == "" && strings.EqualFold(origin.Scheme, a.publicURL.Scheme) && strings.EqualFold(origin.Host, a.publicURL.Host)
 }
 
-func (a *authHandler) pruneTransactionsLocked(now time.Time) {
-	for state, transaction := range a.transactions {
-		if !now.Before(transaction.expires) {
-			delete(a.transactions, state)
-		}
+func sessionTTL(session dashboardSession, now time.Time) time.Duration {
+	remaining := session.expires.Sub(now)
+	if remaining > sessionIdleTTL {
+		return sessionIdleTTL
 	}
-}
-
-func (a *authHandler) pruneSessionsLocked(now time.Time) {
-	for id, session := range a.sessions {
-		if !now.Before(session.expires) || !now.Before(session.lastActivity.Add(sessionIdleTTL)) {
-			delete(a.sessions, id)
-		}
-	}
+	return remaining
 }
 
 func randomOpaque() (string, error) {

@@ -92,6 +92,37 @@ dashboard:
 Configure the OIDC issuer with the same hostname and port, for example
 `http://keycloak.localhost:18080/realms/releaseyard`.
 
+## Session storage
+
+The dashboard keeps sessions and OIDC login transactions in memory by default.
+That is suitable for one replica only: a rollout signs everyone out and
+replicas do not share sessions.
+
+For production and HA, use Redis:
+
+```yaml
+dashboard:
+  replicas: 2
+  sessionStore:
+    type: redis
+    redis:
+      address: redis.example.com:6379
+      username: ""
+      db: 0
+      passwordSecret:
+        name: redis-auth
+        key: password
+      tls:
+        enabled: true
+      keyPrefix: "releaseyard:dashboard:"
+```
+
+Create the password Secret separately; the chart never writes Redis credentials
+into Helm values. Redis itself is not deployed by the chart: use a managed
+service or deploy it separately. The chart fails when `dashboard.replicas` is
+greater than 1 without the Redis store, or when Redis is selected without an
+address.
+
 ## Authorization (management cluster RBAC)
 
 Authorization is the management cluster's Kubernetes RBAC. The dashboard
@@ -154,6 +185,24 @@ and Pod CPU/memory read from the managed cluster. This requires two things:
 The controller keeps using its own kubeconfig (`Cluster.spec.kubeconfigSecretRef`)
 to install into managed clusters; there is no per-user authorization on the
 target clusters.
+
+## Application reference enforcement
+
+The chart installs a `ValidatingAdmissionPolicy` that rejects an `Application`
+create when the requesting user cannot `get` the referenced
+`ApplicationDefinition`, the referenced `Cluster`, or any `Cluster` in an
+environment target snapshot. It applies to dashboard impersonation and direct
+clients such as `kubectl`.
+
+```yaml
+admission:
+  enabled: true
+  failurePolicy: Fail
+```
+
+Requires Kubernetes 1.31 or newer. `failurePolicy: Fail` rejects a create when
+the authorization check cannot be evaluated. Set `admission.enabled=false` only
+for troubleshooting.
 
 ## Other options
 

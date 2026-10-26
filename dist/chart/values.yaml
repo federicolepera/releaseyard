@@ -204,6 +204,19 @@ webhook:
   # Webhook server port
   port: 9443
 
+## Admission policies.
+##
+## Enforce that an Application may only reference ApplicationDefinitions and
+## Clusters the requesting user is allowed to `get`. This closes the gap where
+## Kubernetes RBAC `resourceNames` restricts reads but not references made at
+## create time. Requires Kubernetes 1.31 or newer.
+##
+admission:
+  enabled: true
+  ## Fail rejects the create when the policy cannot be evaluated. Set to Ignore
+  ## only for troubleshooting; it disables the enforcement when evaluation fails.
+  failurePolicy: Fail
+
 ## Prometheus ServiceMonitor for metrics scraping.
 ## Requires prometheus-operator to be installed in the cluster.
 ##
@@ -232,6 +245,34 @@ networkPolicy:
 ## configured later from the Administration page (not through values).
 dashboard:
   enabled: false
+
+  ## Number of dashboard replicas. Values greater than 1 require
+  ## dashboard.sessionStore.type=redis so sessions are shared.
+  ##
+  replicas: 1
+
+  ## Session storage. Use redis in production and whenever replicas > 1 so
+  ## sessions survive rollouts and are shared by all replicas.
+  ##
+  sessionStore:
+    type: memory
+    redis:
+      ## Required when type=redis, for example redis.example.com:6379.
+      ##
+      address: ""
+      username: ""
+      ## DB index. Defaults to 0.
+      ##
+      db: 0
+      ## Prefer an existing Secret over putting a password in Helm values.
+      ## When name is empty, no password is sent.
+      ##
+      passwordSecret:
+        name: ""
+        key: password
+      tls:
+        enabled: false
+      keyPrefix: "releaseyard:dashboard:"
 
   ## Namespace prefix used to derive per-team namespaces from identity-provider
   ## groups for multi-team Application placement.

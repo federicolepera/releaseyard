@@ -1,0 +1,34 @@
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: application-access-policy
+  labels:
+    app.kubernetes.io/name: idp
+    app.kubernetes.io/component: admission
+    app.kubernetes.io/managed-by: kustomize
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups:
+          - platform.releaseyard.io
+        apiVersions:
+          - v1alpha1
+        operations:
+          - CREATE
+        resources:
+          - applications
+        scope: Namespaced
+  validations:
+    - expression: >-
+        authorizer.group('platform.releaseyard.io').resource('applicationdefinitions').name(object.spec.applicationDefinitionRef.name).check('get').allowed()
+      message: The referenced ApplicationDefinition must be readable by the requesting user.
+      reason: Forbidden
+    - expression: >-
+        !has(object.spec.clusterRef) || authorizer.group('platform.releaseyard.io').resource('clusters').name(object.spec.clusterRef.name).check('get').allowed()
+      message: The referenced Cluster must be readable by the requesting user.
+      reason: Forbidden
+    - expression: >-
+        !has(object.spec.environment) || object.spec.environment.targets.all(target, authorizer.group('platform.releaseyard.io').resource('clusters').name(target.name).check('get').allowed())
+      message: Every environment target Cluster must be readable by the requesting user.
+      reason: Forbidden

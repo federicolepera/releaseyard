@@ -4,6 +4,19 @@
 {{- $pullPolicy := required "dashboard.image.pullPolicy is required when dashboard.enabled=true" .Values.dashboard.image.pullPolicy }}
 {{- $publicURL := required "dashboard.publicURL is required when dashboard.enabled=true" .Values.dashboard.publicURL }}
 {{- $localAdminSecretName := include "idp.resourceName" (dict "suffix" "dashboard-local-admin" "context" .) }}
+{{- $sessionStore := .Values.dashboard.sessionStore | default dict }}
+{{- $sessionStoreType := default "memory" $sessionStore.type }}
+{{- if not (has $sessionStoreType (list "memory" "redis")) }}
+{{- fail "dashboard.sessionStore.type must be memory or redis" }}
+{{- end }}
+{{- $replicas := int (default 1 .Values.dashboard.replicas) }}
+{{- if and (gt $replicas 1) (ne $sessionStoreType "redis") }}
+{{- fail "dashboard.replicas > 1 requires dashboard.sessionStore.type=redis" }}
+{{- end }}
+{{- $redis := $sessionStore.redis | default dict }}
+{{- if eq $sessionStoreType "redis" }}
+{{- $_ := required "dashboard.sessionStore.redis.address is required when type=redis" $redis.address }}
+{{- end }}
 {{- $loopback := .Values.dashboard.oidcLoopback }}
 {{- $loopbackSidecar := $loopback.sidecar | default dict }}
 {{- $loopbackSidecarEnabled := and $loopback.enabled (dig "sidecar" "enabled" true $loopback) }}
@@ -24,7 +37,7 @@ metadata:
     app.kubernetes.io/name: {{ include "idp.resourceName" (dict "suffix" "dashboard" "context" .) }}
     app.kubernetes.io/instance: {{ .Release.Name }}
 spec:
-  replicas: 1
+  replicas: {{ $replicas }}
   selector:
     matchLabels:
       app.kubernetes.io/name: {{ include "idp.resourceName" (dict "suffix" "dashboard" "context" .) }}
@@ -69,6 +82,32 @@ spec:
               value: {{ .Values.dashboard.teamNamespacePrefix | quote }}
             - name: APPLICATION_EDITOR_ROLE
               value: {{ include "idp.resourceName" (dict "suffix" "application-editor-role" "context" .) | quote }}
+            - name: SESSION_STORE
+              value: {{ $sessionStoreType | quote }}
+            {{- if eq $sessionStoreType "redis" }}
+            - name: REDIS_ADDR
+              value: {{ $redis.address | quote }}
+            - name: REDIS_DB
+              value: {{ default 0 $redis.db | quote }}
+            - name: REDIS_KEY_PREFIX
+              value: {{ default "releaseyard:dashboard:" $redis.keyPrefix | quote }}
+            {{- if $redis.username }}
+            - name: REDIS_USERNAME
+              value: {{ $redis.username | quote }}
+            {{- end }}
+            {{- $redisPasswordSecret := $redis.passwordSecret | default dict }}
+            {{- if $redisPasswordSecret.name }}
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $redisPasswordSecret.name | quote }}
+                  key: {{ default "password" $redisPasswordSecret.key | quote }}
+            {{- end }}
+            {{- if dig "tls" "enabled" false $redis }}
+            - name: REDIS_TLS_ENABLED
+              value: "true"
+            {{- end }}
+            {{- end }}
           volumeMounts:
             - name: local-admin
               mountPath: /etc/dashboard/local-admin
