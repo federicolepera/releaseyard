@@ -35,8 +35,10 @@ type ApplicationReference struct {
 
 // ApplicationSpec defines the desired state of Application.
 // +kubebuilder:validation:XValidation:rule="(!has(self.releaseNamespace) && !has(oldSelf.releaseNamespace)) || (has(self.releaseNamespace) && has(oldSelf.releaseNamespace) && self.releaseNamespace == oldSelf.releaseNamespace)",message="releaseNamespace is immutable"
-// +kubebuilder:validation:XValidation:rule="has(self.clusterRef) != has(self.environment)",message="exactly one of clusterRef or environment must be set"
-// +kubebuilder:validation:XValidation:rule="(has(oldSelf.clusterRef) && has(self.clusterRef) && self.clusterRef == oldSelf.clusterRef && !has(self.environment) && !has(oldSelf.environment)) || (has(oldSelf.environment) && has(self.environment) && self.environment == oldSelf.environment && !has(self.clusterRef) && !has(oldSelf.clusterRef))",message="the Application target selector is immutable"
+// +kubebuilder:validation:XValidation:rule="(has(self.clusterRef) ? 1 : 0) + (has(self.environment) ? 1 : 0) + (has(self.clusters) ? 1 : 0) == 1",message="exactly one of clusterRef, clusters, or environment must be set"
+// +kubebuilder:validation:XValidation:rule="(!has(self.clusterRef) && !has(oldSelf.clusterRef)) || (has(self.clusterRef) && has(oldSelf.clusterRef) && self.clusterRef == oldSelf.clusterRef)",message="the Application target selector is immutable"
+// +kubebuilder:validation:XValidation:rule="(!has(self.environment) && !has(oldSelf.environment)) || (has(self.environment) && has(oldSelf.environment) && self.environment == oldSelf.environment)",message="the Application target selector is immutable"
+// +kubebuilder:validation:XValidation:rule="(!has(self.clusters) && !has(oldSelf.clusters)) || (has(self.clusters) && has(oldSelf.clusters) && self.clusters == oldSelf.clusters)",message="the Application target selector is immutable"
 type ApplicationSpec struct {
 	// description is an optional human-readable description of the Application.
 	// +kubebuilder:validation:MaxLength=280
@@ -53,6 +55,14 @@ type ApplicationSpec struct {
 	// Its name cannot be changed after creation.
 	// +optional
 	ClusterRef *ApplicationReference `json:"clusterRef,omitempty"`
+	// clusters explicitly selects one or more target Clusters. The list is
+	// immutable and is not expanded when new Clusters appear.
+	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=32
+	// +listType=map
+	// +listMapKey=name
+	// +optional
+	Clusters []ApplicationClusterTarget `json:"clusters,omitempty"`
 	// environment selects Clusters by their environment label. When targets is
 	// omitted the matching set is resolved dynamically on every reconcile. Set
 	// targets to pin a fixed snapshot instead.
@@ -74,6 +84,20 @@ type ApplicationSpec struct {
 	// +kubebuilder:pruning:PreserveUnknownFields
 	// +optional
 	Values *apiextensionsv1.JSON `json:"values,omitempty"`
+}
+
+// ApplicationClusterTarget pins one explicitly selected target Cluster.
+// +kubebuilder:validation:XValidation:rule="size(self.uid) >= 1 && size(self.uid) <= 128",message="uid must contain between 1 and 128 characters"
+type ApplicationClusterTarget struct {
+	// name is the DNS subdomain name of the target Cluster.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=253
+	// +kubebuilder:validation:Pattern="^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$"
+	Name string `json:"name"`
+	// uid identifies the exact target Cluster object.
+	// +kubebuilder:validation:Required
+	UID types.UID `json:"uid"`
 }
 
 // ApplicationEnvironmentSelection selects an environment. An empty targets list

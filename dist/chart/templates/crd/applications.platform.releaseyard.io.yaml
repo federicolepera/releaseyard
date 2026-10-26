@@ -73,6 +73,36 @@ spec:
                 required:
                 - name
                 type: object
+              clusters:
+                description: |-
+                  clusters explicitly selects one or more target Clusters. The list is
+                  immutable and is not expanded when new Clusters appear.
+                items:
+                  description: ApplicationClusterTarget pins one explicitly selected
+                    target Cluster.
+                  properties:
+                    name:
+                      description: name is the DNS subdomain name of the target Cluster.
+                      maxLength: 253
+                      minLength: 1
+                      pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
+                      type: string
+                    uid:
+                      description: uid identifies the exact target Cluster object.
+                      type: string
+                  required:
+                  - name
+                  - uid
+                  type: object
+                  x-kubernetes-validations:
+                  - message: uid must contain between 1 and 128 characters
+                    rule: size(self.uid) >= 1 && size(self.uid) <= 128
+                maxItems: 32
+                minItems: 1
+                type: array
+                x-kubernetes-list-map-keys:
+                - name
+                x-kubernetes-list-type: map
               description:
                 description: description is an optional human-readable description
                   of the Application.
@@ -147,13 +177,19 @@ spec:
               rule: (!has(self.releaseNamespace) && !has(oldSelf.releaseNamespace))
                 || (has(self.releaseNamespace) && has(oldSelf.releaseNamespace) &&
                 self.releaseNamespace == oldSelf.releaseNamespace)
-            - message: exactly one of clusterRef or environment must be set
-              rule: has(self.clusterRef) != has(self.environment)
+            - message: exactly one of clusterRef, clusters, or environment must be
+                set
+              rule: '(has(self.clusterRef) ? 1 : 0) + (has(self.environment) ? 1 :
+                0) + (has(self.clusters) ? 1 : 0) == 1'
             - message: the Application target selector is immutable
-              rule: (has(oldSelf.clusterRef) && has(self.clusterRef) && self.clusterRef
-                == oldSelf.clusterRef && !has(self.environment) && !has(oldSelf.environment))
-                || (has(oldSelf.environment) && has(self.environment) && self.environment
-                == oldSelf.environment && !has(self.clusterRef) && !has(oldSelf.clusterRef))
+              rule: (!has(self.clusterRef) && !has(oldSelf.clusterRef)) || (has(self.clusterRef)
+                && has(oldSelf.clusterRef) && self.clusterRef == oldSelf.clusterRef)
+            - message: the Application target selector is immutable
+              rule: (!has(self.environment) && !has(oldSelf.environment)) || (has(self.environment)
+                && has(oldSelf.environment) && self.environment == oldSelf.environment)
+            - message: the Application target selector is immutable
+              rule: (!has(self.clusters) && !has(oldSelf.clusters)) || (has(self.clusters)
+                && has(oldSelf.clusters) && self.clusters == oldSelf.clusters)
           status:
             description: status defines the observed state of Application
             properties:
