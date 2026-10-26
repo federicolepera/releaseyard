@@ -196,7 +196,7 @@ var _ = Describe("Application access admission", func() {
 		}
 		err := userClient.Update(ctx, app)
 		Expect(apierrors.IsForbidden(err)).To(BeTrue(), "expected Forbidden, got %v", err)
-		Expect(err.Error()).To(ContainSubstring("selected Cluster"))
+		Expect(err.Error()).To(ContainSubstring("added Cluster"))
 	})
 
 	It("allows a dynamic environment Application without targets", func() {
