@@ -332,6 +332,7 @@ The controller manager exposes Prometheus metrics on its secure endpoint when
 | [Applications](docs/applications.md) | Catalog contract, placement, values, release lifecycle |
 | [Cloud resources](docs/cloud-resources.md) | Crossplane integration, targets, definitions, examples |
 | [Access control](docs/access-control.md) | Local admin, OIDC, impersonation, team namespaces, RBAC |
+| [Hardening](docs/hardening.md) | Security and reliability backlog, priorities, acceptance criteria |
 | [Observability](docs/observability.md) | Live resources, logs, metrics, events, Prometheus |
 | [Configuration](docs/configuration.md) | CRD fields and Helm values |
 | [Development](docs/development.md) | Build, test, lint, e2e, local workflows |
