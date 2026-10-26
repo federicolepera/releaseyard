@@ -424,7 +424,7 @@
       && appliedChart?.digest === definition.status.digest && chartPin?.digest === definition.status.digest);
     const bindingCurrent = Boolean(target && binding && binding.clusterUID === target.uid && binding.remoteClaimUID
       && binding.applicationDefinitionUID === definition?.metadata?.uid
-      && binding.releaseName === app.metadata?.name && binding.releaseNamespace === environmentBinding?.releaseNamespace
+      && binding.releaseName && binding.releaseNamespace === environmentBinding?.releaseNamespace
       && environmentBinding?.releaseNamespace === targetNamespace(app));
     const observedAt = instance?.workloadObservedAt;
     const timestamp = typeof observedAt === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(observedAt) ? Date.parse(observedAt) : NaN;
