@@ -311,7 +311,7 @@ func (e *appTestEnvironment) getApp(t *testing.T) *platformv1alpha1.Application 
 	return &got
 }
 
-func TestEnvironmentModeRejectsInvalidSnapshotWithoutRemoteOperations(t *testing.T) {
+func TestEnvironmentModeWithoutMatchingTargetsDoesNotMutate(t *testing.T) {
 	e := newAppTestEnvironment(t, nil)
 	app := e.getApp(t)
 	app.Spec.ClusterRef = nil
@@ -326,10 +326,10 @@ func TestEnvironmentModeRejectsInvalidSnapshotWithoutRemoteOperations(t *testing
 	got := e.getApp(t)
 	ready := meta.FindStatusCondition(got.Status.Conditions, "Ready")
 	workload := meta.FindStatusCondition(got.Status.Conditions, "WorkloadHealthy")
-	if ready == nil || ready.Status != metav1.ConditionFalse || ready.Reason != "InvalidApplication" {
-		t.Fatalf("expected invalid snapshot Ready condition, got %#v", ready)
+	if ready == nil || ready.Status != metav1.ConditionFalse || ready.Reason != "NoEnvironmentTargets" {
+		t.Fatalf("expected no-target Ready condition, got %#v", ready)
 	}
-	if workload == nil || workload.Status != metav1.ConditionUnknown || workload.Reason != "InvalidApplication" && workload.Reason != "InvalidEnvironmentSnapshot" {
+	if workload == nil || workload.Status != metav1.ConditionUnknown || workload.Reason != "NoEnvironmentTargets" {
 		t.Fatalf("expected unknown workload condition, got %#v", workload)
 	}
 }

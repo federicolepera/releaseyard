@@ -48,8 +48,9 @@ type ApplicationSpec struct {
 	// Its name cannot be changed after creation.
 	// +optional
 	ClusterRef *ApplicationReference `json:"clusterRef,omitempty"`
-	// environment selects a fixed snapshot of matching Cluster names and UIDs.
-	// The snapshot is immutable after Application creation.
+	// environment selects Clusters by their environment label. When targets is
+	// omitted the matching set is resolved dynamically on every reconcile. Set
+	// targets to pin a fixed snapshot instead.
 	// +optional
 	Environment *ApplicationEnvironmentSelection `json:"environment,omitempty"`
 
@@ -70,24 +71,25 @@ type ApplicationSpec struct {
 	Values *apiextensionsv1.JSON `json:"values,omitempty"`
 }
 
-// ApplicationEnvironmentSelection defines an immutable environment target snapshot.
+// ApplicationEnvironmentSelection selects an environment. An empty targets list
+// makes the target set dynamic; a non-empty list pins it to those identities.
 type ApplicationEnvironmentSelection struct {
-	// name is the environment label value selected at creation.
+	// name is the environment label value used to select target Clusters.
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=63
 	// +kubebuilder:validation:Pattern="^[A-Za-z0-9]([-A-Za-z0-9_.]*[A-Za-z0-9])?$"
 	Name string `json:"name"`
-	// targets contains the fixed set of Cluster identities selected for this Application.
-	// +kubebuilder:validation:Required
-	// +kubebuilder:validation:MinItems=1
+	// targets optionally pins the Cluster identities for this Application. When
+	// omitted or empty, the controller resolves the matching Clusters dynamically.
 	// +kubebuilder:validation:MaxItems=32
 	// +listType=map
 	// +listMapKey=name
-	Targets []ApplicationEnvironmentTarget `json:"targets"`
+	// +optional
+	Targets []ApplicationEnvironmentTarget `json:"targets,omitempty"`
 }
 
-// ApplicationEnvironmentTarget fixes one Cluster identity in an environment snapshot.
+// ApplicationEnvironmentTarget pins one Cluster identity in an environment.
 // +kubebuilder:validation:XValidation:rule="size(self.uid) >= 1 && size(self.uid) <= 128",message="uid must contain between 1 and 128 characters"
 type ApplicationEnvironmentTarget struct {
 	// name is the DNS subdomain name of the target Cluster.
@@ -288,7 +290,7 @@ type ApplicationStatus struct {
 	// environmentBinding records shared environment-mode identity, without changing legacy singular fields.
 	// +optional
 	EnvironmentBinding *ApplicationEnvironmentBinding `json:"environmentBinding,omitempty"`
-	// instances contains one independent status entry per snapshotted Cluster UID.
+	// instances contains one independent status entry per resolved target Cluster UID.
 	// +listType=map
 	// +listMapKey=clusterUID
 	// +optional

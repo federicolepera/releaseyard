@@ -164,8 +164,8 @@ func validateEnvironmentSelection(environment *platformv1alpha1.ApplicationEnvir
 	if len(environment.Name) == 0 || len(environment.Name) > 63 || len(validation.IsValidLabelValue(environment.Name)) != 0 {
 		return fmt.Errorf("environment name must be a valid Kubernetes label value of at most 63 characters")
 	}
-	if len(environment.Targets) == 0 || len(environment.Targets) > 32 {
-		return fmt.Errorf("environment targets must contain between 1 and 32 Clusters")
+	if len(environment.Targets) > 32 {
+		return fmt.Errorf("environment targets must contain at most 32 Clusters")
 	}
 	seenUIDs := make(map[types.UID]struct{}, len(environment.Targets))
 	seenNames := make(map[string]struct{}, len(environment.Targets))

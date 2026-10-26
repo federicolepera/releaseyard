@@ -18,13 +18,38 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-// reconcileEnvironmentApply applies a fixed environment snapshot serially. It
-// deliberately does not share the legacy singular binding or release state.
+var (
+	errEnvironmentTooManyTargets = errors.New("environment has too many matching Clusters")
+)
+
+// reconcileEnvironmentApply resolves the environment target set serially. A
+// non-empty spec.environment.targets list pins the set; an empty list follows
+// the Cluster environment label dynamically. It deliberately does not share the
+// legacy singular binding or release state.
+//
+//nolint:gocyclo // orchestration handler; splitting would obscure the sequential flow.
 func (r *ApplicationReconciler) reconcileEnvironmentApply(ctx context.Context, app *platformv1alpha1.Application) (ctrl.Result, error) {
 	if err := validateEnvironmentSnapshot(app); err != nil {
-		return r.fail(ctx, app, "InvalidEnvironmentSnapshot", "Environment target snapshot is invalid")
+		return r.fail(ctx, app, "InvalidEnvironmentSnapshot", "Environment target selector is invalid")
+	}
+	targets, err := r.resolveEnvironmentTargets(ctx, app)
+	if err != nil {
+		switch {
+		case errors.Is(err, errEnvironmentTooManyTargets):
+			return r.environmentFail(ctx, app, "TooManyEnvironmentTargets", "Environment has more than 32 matching Clusters")
+		default:
+			return r.environmentFail(ctx, app, "EnvironmentTargetsUnavailable", "Environment targets could not be resolved")
+		}
+	}
+	result, stopped, err := r.reconcileEnvironmentRemovals(ctx, app, targets)
+	if err != nil || stopped {
+		return result, err
+	}
+	if len(targets) == 0 {
+		return r.environmentFail(ctx, app, "NoEnvironmentTargets", "No Clusters match the environment")
 	}
 	var definition platformv1alpha1.ApplicationDefinition
 	if err := r.getAuthoritative(ctx, types.NamespacedName{Name: app.Spec.ApplicationDefinitionRef.Name}, &definition); err != nil {
@@ -37,8 +62,8 @@ func (r *ApplicationReconciler) reconcileEnvironmentApply(ctx context.Context, a
 	if err := contract.ValidateApplication(&definition, app); err != nil {
 		return r.environmentFail(ctx, app, "InvalidApplication", "Application inputs are invalid")
 	}
-	if err := r.preflightEnvironmentTargets(ctx, app.Spec.Environment.Targets); err != nil {
-		return r.environmentFail(ctx, app, "TargetIdentityConflict", "A snapshotted Cluster name now identifies a different object")
+	if err := r.preflightEnvironmentTargets(ctx, targets); err != nil {
+		return r.environmentFail(ctx, app, "TargetIdentityConflict", "An environment Cluster name now identifies a different object")
 	}
 	namespace, err := contract.EffectiveReleaseNamespace(&definition, app)
 	if err != nil {
@@ -82,8 +107,7 @@ func (r *ApplicationReconciler) reconcileEnvironmentApply(ctx context.Context, a
 			return environmentPersistFailure(err)
 		}
 	}
-	targets := append([]platformv1alpha1.ApplicationEnvironmentTarget(nil), app.Spec.Environment.Targets...)
-	targets, result, stopped, err := runEnvironmentTargets(targets, func(target platformv1alpha1.ApplicationEnvironmentTarget) (ctrl.Result, bool, error) {
+	targets, result, stopped, err = runEnvironmentTargets(targets, func(target platformv1alpha1.ApplicationEnvironmentTarget) (ctrl.Result, bool, error) {
 		return r.applyEnvironmentTarget(ctx, app, &definition, target, namespace, values, chart, archive, desired)
 	})
 	if err != nil {
@@ -99,6 +123,90 @@ func (r *ApplicationReconciler) reconcileEnvironmentApply(ctx context.Context, a
 		return environmentPersistFailure(err)
 	}
 	return ctrl.Result{RequeueAfter: applicationRequeue}, nil
+}
+
+func (r *ApplicationReconciler) resolveEnvironmentTargets(ctx context.Context, app *platformv1alpha1.Application) ([]platformv1alpha1.ApplicationEnvironmentTarget, error) {
+	if app.Spec.Environment == nil {
+		return nil, errors.New("environment selection is required")
+	}
+	if len(app.Spec.Environment.Targets) > 0 {
+		return append([]platformv1alpha1.ApplicationEnvironmentTarget(nil), app.Spec.Environment.Targets...), nil
+	}
+	var clusters platformv1alpha1.ClusterList
+	if err := r.Client.List(ctx, &clusters, client.MatchingLabels{platformv1alpha1.ClusterEnvironmentLabelKey: app.Spec.Environment.Name}); err != nil {
+		return nil, err
+	}
+	targets := make([]platformv1alpha1.ApplicationEnvironmentTarget, 0, len(clusters.Items))
+	for i := range clusters.Items {
+		cluster := &clusters.Items[i]
+		if !cluster.DeletionTimestamp.IsZero() || cluster.UID == "" {
+			continue
+		}
+		targets = append(targets, platformv1alpha1.ApplicationEnvironmentTarget{Name: cluster.Name, UID: cluster.UID})
+	}
+	if len(targets) > 32 {
+		return nil, errEnvironmentTooManyTargets
+	}
+	slices.SortFunc(targets, func(a, b platformv1alpha1.ApplicationEnvironmentTarget) int { return cmp.Compare(a.Name, b.Name) })
+	return targets, nil
+}
+
+func (r *ApplicationReconciler) reconcileEnvironmentRemovals(ctx context.Context, app *platformv1alpha1.Application, desired []platformv1alpha1.ApplicationEnvironmentTarget) (ctrl.Result, bool, error) {
+	for i := 0; i < len(app.Status.Instances); {
+		inst := &app.Status.Instances[i]
+		if environmentTargetIn(desired, inst.ClusterName, inst.ClusterUID) {
+			i++
+			continue
+		}
+		target := platformv1alpha1.ApplicationEnvironmentTarget{Name: inst.ClusterName, UID: inst.ClusterUID}
+		if inst.Binding == nil {
+			if inst.Applied != nil || inst.LastAttemptedIdentity != "" || inst.CleanupComplete || releaseAbsent(inst) {
+				markEnvironmentFailure(inst, app.Generation, "OrphanedTarget", "Environment target has remote state without a binding")
+				invalidateEnvironmentAggregates(app, "OrphanedTarget", "Environment target has remote state without a binding")
+				if err := r.persistStatus(ctx, app, app.Generation); err != nil {
+					result, persistErr := environmentPersistFailure(err)
+					return result, true, persistErr
+				}
+				return ctrl.Result{RequeueAfter: applicationRequeue}, true, nil
+			}
+			app.Status.Instances = slices.Delete(app.Status.Instances, i, i+1)
+			if err := r.persistStatus(ctx, app, app.Generation); err != nil {
+				result, persistErr := environmentPersistFailure(err)
+				return result, true, persistErr
+			}
+			continue
+		}
+		result, done, continuePass, err := r.cleanupEnvironmentInstance(ctx, app, target, inst)
+		if err != nil {
+			return result, true, err
+		}
+		if !continuePass {
+			return result, true, nil
+		}
+		if !done {
+			return ctrl.Result{RequeueAfter: applicationRequeue}, true, nil
+		}
+		index := environmentInstanceIndex(app.Status.Instances, target.Name)
+		if index < 0 || app.Status.Instances[index].ClusterUID != target.UID {
+			return ctrl.Result{RequeueAfter: staleInputRequeue}, true, nil
+		}
+		app.Status.Instances = slices.Delete(app.Status.Instances, index, index+1)
+		if err := r.persistStatus(ctx, app, app.Generation); err != nil {
+			result, persistErr := environmentPersistFailure(err)
+			return result, true, persistErr
+		}
+		i = index
+	}
+	return ctrl.Result{}, false, nil
+}
+
+func environmentTargetIn(targets []platformv1alpha1.ApplicationEnvironmentTarget, name string, uid types.UID) bool {
+	for _, target := range targets {
+		if target.Name == name && target.UID == uid {
+			return true
+		}
+	}
+	return false
 }
 
 // runEnvironmentTargets uses continueNext=true only after a successful target
@@ -129,7 +237,7 @@ func (r *ApplicationReconciler) preflightEnvironmentTargets(ctx context.Context,
 			return err
 		}
 		if cluster.UID != target.UID {
-			return errors.New("snapshotted Cluster was replaced")
+			return errors.New("environment target Cluster was replaced")
 		}
 	}
 	return nil
@@ -315,7 +423,7 @@ func (r *ApplicationReconciler) recoverEnvironmentApply(ctx context.Context, att
 	if err := r.getAuthoritative(ctx, types.NamespacedName{Namespace: attempted.Namespace, Name: attempted.Name}, &current); err != nil {
 		return ctrl.Result{RequeueAfter: staleInputRequeue}, false, nil
 	}
-	if current.UID != attempted.UID || !current.DeletionTimestamp.IsZero() || current.Spec.Environment == nil || !environmentHasTarget(current.Spec.Environment.Targets, target) {
+	if current.UID != attempted.UID || !current.DeletionTimestamp.IsZero() || current.Spec.Environment == nil || !environmentTargetAllowed(&current, target) {
 		return ctrl.Result{RequeueAfter: staleInputRequeue}, false, nil
 	}
 	if current.Status.EnvironmentBinding == nil || current.Status.EnvironmentBinding.ApplicationDefinitionUID != binding.ApplicationDefinitionUID || current.Status.EnvironmentBinding.ReleaseNamespace != binding.ReleaseNamespace {
@@ -350,6 +458,16 @@ func (r *ApplicationReconciler) recoverEnvironmentApply(ctx context.Context, att
 		return ctrl.Result{RequeueAfter: staleInputRequeue}, false, nil
 	}
 	return ctrl.Result{RequeueAfter: staleInputRequeue}, false, nil
+}
+
+func environmentTargetAllowed(app *platformv1alpha1.Application, target platformv1alpha1.ApplicationEnvironmentTarget) bool {
+	if app.Spec.Environment == nil {
+		return false
+	}
+	if len(app.Spec.Environment.Targets) == 0 {
+		return true
+	}
+	return environmentHasTarget(app.Spec.Environment.Targets, target)
 }
 
 func environmentHasTarget(targets []platformv1alpha1.ApplicationEnvironmentTarget, want platformv1alpha1.ApplicationEnvironmentTarget) bool {

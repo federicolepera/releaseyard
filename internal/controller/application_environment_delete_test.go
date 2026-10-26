@@ -101,7 +101,7 @@ func TestEnvironmentDeletionUninstallsThenDeletesClaimCheckpointed(t *testing.T)
 	e := newAppTestEnvironment(t, nil)
 	app := e.getApp(t)
 	app.Spec.ClusterRef = nil
-	app.Spec.Environment = &platformv1alpha1.ApplicationEnvironmentSelection{Name: "production", Targets: []platformv1alpha1.ApplicationEnvironmentTarget{{Name: appTestCluster, UID: e.cluster.UID}}}
+	app.Spec.Environment = &platformv1alpha1.ApplicationEnvironmentSelection{Name: "production"}
 	if err := e.c.Update(context.Background(), app); err != nil {
 		t.Fatal(err)
 	}
@@ -144,6 +144,35 @@ func TestClusterEventMapsEnvironmentSnapshotTargetWithoutLabels(t *testing.T) {
 	requests := e.r.mapCluster(context.Background(), e.cluster)
 	if len(requests) != 1 || requests[0].NamespacedName != e.request.NamespacedName {
 		t.Fatalf("snapshot Cluster event mapped to %#v, want %s", requests, e.request.NamespacedName)
+	}
+}
+
+func TestClusterEventMapsDynamicEnvironmentByLabelAndStatus(t *testing.T) {
+	e := newAppTestEnvironment(t, nil)
+	app := e.getApp(t)
+	app.Spec.ClusterRef = nil
+	app.Spec.Environment = &platformv1alpha1.ApplicationEnvironmentSelection{Name: "production"}
+	if err := e.c.Update(context.Background(), app); err != nil {
+		t.Fatal(err)
+	}
+
+	labeled := e.cluster.DeepCopy()
+	labeled.Labels = map[string]string{platformv1alpha1.ClusterEnvironmentLabelKey: "production"}
+	requests := e.r.mapCluster(context.Background(), labeled)
+	if len(requests) != 1 || requests[0].NamespacedName != e.request.NamespacedName {
+		t.Fatalf("dynamic environment label mapped to %#v, want %s", requests, e.request.NamespacedName)
+	}
+
+	app = e.getApp(t)
+	app.Status.Instances = []platformv1alpha1.ApplicationInstanceStatus{{ClusterName: e.cluster.Name, ClusterUID: e.cluster.UID}}
+	if err := e.c.Status().Update(context.Background(), app); err != nil {
+		t.Fatal(err)
+	}
+	unlabeled := e.cluster.DeepCopy()
+	unlabeled.Labels = nil
+	requests = e.r.mapCluster(context.Background(), unlabeled)
+	if len(requests) != 1 {
+		t.Fatalf("tracked dynamic Cluster removal mapped to %#v, want %s", requests, e.request.NamespacedName)
 	}
 }
 

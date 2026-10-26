@@ -129,10 +129,10 @@ func TestValidateApplicationEnvironmentSelection(t *testing.T) {
 			app.Spec.ClusterRef = nil
 			app.Spec.Environment = &platformv1alpha1.ApplicationEnvironmentSelection{Name: "prod/blue", Targets: append([]platformv1alpha1.ApplicationEnvironmentTarget(nil), valid...)}
 		}, wantErr: "environment name"},
-		{name: "empty targets", mutate: func(app *platformv1alpha1.Application) {
+		{name: "empty targets are dynamic", mutate: func(app *platformv1alpha1.Application) {
 			app.Spec.ClusterRef = nil
 			app.Spec.Environment = &platformv1alpha1.ApplicationEnvironmentSelection{Name: "prod"}
-		}, wantErr: "between 1 and 32"},
+		}},
 		{name: "duplicate name", mutate: func(app *platformv1alpha1.Application) {
 			app.Spec.ClusterRef = nil
 			app.Spec.Environment = &platformv1alpha1.ApplicationEnvironmentSelection{Name: "prod", Targets: []platformv1alpha1.ApplicationEnvironmentTarget{{Name: "cluster-a", UID: "uid-a"}, {Name: "cluster-a", UID: "uid-b"}}}

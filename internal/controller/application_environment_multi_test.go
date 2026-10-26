@@ -136,6 +136,58 @@ func TestEnvironmentMultiTargetApplyUsesIndependentRemoteState(t *testing.T) {
 	assertAggregatedEnvironmentHealthy(t, got)
 }
 
+func TestEnvironmentDynamicTargetsFollowClusterLabels(t *testing.T) {
+	e, secondServer, secondCluster, _ := newEnvironmentMultiTargetTest(t, true)
+	helms := &environmentMultiHelm{t: t, state: make(map[string]environmentMultiHelmState)}
+	claims := newEnvironmentMultiClaims()
+	configureEnvironmentMultiReconciler(t, e, helms, claims, map[string]string{eHostForSecret(t, e.reader, testSecretName): "resource-a", secondServer.URL: "resource-b"})
+
+	first := e.cluster.DeepCopy()
+	first.Labels = map[string]string{platformv1alpha1.ClusterEnvironmentLabelKey: "production"}
+	if err := e.c.Update(context.Background(), first); err != nil {
+		t.Fatal(err)
+	}
+	app := e.getApp(t)
+	app.Spec.ClusterRef = nil
+	app.Spec.Environment = &platformv1alpha1.ApplicationEnvironmentSelection{Name: "production"}
+	if err := e.c.Update(context.Background(), app); err != nil {
+		t.Fatal(err)
+	}
+
+	e.reconcile(t)
+	if got := e.getApp(t); len(got.Status.Instances) != 1 || got.Status.Instances[0].ClusterUID != e.cluster.UID {
+		t.Fatalf("initial dynamic target set = %#v", got.Status.Instances)
+	}
+
+	second := secondCluster.DeepCopy()
+	second.Labels = map[string]string{platformv1alpha1.ClusterEnvironmentLabelKey: "production"}
+	if err := e.c.Update(context.Background(), second); err != nil {
+		t.Fatal(err)
+	}
+	e.reconcile(t)
+	if got := e.getApp(t); len(got.Status.Instances) != 2 {
+		t.Fatalf("new matching Cluster was not added: %#v", got.Status.Instances)
+	}
+
+	first.Labels = nil
+	if err := e.c.Update(context.Background(), first); err != nil {
+		t.Fatal(err)
+	}
+	for range 3 {
+		e.reconcile(t)
+	}
+	got := e.getApp(t)
+	if len(got.Status.Instances) != 1 || got.Status.Instances[0].ClusterUID != secondCluster.UID {
+		t.Fatalf("Cluster leaving the environment was not removed: %#v", got.Status.Instances)
+	}
+	if len(claims.claims) != 1 {
+		t.Fatalf("remote claim for removed Cluster was not deleted: %#v", claims.claims)
+	}
+	if condition := metaFindApplicationCondition(got.Status.Conditions, "Ready"); condition == nil || condition.Status != metav1.ConditionTrue {
+		t.Fatalf("dynamic environment did not converge after removal: %#v", condition)
+	}
+}
+
 func TestEnvironmentMultiTargetUnavailableTargetRecoversWithoutRollback(t *testing.T) {
 	e, secondServer, secondCluster, secondSecret := newEnvironmentMultiTargetTest(t, false)
 	helms := &environmentMultiHelm{t: t, state: make(map[string]environmentMultiHelmState)}

@@ -160,6 +160,15 @@ var _ = Describe("Application access admission", func() {
 		Expect(err.Error()).To(ContainSubstring("environment target"))
 	})
 
+	It("allows a dynamic environment Application without targets", func() {
+		app := testApplication(namespace, "dynamic-environment-app", allowedDefinition, allowedCluster)
+		spec := app.Object["spec"].(map[string]any)
+		delete(spec, "clusterRef")
+		spec["environment"] = map[string]any{"name": "production"}
+
+		Expect(userClient.Create(ctx, app)).To(Succeed())
+	})
+
 	It("allows an environment Application whose target clusters are readable", func() {
 		app := testApplication(namespace, "allowed-environment-app", allowedDefinition, allowedCluster)
 		spec := app.Object["spec"].(map[string]any)

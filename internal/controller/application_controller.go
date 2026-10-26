@@ -665,8 +665,13 @@ func (r *ApplicationReconciler) mapCluster(ctx context.Context, object client.Ob
 		snapshotMatch := app.Spec.Environment != nil && slices.ContainsFunc(app.Spec.Environment.Targets, func(target platformv1alpha1.ApplicationEnvironmentTarget) bool {
 			return target.Name == object.GetName()
 		})
+		dynamicMatch := app.Spec.Environment != nil && len(app.Spec.Environment.Targets) == 0 &&
+			(object.GetLabels()[platformv1alpha1.ClusterEnvironmentLabelKey] == app.Spec.Environment.Name ||
+				slices.ContainsFunc(app.Status.Instances, func(instance platformv1alpha1.ApplicationInstanceStatus) bool {
+					return instance.ClusterName == object.GetName()
+				}))
 		legacyMatch := app.Spec.ClusterRef != nil && app.Spec.ClusterRef.Name == object.GetName()
-		if snapshotMatch || legacyMatch {
+		if snapshotMatch || dynamicMatch || legacyMatch {
 			requests = append(requests, reconcile.Request{NamespacedName: types.NamespacedName{Namespace: app.Namespace, Name: app.Name}})
 		}
 	}

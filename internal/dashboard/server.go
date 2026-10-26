@@ -750,8 +750,8 @@ func (s *server) createApplication(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	environmentMode := input.EnvironmentName != ""
-	if environmentMode && (!validLabelValue(input.EnvironmentName) || !validPreviewDigest(input.PreviewDigest)) {
-		writeError(w, http.StatusBadRequest, "Environment and previewDigest are invalid")
+	if environmentMode && !validLabelValue(input.EnvironmentName) {
+		writeError(w, http.StatusBadRequest, "Environment is invalid")
 		return
 	}
 	if len(input.Values) != 0 {
@@ -787,36 +787,7 @@ func (s *server) createApplication(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 	if environmentMode {
-		targets, digest, err := resolveEnvironmentTargets(r.Context(), s.client, input.EnvironmentName)
-		if err != nil {
-			if errors.Is(err, errTooManyEnvironmentTargets) {
-				writeError(w, http.StatusUnprocessableEntity, "Environment has too many cluster targets")
-			} else {
-				writeError(w, http.StatusInternalServerError, "Could not load environment targets")
-			}
-			return
-		}
-		if digest != input.PreviewDigest {
-			writeError(w, http.StatusConflict, "Environment targets have changed since preview")
-			return
-		}
-		if len(targets) == 0 {
-			writeError(w, http.StatusUnprocessableEntity, "Environment has no cluster targets")
-			return
-		}
-		snapshot := make([]platformv1alpha1.ApplicationEnvironmentTarget, 0, len(targets))
-		for _, target := range targets {
-			if target.Deleting {
-				writeError(w, http.StatusConflict, "An environment target is being deleted")
-				return
-			}
-			if target.UID == "" {
-				writeError(w, http.StatusUnprocessableEntity, "An environment target has no UID")
-				return
-			}
-			snapshot = append(snapshot, platformv1alpha1.ApplicationEnvironmentTarget{Name: target.Name, UID: target.UID})
-		}
-		app.Spec.Environment = &platformv1alpha1.ApplicationEnvironmentSelection{Name: input.EnvironmentName, Targets: snapshot}
+		app.Spec.Environment = &platformv1alpha1.ApplicationEnvironmentSelection{Name: input.EnvironmentName}
 	} else {
 		cluster := &platformv1alpha1.Cluster{}
 		if err := s.client.Get(r.Context(), types.NamespacedName{Name: input.ClusterName}, cluster); err != nil {
@@ -858,18 +829,6 @@ func (s *server) createApplication(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, app)
-}
-
-func validPreviewDigest(digest string) bool {
-	if len(digest) != sha256.Size*2 {
-		return false
-	}
-	for _, char := range digest {
-		if (char < '0' || char > '9') && (char < 'a' || char > 'f') {
-			return false
-		}
-	}
-	return true
 }
 
 // isCurrentValidatedDefinition deliberately requires the condition itself and
