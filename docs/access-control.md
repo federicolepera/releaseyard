@@ -118,13 +118,29 @@ groups with normal Kubernetes RoleBindings or ClusterRoleBindings.
 `dashboard.adminGroups` binds the shipped dashboard admin role to the listed
 OIDC groups. This requires `rbac.helpers.enabled=true`.
 
+## Application references
+
+Kubernetes `resourceNames` restricts `get`, not the references made by
+`create`. The chart therefore installs a `ValidatingAdmissionPolicy` that runs
+on `Application` create and asks the API server whether the requesting user may
+`get`:
+
+- the referenced `ApplicationDefinition`;
+- the referenced `Cluster`, or every `Cluster` in an environment target
+  snapshot.
+
+The policy applies to dashboard impersonation and to direct clients such as
+`kubectl`. It uses `failurePolicy: Fail` by default, so a policy evaluation
+failure rejects the request. Requires Kubernetes 1.31 or newer. Disable it only
+for troubleshooting with `admission.enabled=false`; see
+[Configuration](configuration.md).
+
 ## Known gaps
 
-- Kubernetes `resourceNames` restricts `get`, not `create`. A direct API client
-  can reference a definition or cluster it cannot see. A validating admission
-  policy or webhook is needed to close this gap.
 - Environment snapshots are resolved by the dashboard for environment
   Applications created through the UI. Direct clients must provide the snapshot.
+  The admission policy verifies that every supplied target is readable, but it
+  does not resolve or validate environment membership.
 - The dashboard can patch the environment label on Clusters, but RBAC cannot
   restrict a patch to one metadata key. Use an admission policy if the dashboard
   is exposed beyond a trusted environment.

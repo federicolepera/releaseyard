@@ -25,12 +25,14 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+	"sigs.k8s.io/yaml"
 
 	platformv1alpha1 "github.com/federicolepera/idp/api/v1alpha1"
 	// +kubebuilder:scaffold:imports
@@ -83,7 +85,24 @@ var _ = BeforeSuite(func() {
 	k8sClient, err = client.New(cfg, client.Options{Scheme: scheme.Scheme})
 	Expect(err).NotTo(HaveOccurred())
 	Expect(k8sClient).NotTo(BeNil())
+
+	By("installing admission policies")
+	installApplicationAccessPolicy()
 })
+
+func installApplicationAccessPolicy() {
+	for _, name := range []string{
+		"application-access-policy.yaml",
+		"application-access-binding.yaml",
+	} {
+		data, err := os.ReadFile(filepath.Join("..", "..", "config", "admission", name))
+		Expect(err).NotTo(HaveOccurred(), "reading %s", name)
+
+		object := &unstructured.Unstructured{}
+		Expect(yaml.Unmarshal(data, &object.Object)).To(Succeed(), "decoding %s", name)
+		Expect(k8sClient.Create(ctx, object)).To(Succeed(), "creating %s", name)
+	}
+}
 
 var _ = AfterSuite(func() {
 	By("tearing down the test environment")

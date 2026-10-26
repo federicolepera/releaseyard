@@ -204,6 +204,19 @@ webhook:
   # Webhook server port
   port: 9443
 
+## Admission policies.
+##
+## Enforce that an Application may only reference ApplicationDefinitions and
+## Clusters the requesting user is allowed to `get`. This closes the gap where
+## Kubernetes RBAC `resourceNames` restricts reads but not references made at
+## create time. Requires Kubernetes 1.31 or newer.
+##
+admission:
+  enabled: true
+  ## Fail rejects the create when the policy cannot be evaluated. Set to Ignore
+  ## only for troubleshooting; it disables the enforcement when evaluation fails.
+  failurePolicy: Fail
+
 ## Prometheus ServiceMonitor for metrics scraping.
 ## Requires prometheus-operator to be installed in the cluster.
 ##

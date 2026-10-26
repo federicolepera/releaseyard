@@ -20,15 +20,14 @@ spec:
     listKind: ApplicationDefinitionList
     plural: applicationdefinitions
     singular: applicationdefinition
-  scope: Namespaced
+  scope: Cluster
   versions:
   - name: v1alpha1
     schema:
       openAPIV3Schema:
         description: |-
-          ApplicationDefinition is the namespaced management-cluster contract for an application chart.
-          ApplicationDefinition metadata.namespace is in the management cluster; spec.release.namespace
-          identifies the target namespace on a workload cluster.
+          ApplicationDefinition is the cluster-scoped management-cluster contract for an application chart.
+          spec.release.namespace identifies the target namespace on a workload cluster.
         properties:
           apiVersion:
             description: |-
@@ -136,6 +135,12 @@ spec:
                   Application value validation and Helm operations are future work; this API only stores the contract.
                 type: object
                 x-kubernetes-preserve-unknown-fields: true
+              description:
+                description: |-
+                  description is a short human-readable summary of the definition, shown in
+                  the catalog and in the access definitions picker.
+                maxLength: 280
+                type: string
               release:
                 description: |-
                   release configures the target workload cluster namespace and release naming convention.
@@ -293,7 +298,7 @@ spec:
             properties:
               applicationDefinitionRef:
                 description: |-
-                  applicationDefinitionRef identifies an ApplicationDefinition in this Application's namespace.
+                  applicationDefinitionRef identifies a cluster-scoped ApplicationDefinition.
                   Its name cannot be changed after creation.
                 properties:
                   name:
@@ -1072,6 +1077,160 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.22.0
+  name: cloudtargets.platform.releaseyard.io
+spec:
+  group: platform.releaseyard.io
+  names:
+    kind: CloudTarget
+    listKind: CloudTargetList
+    plural: cloudtargets
+    singular: cloudtarget
+  scope: Cluster
+  versions:
+  - name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: CloudTarget is the Schema for the cloudtargets API
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: spec defines the desired state of CloudTarget
+            properties:
+              provider:
+                description: provider is the cloud provider this target belongs to.
+                enum:
+                - aws
+                type: string
+              providerConfigRef:
+                description: |-
+                  providerConfigRef points at the Crossplane ProviderConfig that supplies
+                  credentials and the endpoint for this target.
+                properties:
+                  name:
+                    description: name is the ProviderConfig name.
+                    minLength: 1
+                    type: string
+                  namespace:
+                    description: namespace is the namespace that contains the ProviderConfig.
+                    minLength: 1
+                    type: string
+                required:
+                - name
+                - namespace
+                type: object
+              region:
+                description: region is the default region for resources that use this
+                  target.
+                maxLength: 63
+                minLength: 1
+                type: string
+            required:
+            - provider
+            - providerConfigRef
+            - region
+            type: object
+          status:
+            description: status defines the observed state of CloudTarget
+            properties:
+              conditions:
+                description: |-
+                  conditions represent the current state of the CloudTarget resource.
+                  Each condition has a unique type and reflects the status of a specific aspect of the resource.
+
+                  Standard condition types include:
+                  - "Available": the resource is fully functional
+                  - "Progressing": the resource is being created or updated
+                  - "Degraded": the resource failed to reach or maintain its desired state
+
+                  The status of each condition is one of True, False, or Unknown.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.22.0
   name: clusters.platform.releaseyard.io
 spec:
   group: platform.releaseyard.io
@@ -1226,6 +1385,435 @@ spec:
                   successfully refreshed.
                 format: date-time
                 type: string
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.22.0
+  name: resourcedefinitions.platform.releaseyard.io
+spec:
+  group: platform.releaseyard.io
+  names:
+    kind: ResourceDefinition
+    listKind: ResourceDefinitionList
+    plural: resourcedefinitions
+    singular: resourcedefinition
+  scope: Cluster
+  versions:
+  - name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: ResourceDefinition is the Schema for the resourcedefinitions
+          API
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: spec defines the desired state of ResourceDefinition
+            properties:
+              configurableValues:
+                description: configurableValues lists the value paths a Resource may
+                  set.
+                items:
+                  description: ResourceDefinitionValue exposes one configurable value.
+                  properties:
+                    maximum:
+                      description: maximum is an inclusive upper bound for integer
+                        values.
+                      format: int64
+                      type: integer
+                    minimum:
+                      description: minimum is an inclusive lower bound for integer
+                        values.
+                      format: int64
+                      type: integer
+                    path:
+                      description: path is a dot-separated value path.
+                      minLength: 1
+                      pattern: ^[A-Za-z][A-Za-z0-9_-]*(\.[A-Za-z][A-Za-z0-9_-]*)*$
+                      type: string
+                    required:
+                      default: false
+                      description: required indicates whether a Resource must supply
+                        the value.
+                      type: boolean
+                    type:
+                      description: type is the value type exposed to a Resource.
+                      enum:
+                      - string
+                      - integer
+                      - boolean
+                      type: string
+                  required:
+                  - path
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - path
+                x-kubernetes-list-type: map
+              description:
+                description: description is a short human-readable summary shown in
+                  the catalog.
+                maxLength: 280
+                type: string
+              outputs:
+                description: outputs maps Resource status keys to paths on the composed
+                  resource.
+                items:
+                  description: ResourceOutput maps a managed resource field to Resource.status.outputs.
+                  properties:
+                    from:
+                      description: from is a path on the composed resource, e.g. status.atProvider.arn.
+                      minLength: 1
+                      type: string
+                    name:
+                      description: name is the output key exposed on Resource.status.outputs.
+                      minLength: 1
+                      type: string
+                    template:
+                      description: |-
+                        template names the ResourceTemplate the output is read from. When empty
+                        the first template is used.
+                      type: string
+                  required:
+                  - from
+                  - name
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - name
+                x-kubernetes-list-type: map
+              resources:
+                description: resources is the ordered list of cloud objects to create.
+                items:
+                  description: ResourceTemplate describes one managed resource to
+                    create.
+                  properties:
+                    apiVersion:
+                      description: apiVersion of the managed resource to create.
+                      minLength: 1
+                      type: string
+                    base:
+                      description: base is an optional static fragment merged into
+                        the managed resource.
+                      type: object
+                      x-kubernetes-preserve-unknown-fields: true
+                    kind:
+                      description: kind of the managed resource to create.
+                      minLength: 1
+                      type: string
+                    mappings:
+                      description: mappings copy Resource values or CloudTarget fields
+                        into the managed resource.
+                      items:
+                        description: FieldMapping copies a value into a field of a
+                          managed resource.
+                        properties:
+                          from:
+                            description: 'from is a source path: values.<path> or
+                              target.<path>.'
+                            minLength: 1
+                            type: string
+                          to:
+                            description: to is a path on the managed resource, e.g.
+                              spec.forProvider.region.
+                            minLength: 1
+                            type: string
+                        required:
+                        - from
+                        - to
+                        type: object
+                      type: array
+                      x-kubernetes-list-map-keys:
+                      - to
+                      x-kubernetes-list-type: map
+                    name:
+                      description: name identifies the template within the definition.
+                      minLength: 1
+                      pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                      type: string
+                  required:
+                  - apiVersion
+                  - kind
+                  - name
+                  type: object
+                minItems: 1
+                type: array
+                x-kubernetes-list-map-keys:
+                - name
+                x-kubernetes-list-type: map
+            required:
+            - resources
+            type: object
+          status:
+            description: status defines the observed state of ResourceDefinition
+            properties:
+              conditions:
+                description: |-
+                  conditions represent the current state of the ResourceDefinition resource.
+                  Each condition has a unique type and reflects the status of a specific aspect of the resource.
+
+                  Standard condition types include:
+                  - "Available": the resource is fully functional
+                  - "Progressing": the resource is being created or updated
+                  - "Degraded": the resource failed to reach or maintain its desired state
+
+                  The status of each condition is one of True, False, or Unknown.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.22.0
+  name: resources.platform.releaseyard.io
+spec:
+  group: platform.releaseyard.io
+  names:
+    kind: Resource
+    listKind: ResourceList
+    plural: resources
+    singular: resource
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: Resource is the Schema for the resources API
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: spec defines the desired state of Resource
+            properties:
+              definitionRef:
+                description: definitionRef references a cluster-scoped ResourceDefinition.
+                properties:
+                  name:
+                    minLength: 1
+                    type: string
+                required:
+                - name
+                type: object
+              targetRef:
+                description: targetRef references a cluster-scoped CloudTarget.
+                properties:
+                  name:
+                    minLength: 1
+                    type: string
+                required:
+                - name
+                type: object
+              values:
+                description: values are validated against the definition's configurableValues.
+                type: object
+                x-kubernetes-preserve-unknown-fields: true
+            required:
+            - definitionRef
+            - targetRef
+            type: object
+          status:
+            description: status defines the observed state of Resource
+            properties:
+              composed:
+                description: composed lists the managed resources created for this
+                  Resource.
+                items:
+                  description: ComposedResource identifies a managed resource created
+                    for a Resource.
+                  properties:
+                    apiVersion:
+                      description: apiVersion of the composed resource.
+                      type: string
+                    kind:
+                      description: kind of the composed resource.
+                      type: string
+                    name:
+                      description: name is the template name.
+                      type: string
+                    namespace:
+                      description: namespace of the composed resource.
+                      type: string
+                  required:
+                  - apiVersion
+                  - kind
+                  - name
+                  - namespace
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - name
+                x-kubernetes-list-type: map
+              conditions:
+                description: conditions represent the observed state of the Resource.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              outputs:
+                additionalProperties:
+                  type: string
+                description: outputs are values read from the composed resources.
+                type: object
             type: object
         required:
         - spec
@@ -1446,6 +2034,77 @@ metadata:
   labels:
     app.kubernetes.io/managed-by: kustomize
     app.kubernetes.io/name: idp
+  name: idp-cloudtarget-admin-role
+rules:
+- apiGroups:
+  - platform.releaseyard.io
+  resources:
+  - cloudtargets
+  verbs:
+  - '*'
+- apiGroups:
+  - platform.releaseyard.io
+  resources:
+  - cloudtargets/status
+  verbs:
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: idp
+  name: idp-cloudtarget-editor-role
+rules:
+- apiGroups:
+  - platform.releaseyard.io
+  resources:
+  - cloudtargets
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - platform.releaseyard.io
+  resources:
+  - cloudtargets/status
+  verbs:
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: idp
+  name: idp-cloudtarget-viewer-role
+rules:
+- apiGroups:
+  - platform.releaseyard.io
+  resources:
+  - cloudtargets
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - platform.releaseyard.io
+  resources:
+  - cloudtargets/status
+  verbs:
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: idp
   name: idp-cluster-admin-role
 rules:
 - apiGroups:
@@ -1517,10 +2176,31 @@ metadata:
   name: idp-manager-role
 rules:
 - apiGroups:
+  - ""
+  resources:
+  - events
+  verbs:
+  - create
+  - patch
+- apiGroups:
+  - ec2.aws.m.upbound.io
+  resources:
+  - instances
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
   - platform.releaseyard.io
   resources:
   - applicationdefinitions
+  - cloudtargets
   - clusters
+  - resourcedefinitions
   verbs:
   - get
   - list
@@ -1531,6 +2211,7 @@ rules:
   - applicationdefinitions/status
   - applications/status
   - clusters/status
+  - resources/status
   verbs:
   - get
   - patch
@@ -1539,6 +2220,7 @@ rules:
   - platform.releaseyard.io
   resources:
   - applications
+  - resources
   verbs:
   - create
   - delete
@@ -1551,8 +2233,21 @@ rules:
   - platform.releaseyard.io
   resources:
   - applications/finalizers
+  - resources/finalizers
   verbs:
   - update
+- apiGroups:
+  - s3.aws.m.upbound.io
+  resources:
+  - buckets
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -1579,6 +2274,148 @@ metadata:
 rules:
 - nonResourceURLs:
   - /metrics
+  verbs:
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: idp
+  name: idp-resource-admin-role
+rules:
+- apiGroups:
+  - platform.releaseyard.io
+  resources:
+  - resources
+  verbs:
+  - '*'
+- apiGroups:
+  - platform.releaseyard.io
+  resources:
+  - resources/status
+  verbs:
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: idp
+  name: idp-resource-editor-role
+rules:
+- apiGroups:
+  - platform.releaseyard.io
+  resources:
+  - resources
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - platform.releaseyard.io
+  resources:
+  - resources/status
+  verbs:
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: idp
+  name: idp-resource-viewer-role
+rules:
+- apiGroups:
+  - platform.releaseyard.io
+  resources:
+  - resources
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - platform.releaseyard.io
+  resources:
+  - resources/status
+  verbs:
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: idp
+  name: idp-resourcedefinition-admin-role
+rules:
+- apiGroups:
+  - platform.releaseyard.io
+  resources:
+  - resourcedefinitions
+  verbs:
+  - '*'
+- apiGroups:
+  - platform.releaseyard.io
+  resources:
+  - resourcedefinitions/status
+  verbs:
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: idp
+  name: idp-resourcedefinition-editor-role
+rules:
+- apiGroups:
+  - platform.releaseyard.io
+  resources:
+  - resourcedefinitions
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - platform.releaseyard.io
+  resources:
+  - resourcedefinitions/status
+  verbs:
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: idp
+  name: idp-resourcedefinition-viewer-role
+rules:
+- apiGroups:
+  - platform.releaseyard.io
+  resources:
+  - resourcedefinitions
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - platform.releaseyard.io
+  resources:
+  - resourcedefinitions/status
   verbs:
   - get
 ---
@@ -1735,3 +2572,49 @@ spec:
       serviceAccountName: idp-controller-manager
       terminationGracePeriodSeconds: 10
       volumes: []
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  labels:
+    app.kubernetes.io/component: admission
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: idp
+  name: idp-application-access-policy
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+    - apiGroups:
+      - platform.releaseyard.io
+      apiVersions:
+      - v1alpha1
+      operations:
+      - CREATE
+      resources:
+      - applications
+      scope: Namespaced
+  validations:
+  - expression: authorizer.group('platform.releaseyard.io').resource('applicationdefinitions').name(object.spec.applicationDefinitionRef.name).check('get').allowed()
+    message: The referenced ApplicationDefinition must be readable by the requesting
+      user.
+    reason: Forbidden
+  - expression: '!has(object.spec.clusterRef) || authorizer.group(''platform.releaseyard.io'').resource(''clusters'').name(object.spec.clusterRef.name).check(''get'').allowed()'
+    message: The referenced Cluster must be readable by the requesting user.
+    reason: Forbidden
+  - expression: '!has(object.spec.environment) || object.spec.environment.targets.all(target,
+      authorizer.group(''platform.releaseyard.io'').resource(''clusters'').name(target.name).check(''get'').allowed())'
+    message: Every environment target Cluster must be readable by the requesting user.
+    reason: Forbidden
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  labels:
+    app.kubernetes.io/component: admission
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: idp
+  name: idp-application-access-binding
+spec:
+  policyName: idp-application-access-policy
+  validationActions:
+  - Deny

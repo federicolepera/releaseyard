@@ -155,6 +155,24 @@ The controller keeps using its own kubeconfig (`Cluster.spec.kubeconfigSecretRef
 to install into managed clusters; there is no per-user authorization on the
 target clusters.
 
+## Application reference enforcement
+
+The chart installs a `ValidatingAdmissionPolicy` that rejects an `Application`
+create when the requesting user cannot `get` the referenced
+`ApplicationDefinition`, the referenced `Cluster`, or any `Cluster` in an
+environment target snapshot. It applies to dashboard impersonation and direct
+clients such as `kubectl`.
+
+```yaml
+admission:
+  enabled: true
+  failurePolicy: Fail
+```
+
+Requires Kubernetes 1.31 or newer. `failurePolicy: Fail` rejects a create when
+the authorization check cannot be evaluated. Set `admission.enabled=false` only
+for troubleshooting.
+
 ## Other options
 
 The optional Ingress is disabled by default. Enabling it requires an Ingress

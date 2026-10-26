@@ -118,6 +118,13 @@ after installation.
 | `prometheus.enabled` | `false` | Create a ServiceMonitor. |
 | `networkPolicy.enabled` | `false` | Restrict metrics ingress. |
 
+### Admission
+
+| Value | Default | Notes |
+|-------|---------|-------|
+| `admission.enabled` | `true` | Enforce Application references with a ValidatingAdmissionPolicy. Requires Kubernetes 1.31+. |
+| `admission.failurePolicy` | `Fail` | Reject the create when the policy cannot be evaluated. |
+
 ### CRDs and lifecycle
 
 | Value | Default | Notes |

@@ -12,6 +12,18 @@ rules:
   - create
   - patch
 - apiGroups:
+  - ec2.aws.m.upbound.io
+  resources:
+  - instances
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
   - platform.releaseyard.io
   resources:
   - applicationdefinitions
@@ -57,18 +69,6 @@ rules:
   - s3.aws.m.upbound.io
   resources:
   - buckets
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - ec2.aws.m.upbound.io
-  resources:
-  - instances
   verbs:
   - create
   - delete
