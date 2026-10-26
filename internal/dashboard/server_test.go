@@ -363,7 +363,7 @@ func TestCreateApplication(t *testing.T) {
 	definition := validDefinition(testDefinitionName, true)
 	cluster := &platformv1alpha1.Cluster{ObjectMeta: metav1.ObjectMeta{Name: testClusterName}}
 	h, c := testHandler(t, definition, cluster)
-	w := postJSON(h, `{"name":"my-app","definitionName":"sample","clusterName":"production","values":{"replica":{"count":3},"feature":{"enabled":true}}}`)
+	w := postJSON(h, `{"name":"my-app","description":"Customer portal","definitionName":"sample","clusterName":"production","values":{"replica":{"count":3},"feature":{"enabled":true}}}`)
 	if w.Code != http.StatusCreated {
 		t.Fatalf("POST status=%d body=%s", w.Code, w.Body)
 	}
@@ -373,6 +373,9 @@ func TestCreateApplication(t *testing.T) {
 	}
 	if app.Spec.Values == nil || string(app.Spec.Values.Raw) != `{"replica":{"count":3},"feature":{"enabled":true}}` {
 		t.Fatalf("values not preserved as raw JSON: %s", app.Spec.Values)
+	}
+	if app.Spec.Description != "Customer portal" {
+		t.Fatalf("description not preserved: %q", app.Spec.Description)
 	}
 	if app.Spec.ApplicationDefinitionRef.Name != testDefinitionName || app.Spec.ClusterRef == nil || app.Spec.ClusterRef.Name != testClusterName {
 		t.Fatalf("unexpected references: %+v", app.Spec)
@@ -384,112 +387,96 @@ func TestCreateApplication(t *testing.T) {
 
 func TestCreateApplicationForEnvironment(t *testing.T) {
 	definition := validDefinition(testDefinitionName, true)
-	makeCluster := func(name string, uid types.UID, connected bool) *platformv1alpha1.Cluster {
-		status := metav1.ConditionFalse
-		if connected {
-			status = metav1.ConditionTrue
-		}
-		return &platformv1alpha1.Cluster{ObjectMeta: metav1.ObjectMeta{Name: name, UID: uid, Labels: map[string]string{clusterEnvironmentLabel: "prod"}}, Status: platformv1alpha1.ClusterStatus{Conditions: []metav1.Condition{{Type: "Connected", Status: status}}}}
+	makeCluster := func(name string, uid types.UID) *platformv1alpha1.Cluster {
+		return &platformv1alpha1.Cluster{ObjectMeta: metav1.ObjectMeta{Name: name, UID: uid, Labels: map[string]string{clusterEnvironmentLabel: "prod"}}}
 	}
-	t.Run("stores sorted immutable snapshot including disconnected targets", func(t *testing.T) {
-		alpha, beta := makeCluster("alpha", "uid-a", false), makeCluster("beta", "uid-b", true)
-		h, c := testHandler(t, definition, beta, alpha)
-		_, digest, err := resolveEnvironmentTargets(context.Background(), c, "prod")
-		if err != nil {
-			t.Fatal(err)
-		}
-		body := fmt.Sprintf(`{"name":"env-app","definitionName":"sample","environmentName":"prod","previewDigest":%q,"values":{"replica":{"count":3}}}`, digest)
+
+	t.Run("stores a dynamic environment selector", func(t *testing.T) {
+		h, c := testHandler(t, definition, makeCluster("alpha", "uid-a"), makeCluster("beta", "uid-b"))
+		body := `{"name":"env-app","definitionName":"sample","environmentName":"prod","values":{"replica":{"count":3}}}`
 		w := postJSON(h, body)
 		if w.Code != http.StatusCreated {
 			t.Fatalf("POST status=%d body=%s", w.Code, w.Body)
-		}
-		var response platformv1alpha1.Application
-		if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
-			t.Fatal(err)
 		}
 		stored := &platformv1alpha1.Application{}
 		if err := c.Get(context.Background(), client.ObjectKey{Namespace: testNamespace, Name: "env-app"}, stored); err != nil {
 			t.Fatal(err)
 		}
-		for _, app := range []*platformv1alpha1.Application{&response, stored} {
-			if app.Spec.ClusterRef != nil || app.Spec.Environment == nil || app.Spec.Environment.Name != "prod" || len(app.Spec.Environment.Targets) != 2 || app.Spec.Environment.Targets[0].Name != "alpha" || app.Spec.Environment.Targets[0].UID != "uid-a" || app.Spec.Environment.Targets[1].Name != "beta" || app.Spec.Environment.Targets[1].UID != "uid-b" {
-				t.Fatalf("unexpected environment snapshot: %+v", app.Spec)
-			}
+		if stored.Spec.ClusterRef != nil || stored.Spec.Environment == nil || stored.Spec.Environment.Name != "prod" || len(stored.Spec.Environment.Targets) != 0 {
+			t.Fatalf("unexpected dynamic environment selector: %+v", stored.Spec)
 		}
 	})
-	t.Run("request modes and digest validation", func(t *testing.T) {
-		cluster := makeCluster("alpha", "uid-a", true)
-		h, c := testHandler(t, definition, cluster)
-		_, digest, _ := resolveEnvironmentTargets(context.Background(), c, "prod")
-		base := `"name":"bad-app","definitionName":"sample"`
+
+	t.Run("ignores a preview digest instead of pinning targets", func(t *testing.T) {
+		h, c := testHandler(t, definition, makeCluster("alpha", "uid-a"))
+		body := `{"name":"preview-app","definitionName":"sample","environmentName":"prod","previewDigest":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","values":{"replica":{"count":1}}}`
+		if w := postJSON(h, body); w.Code != http.StatusCreated {
+			t.Fatalf("POST status=%d body=%s", w.Code, w.Body)
+		}
+		stored := &platformv1alpha1.Application{}
+		if err := c.Get(context.Background(), client.ObjectKey{Namespace: testNamespace, Name: "preview-app"}, stored); err != nil {
+			t.Fatal(err)
+		}
+		if stored.Spec.Environment == nil || len(stored.Spec.Environment.Targets) != 0 {
+			t.Fatalf("preview digest pinned environment targets: %+v", stored.Spec.Environment)
+		}
+	})
+
+	t.Run("request modes", func(t *testing.T) {
+		h, _ := testHandler(t, definition, makeCluster("alpha", "uid-a"))
 		for _, body := range []string{
-			`{` + base + `}`,
-			`{` + base + `,"clusterName":"alpha","environmentName":"prod","previewDigest":"` + digest + `"}`,
-			`{` + base + `,"environmentName":"prod"}`,
-			`{` + base + `,"environmentName":"prod","previewDigest":"` + strings.Repeat("A", sha256.Size*2) + `"}`,
-			`{` + base + `,"environmentName":"bad value","previewDigest":"` + digest + `"}`,
-			`{` + base + `,"environmentName":"prod","previewDigest":"` + digest + `","targets":[]}`,
+			`{"name":"bad-app","definitionName":"sample"}`,
+			`{"name":"bad-app","definitionName":"sample","clusterName":"alpha","environmentName":"prod"}`,
+			`{"name":"bad-app","definitionName":"sample","environmentName":"bad value"}`,
+			`{"name":"bad-app","definitionName":"sample","environmentName":"prod","targets":[]}`,
 		} {
 			if w := postJSON(h, body); w.Code != http.StatusBadRequest {
 				t.Fatalf("POST body=%s status=%d, want 400", body, w.Code)
 			}
 		}
 	})
-	t.Run("changed membership conflicts", func(t *testing.T) {
-		cluster := makeCluster("alpha", "uid-a", true)
-		h, c := testHandler(t, definition, cluster)
-		_, digest, _ := resolveEnvironmentTargets(context.Background(), c, "prod")
-		changed := cluster.DeepCopy()
-		changed.UID = "uid-new"
-		if err := c.Update(context.Background(), changed); err != nil {
+}
+
+func TestCreateApplicationForExplicitClusters(t *testing.T) {
+	definition := validDefinition(testDefinitionName, true)
+	makeCluster := func(name string, uid types.UID) *platformv1alpha1.Cluster {
+		return &platformv1alpha1.Cluster{ObjectMeta: metav1.ObjectMeta{Name: name, UID: uid}}
+	}
+
+	t.Run("stores the selected cluster identities", func(t *testing.T) {
+		h, c := testHandler(t, definition, makeCluster("alpha", "uid-a"), makeCluster("beta", "uid-b"))
+		body := `{"name":"selected-app","definitionName":"sample","clusters":[{"name":"beta","uid":"uid-b"},{"name":"alpha","uid":"uid-a"}],"values":{"replica":{"count":3}}}`
+		w := postJSON(h, body)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("POST status=%d body=%s", w.Code, w.Body)
+		}
+		stored := &platformv1alpha1.Application{}
+		if err := c.Get(context.Background(), client.ObjectKey{Namespace: testNamespace, Name: "selected-app"}, stored); err != nil {
 			t.Fatal(err)
 		}
-		body := fmt.Sprintf(`{"name":"stale-app","definitionName":"sample","environmentName":"prod","previewDigest":%q}`, digest)
-		if w := postJSON(h, body); w.Code != http.StatusConflict {
-			t.Fatalf("stale POST status=%d, want 409 body=%s", w.Code, w.Body)
+		if stored.Spec.ClusterRef != nil || stored.Spec.Environment != nil {
+			t.Fatalf("explicit selection also set another target mode: %+v", stored.Spec)
 		}
-		changed.Labels = map[string]string{}
-		if err := c.Update(context.Background(), changed); err != nil {
-			t.Fatal(err)
-		}
-		if w := postJSON(h, body); w.Code != http.StatusConflict {
-			t.Fatalf("stale POST after label change status=%d, want 409 body=%s", w.Code, w.Body)
+		if len(stored.Spec.Clusters) != 2 || stored.Spec.Clusters[0].Name != "beta" || stored.Spec.Clusters[0].UID != "uid-b" || stored.Spec.Clusters[1].Name != "alpha" || stored.Spec.Clusters[1].UID != "uid-a" {
+			t.Fatalf("unexpected explicit cluster selection: %+v", stored.Spec.Clusters)
 		}
 	})
-	t.Run("empty deleting uidless and too many targets rejected", func(t *testing.T) {
-		many := make([]client.Object, 0, maxEnvironmentTargets+1)
-		for i := range maxEnvironmentTargets + 1 {
-			name := fmt.Sprintf("target-%02d", i)
-			many = append(many, makeCluster(name, types.UID("uid-"+name), true))
-		}
-		cases := []struct {
-			name    string
-			objects []client.Object
-			want    int
+
+	t.Run("request validation", func(t *testing.T) {
+		h, _ := testHandler(t, definition, makeCluster("alpha", "uid-a"), makeCluster("beta", "uid-b"))
+		for _, tc := range []struct {
+			body string
+			want int
 		}{
-			{name: "empty", want: http.StatusUnprocessableEntity},
-			{name: "deleting", objects: []client.Object{func() *platformv1alpha1.Cluster {
-				c := makeCluster("alpha", "uid-a", true)
-				now := metav1.Now()
-				c.DeletionTimestamp = &now
-				c.Finalizers = []string{"hold"}
-				return c
-			}()}, want: http.StatusConflict},
-			{name: "uidless", objects: []client.Object{makeCluster("alpha", "", true)}, want: http.StatusUnprocessableEntity},
-			{name: "too many", objects: many, want: http.StatusUnprocessableEntity},
-		}
-		for _, tc := range cases {
-			t.Run(tc.name, func(t *testing.T) {
-				h, c := testHandler(t, append([]client.Object{definition}, tc.objects...)...)
-				digest := strings.Repeat("a", sha256.Size*2)
-				if tc.name != "too many" {
-					_, digest, _ = resolveEnvironmentTargets(context.Background(), c, "prod")
-				}
-				body := fmt.Sprintf(`{"name":"reject-app","definitionName":"sample","environmentName":"prod","previewDigest":%q}`, digest)
-				if w := postJSON(h, body); w.Code != tc.want {
-					t.Fatalf("POST status=%d, want %d body=%s", w.Code, tc.want, w.Body)
-				}
-			})
+			{body: `{"name":"bad-app","definitionName":"sample","clusters":[]}`, want: http.StatusBadRequest},
+			{body: `{"name":"bad-app","definitionName":"sample","clusterName":"alpha","clusters":[{"name":"beta","uid":"uid-b"}]}`, want: http.StatusBadRequest},
+			{body: `{"name":"bad-app","definitionName":"sample","clusters":[{"name":"alpha","uid":"uid-a"},{"name":"alpha","uid":"uid-b"}]}`, want: http.StatusBadRequest},
+			{body: `{"name":"bad-app","definitionName":"sample","clusters":[{"name":"alpha","uid":"stale"}]}`, want: http.StatusConflict},
+			{body: `{"name":"bad-app","definitionName":"sample","clusters":[{"name":"missing","uid":"uid-x"}]}`, want: http.StatusNotFound},
+		} {
+			if w := postJSON(h, tc.body); w.Code != tc.want {
+				t.Fatalf("POST body=%s status=%d, want %d: %s", tc.body, w.Code, tc.want, w.Body)
+			}
 		}
 	})
 }

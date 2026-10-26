@@ -58,14 +58,21 @@ The API group is `platform.releaseyard.io/v1alpha1`.
 The controller deliberately refuses to adopt a Helm release it does not own.
 Release ownership is recorded in a ConfigMap claim and in the release labels.
 
-## Environment placement
+## Multi-target placement
 
-An Application with `spec.environment` stores a fixed snapshot of matching
-Cluster names and UIDs at creation time. Later label changes do not silently add
-or remove targets. The controller reconciles each snapshot entry independently
-and reports per-instance status.
+An Application can target one Cluster with `spec.clusterRef`, an explicit
+immutable list with `spec.clusters`, or an environment with
+`spec.environment.name`.
 
-`spec.clusterRef`, `spec.environment`, `spec.applicationDefinitionRef`, and
+An environment Application follows the Clusters whose environment label
+matches. The controller re-resolves the set on every reconcile, adds releases on
+new matching Clusters, and uninstalls/removes instances for Clusters that leave.
+A non-empty `spec.environment.targets` pins the set instead; later label changes
+do not alter it. Explicit `spec.clusters` entries are always a fixed snapshot.
+
+Each target is reconciled independently with per-instance status.
+
+`spec.clusterRef`, `spec.clusters`, `spec.environment`, `spec.applicationDefinitionRef`, and
 `spec.releaseNamespace` are immutable after creation.
 
 ## Cloud reconciliation

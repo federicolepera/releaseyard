@@ -133,8 +133,8 @@ on `Application` create and asks the API server whether the requesting user may
 `get`:
 
 - the referenced `ApplicationDefinition`;
-- the referenced `Cluster`, or every `Cluster` in an environment target
-  snapshot.
+- the referenced `Cluster`, every `Cluster` in `spec.clusters`, or every
+  `Cluster` explicitly listed in a pinned environment target list.
 
 The policy applies to dashboard impersonation and to direct clients such as
 `kubectl`. It uses `failurePolicy: Fail` by default, so a policy evaluation
@@ -168,10 +168,10 @@ logged. Protect and retain the log sink according to your security policy.
 
 ## Known gaps
 
-- Environment snapshots are resolved by the dashboard for environment
-  Applications created through the UI. Direct clients must provide the snapshot.
-  The admission policy verifies that every supplied target is readable, but it
-  does not resolve or validate environment membership.
+- Dynamic environment placement is authorized by the permission to create the
+  Application in its team namespace. The controller resolves the target Clusters
+  with its own credentials, so per-cluster read access is not checked at create
+  time. Add environment-level RBAC before exposing this to untrusted users.
 - The dashboard can patch the environment label on Clusters, but RBAC cannot
   restrict a patch to one metadata key. Use an admission policy if the dashboard
   is exposed beyond a trusted environment.

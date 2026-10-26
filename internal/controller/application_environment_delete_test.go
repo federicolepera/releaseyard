@@ -101,7 +101,7 @@ func TestEnvironmentDeletionUninstallsThenDeletesClaimCheckpointed(t *testing.T)
 	e := newAppTestEnvironment(t, nil)
 	app := e.getApp(t)
 	app.Spec.ClusterRef = nil
-	app.Spec.Environment = &platformv1alpha1.ApplicationEnvironmentSelection{Name: "production", Targets: []platformv1alpha1.ApplicationEnvironmentTarget{{Name: appTestCluster, UID: e.cluster.UID}}}
+	app.Spec.Environment = &platformv1alpha1.ApplicationEnvironmentSelection{Name: "production"}
 	if err := e.c.Update(context.Background(), app); err != nil {
 		t.Fatal(err)
 	}
@@ -133,6 +133,54 @@ func TestEnvironmentDeletionUninstallsThenDeletesClaimCheckpointed(t *testing.T)
 	}
 }
 
+func TestExplicitClusterSelectionDeletionCleansInstanceSnapshot(t *testing.T) {
+	e := newAppTestEnvironment(t, nil)
+	app := e.getApp(t)
+	app.Spec.ClusterRef = nil
+	app.Spec.Clusters = []platformv1alpha1.ApplicationClusterTarget{{Name: e.cluster.Name, UID: e.cluster.UID}}
+	if err := e.c.Update(context.Background(), app); err != nil {
+		t.Fatal(err)
+	}
+	secret := &corev1.Secret{}
+	if err := e.reader.Get(context.Background(), types.NamespacedName{Namespace: testManagerNamespace, Name: testSecretName}, secret); err != nil {
+		t.Fatal(err)
+	}
+	_, remoteTarget, err := parseRemoteClusterConfig(secret.Data["kubeconfig"], appTestReleaseNamespace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	app = e.getApp(t)
+	app.Status.EnvironmentBinding = &platformv1alpha1.ApplicationEnvironmentBinding{ApplicationDefinitionUID: e.definition.UID, ReleaseNamespace: appTestReleaseNamespace}
+	app.Status.Instances = []platformv1alpha1.ApplicationInstanceStatus{{
+		ClusterName: e.cluster.Name, ClusterUID: e.cluster.UID,
+		Binding: &platformv1alpha1.ApplicationBinding{ApplicationDefinitionUID: e.definition.UID, ClusterUID: e.cluster.UID, TargetAPIServer: remoteTarget.Server, TargetTrustHash: trustHash(remoteTarget.TrustSHA256), ReleaseNamespace: appTestReleaseNamespace, ReleaseName: appTestName, RemoteClaimUID: e.claims.claim.UID},
+		Applied: &platformv1alpha1.ApplicationAppliedIdentity{ApplicationGeneration: app.Generation}, LastAttemptedIdentity: "attempt",
+	}}
+	if err := e.c.Status().Update(context.Background(), app); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.c.Delete(context.Background(), e.getApp(t)); err != nil {
+		t.Fatal(err)
+	}
+	e.reconcile(t)
+	checkpoint := e.getApp(t).Status.Instances[0]
+	if !releaseAbsent(&checkpoint) || checkpoint.CleanupComplete || len(e.helm.uninstall) != 1 || e.claims.deletes != 0 {
+		t.Fatalf("explicit selection release absence was not checkpointed: instance=%#v uninstall=%d deletes=%d", checkpoint, len(e.helm.uninstall), e.claims.deletes)
+	}
+	e.reconcile(t)
+	if e.claims.deletes != 1 || !e.claims.deleted {
+		t.Fatalf("explicit selection claim was not deleted after release cleanup: deletes=%d", e.claims.deletes)
+	}
+	var current platformv1alpha1.Application
+	err = e.c.Get(context.Background(), e.request.NamespacedName, &current)
+	if err == nil && len(current.Status.Instances) != 0 {
+		t.Fatalf("explicit selection instance remained after cleanup: %#v", current.Status.Instances)
+	}
+	if err != nil && !apierrors.IsNotFound(err) {
+		t.Fatalf("get Application after cleanup: %v", err)
+	}
+}
+
 func TestClusterEventMapsEnvironmentSnapshotTargetWithoutLabels(t *testing.T) {
 	e := newAppTestEnvironment(t, nil)
 	app := e.getApp(t)
@@ -144,6 +192,35 @@ func TestClusterEventMapsEnvironmentSnapshotTargetWithoutLabels(t *testing.T) {
 	requests := e.r.mapCluster(context.Background(), e.cluster)
 	if len(requests) != 1 || requests[0].NamespacedName != e.request.NamespacedName {
 		t.Fatalf("snapshot Cluster event mapped to %#v, want %s", requests, e.request.NamespacedName)
+	}
+}
+
+func TestClusterEventMapsDynamicEnvironmentByLabelAndStatus(t *testing.T) {
+	e := newAppTestEnvironment(t, nil)
+	app := e.getApp(t)
+	app.Spec.ClusterRef = nil
+	app.Spec.Environment = &platformv1alpha1.ApplicationEnvironmentSelection{Name: "production"}
+	if err := e.c.Update(context.Background(), app); err != nil {
+		t.Fatal(err)
+	}
+
+	labeled := e.cluster.DeepCopy()
+	labeled.Labels = map[string]string{platformv1alpha1.ClusterEnvironmentLabelKey: "production"}
+	requests := e.r.mapCluster(context.Background(), labeled)
+	if len(requests) != 1 || requests[0].NamespacedName != e.request.NamespacedName {
+		t.Fatalf("dynamic environment label mapped to %#v, want %s", requests, e.request.NamespacedName)
+	}
+
+	app = e.getApp(t)
+	app.Status.Instances = []platformv1alpha1.ApplicationInstanceStatus{{ClusterName: e.cluster.Name, ClusterUID: e.cluster.UID}}
+	if err := e.c.Status().Update(context.Background(), app); err != nil {
+		t.Fatal(err)
+	}
+	unlabeled := e.cluster.DeepCopy()
+	unlabeled.Labels = nil
+	requests = e.r.mapCluster(context.Background(), unlabeled)
+	if len(requests) != 1 {
+		t.Fatalf("tracked dynamic Cluster removal mapped to %#v, want %s", requests, e.request.NamespacedName)
 	}
 }
 

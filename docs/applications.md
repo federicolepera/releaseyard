@@ -66,6 +66,7 @@ metadata:
   name: demo
   namespace: releaseyard-team-platform
 spec:
+  description: Customer-facing demo application
   applicationDefinitionRef:
     name: releaseyard-demo
   clusterRef:
@@ -91,7 +92,40 @@ spec:
 
 The Application produces one Helm release on that cluster.
 
+### Selected clusters
+
+```yaml
+spec:
+  clusters:
+    - name: releaseyard-managed-a
+      uid: <cluster-a-uid>
+    - name: releaseyard-managed-b
+      uid: <cluster-b-uid>
+```
+
+The Application deploys to exactly these Clusters. The list is immutable and is
+not expanded when new Clusters appear; remove or add targets by recreating the
+Application. `uid` guards against a Cluster being deleted and recreated under
+the same name.
+
+The dashboard exposes this mode as **Selected clusters**, where each target can
+be checked individually. A direct API client must resolve the Cluster UIDs.
+
 ### An environment
+
+```yaml
+spec:
+  environment:
+    name: staging
+```
+
+The controller resolves the target set from Clusters whose
+`platform.releaseyard.io/environment` label equals `staging`. It re-resolves on
+every reconcile: a new matching Cluster receives a release, and a Cluster that
+leaves the environment is uninstalled and its instance removed. The resolved
+set is recorded in `status.instances`; `spec.environment.targets` stays empty.
+
+To pin a fixed target set instead, set `targets` explicitly:
 
 ```yaml
 spec:
@@ -102,13 +136,16 @@ spec:
         uid: <cluster-uid>
 ```
 
-The targets are an immutable snapshot of the clusters selected by the
-`platform.releaseyard.io/environment` label at creation time. Creating an
-environment Application through the dashboard resolves and previews this
-snapshot. Direct API clients must provide an explicit target list.
+Pinned targets are immutable after creation and are intended for stateful
+workloads where automatic placement changes are unsafe. Dynamic and pinned are
+selected by the presence of `targets`; you cannot switch modes later.
 
-Exactly one of `clusterRef` or `environment` must be set. The choice is
-immutable.
+If no Cluster currently matches, the Application stays not ready and becomes
+ready when a matching Cluster appears. Direct API clients only need
+`environment.name`; they do not need to resolve Cluster UIDs.
+
+Exactly one of `clusterRef`, `clusters`, or `environment` must be set. The
+choice is immutable.
 
 ## Release namespace
 

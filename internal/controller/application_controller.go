@@ -150,7 +150,7 @@ func (r *ApplicationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 	if !app.DeletionTimestamp.IsZero() {
-		if app.Spec.Environment != nil {
+		if usesMultiTargetSelection(&app) {
 			return r.reconcileEnvironmentDelete(ctx, &app)
 		}
 		return r.reconcileDelete(ctx, &app)
@@ -162,7 +162,7 @@ func (r *ApplicationReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		}
 		return ctrl.Result{RequeueAfter: staleInputRequeue}, nil
 	}
-	if app.Spec.Environment != nil {
+	if usesMultiTargetSelection(&app) {
 		return r.reconcileEnvironmentApply(ctx, &app)
 	}
 	return r.reconcileApply(ctx, &app)
@@ -662,11 +662,18 @@ func (r *ApplicationReconciler) mapCluster(ctx context.Context, object client.Ob
 	requests := make([]reconcile.Request, 0)
 	for i := range apps.Items {
 		app := &apps.Items[i]
-		snapshotMatch := app.Spec.Environment != nil && slices.ContainsFunc(app.Spec.Environment.Targets, func(target platformv1alpha1.ApplicationEnvironmentTarget) bool {
+		snapshotMatch := (app.Spec.Environment != nil && slices.ContainsFunc(app.Spec.Environment.Targets, func(target platformv1alpha1.ApplicationEnvironmentTarget) bool {
+			return target.Name == object.GetName()
+		})) || slices.ContainsFunc(app.Spec.Clusters, func(target platformv1alpha1.ApplicationClusterTarget) bool {
 			return target.Name == object.GetName()
 		})
+		dynamicMatch := app.Spec.Environment != nil && len(app.Spec.Environment.Targets) == 0 &&
+			(object.GetLabels()[platformv1alpha1.ClusterEnvironmentLabelKey] == app.Spec.Environment.Name ||
+				slices.ContainsFunc(app.Status.Instances, func(instance platformv1alpha1.ApplicationInstanceStatus) bool {
+					return instance.ClusterName == object.GetName()
+				}))
 		legacyMatch := app.Spec.ClusterRef != nil && app.Spec.ClusterRef.Name == object.GetName()
-		if snapshotMatch || legacyMatch {
+		if snapshotMatch || dynamicMatch || legacyMatch {
 			requests = append(requests, reconcile.Request{NamespacedName: types.NamespacedName{Namespace: app.Namespace, Name: app.Name}})
 		}
 	}

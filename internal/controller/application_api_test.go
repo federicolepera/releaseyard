@@ -84,6 +84,20 @@ var _ = Describe("Application API", func() {
 		Expect(readBack.Object["spec"].(map[string]any)["environment"]).To(Equal(application.Object["spec"].(map[string]any)["environment"]))
 	})
 
+	It("creates a dynamic environment application without targets", func() {
+		application := validApplication(managementNamespace)
+		spec := application.Object["spec"].(map[string]any)
+		delete(spec, "clusterRef")
+		spec["environment"] = map[string]any{"name": "production"}
+		Expect(k8sClient.Create(ctx, application)).To(Succeed())
+
+		readBack := &unstructured.Unstructured{}
+		readBack.SetGroupVersionKind(applicationGVK)
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Namespace: managementNamespace, Name: application.GetName()}, readBack)).To(Succeed())
+		environment := readBack.Object["spec"].(map[string]any)["environment"].(map[string]any)
+		Expect(environment).NotTo(HaveKey("targets"))
+	})
+
 	It("allows environment application values-only updates", func() {
 		application := validEnvironmentApplication(managementNamespace)
 		Expect(k8sClient.Create(ctx, application)).To(Succeed())
@@ -124,10 +138,6 @@ var _ = Describe("Application API", func() {
 		Entry("invalid environment name", func(application *unstructured.Unstructured) {
 			delete(application.Object["spec"].(map[string]any), "clusterRef")
 			application.Object["spec"].(map[string]any)["environment"] = map[string]any{"name": "prod/blue", "targets": validEnvironmentTargets()}
-		}),
-		Entry("empty environment target list", func(application *unstructured.Unstructured) {
-			delete(application.Object["spec"].(map[string]any), "clusterRef")
-			application.Object["spec"].(map[string]any)["environment"] = map[string]any{"name": "production", "targets": []any{}}
 		}),
 		Entry("duplicate environment target names", func(application *unstructured.Unstructured) {
 			delete(application.Object["spec"].(map[string]any), "clusterRef")

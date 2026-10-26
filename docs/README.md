@@ -10,6 +10,7 @@ Start with the [README](../README.md) for the product overview and quickstart.
 | [Applications](applications.md) | Catalog contract, placement, values, release lifecycle |
 | [Cloud resources](cloud-resources.md) | Crossplane integration, targets, definitions, AWS examples |
 | [Access control](access-control.md) | Local admin, OIDC, impersonation, team namespaces, RBAC |
+| [Hardening](hardening.md) | Security and reliability backlog, priorities, acceptance criteria |
 | [Observability](observability.md) | Live resources, logs, metrics, events, Prometheus |
 | [Configuration](configuration.md) | CRD fields and Helm values |
 | [Development](development.md) | Build, test, lint, e2e, local workflows |

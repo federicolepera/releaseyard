@@ -129,10 +129,10 @@ func TestValidateApplicationEnvironmentSelection(t *testing.T) {
 			app.Spec.ClusterRef = nil
 			app.Spec.Environment = &platformv1alpha1.ApplicationEnvironmentSelection{Name: "prod/blue", Targets: append([]platformv1alpha1.ApplicationEnvironmentTarget(nil), valid...)}
 		}, wantErr: "environment name"},
-		{name: "empty targets", mutate: func(app *platformv1alpha1.Application) {
+		{name: "empty targets are dynamic", mutate: func(app *platformv1alpha1.Application) {
 			app.Spec.ClusterRef = nil
 			app.Spec.Environment = &platformv1alpha1.ApplicationEnvironmentSelection{Name: "prod"}
-		}, wantErr: "between 1 and 32"},
+		}},
 		{name: "duplicate name", mutate: func(app *platformv1alpha1.Application) {
 			app.Spec.ClusterRef = nil
 			app.Spec.Environment = &platformv1alpha1.ApplicationEnvironmentSelection{Name: "prod", Targets: []platformv1alpha1.ApplicationEnvironmentTarget{{Name: "cluster-a", UID: "uid-a"}, {Name: "cluster-a", UID: "uid-b"}}}
@@ -160,6 +160,67 @@ func TestValidateApplicationEnvironmentSelection(t *testing.T) {
 		{name: "empty target UID", mutate: func(app *platformv1alpha1.Application) {
 			app.Spec.ClusterRef = nil
 			app.Spec.Environment = &platformv1alpha1.ApplicationEnvironmentSelection{Name: "prod", Targets: []platformv1alpha1.ApplicationEnvironmentTarget{{Name: "cluster-a"}}}
+		}, wantErr: "UID"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			app := applicationWithValues(replicaCountTwoJSON)
+			tt.mutate(app)
+			err := ValidateApplication(definition, app)
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("ValidateApplication() error = %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("ValidateApplication() error = %v, want substring %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestValidateApplicationClusterSelection(t *testing.T) {
+	definition := definition(`{"replicaCount":1}`, value("replicaCount", integerType, nil, nil))
+	definition.Namespace = applicationsNamespace
+	definition.Spec.Release.Namespace = applicationsNamespace
+	valid := []platformv1alpha1.ApplicationClusterTarget{{Name: "cluster-a", UID: "uid-a"}, {Name: "cluster-b", UID: "uid-b"}}
+	tests := []struct {
+		name    string
+		mutate  func(*platformv1alpha1.Application)
+		wantErr string
+	}{
+		{name: "valid selection", mutate: func(app *platformv1alpha1.Application) {
+			app.Spec.ClusterRef = nil
+			app.Spec.Clusters = append([]platformv1alpha1.ApplicationClusterTarget(nil), valid...)
+		}},
+		{name: "clusterRef and clusters", mutate: func(app *platformv1alpha1.Application) {
+			app.Spec.Clusters = append([]platformv1alpha1.ApplicationClusterTarget(nil), valid...)
+		}, wantErr: "exactly one"},
+		{name: "environment and clusters", mutate: func(app *platformv1alpha1.Application) {
+			app.Spec.ClusterRef = nil
+			app.Spec.Environment = &platformv1alpha1.ApplicationEnvironmentSelection{Name: "prod"}
+			app.Spec.Clusters = append([]platformv1alpha1.ApplicationClusterTarget(nil), valid...)
+		}, wantErr: "exactly one"},
+		{name: "empty selection", mutate: func(app *platformv1alpha1.Application) {
+			app.Spec.ClusterRef = nil
+			app.Spec.Clusters = []platformv1alpha1.ApplicationClusterTarget{}
+		}, wantErr: "exactly one"},
+		{name: "duplicate name", mutate: func(app *platformv1alpha1.Application) {
+			app.Spec.ClusterRef = nil
+			app.Spec.Clusters = []platformv1alpha1.ApplicationClusterTarget{{Name: "cluster-a", UID: "uid-a"}, {Name: "cluster-a", UID: "uid-b"}}
+		}, wantErr: "duplicated"},
+		{name: "duplicate UID", mutate: func(app *platformv1alpha1.Application) {
+			app.Spec.ClusterRef = nil
+			app.Spec.Clusters = []platformv1alpha1.ApplicationClusterTarget{{Name: "cluster-a", UID: "uid-a"}, {Name: "cluster-b", UID: "uid-a"}}
+		}, wantErr: "UID"},
+		{name: "invalid target DNS name", mutate: func(app *platformv1alpha1.Application) {
+			app.Spec.ClusterRef = nil
+			app.Spec.Clusters = []platformv1alpha1.ApplicationClusterTarget{{Name: "Bad_name", UID: "uid"}}
+		}, wantErr: "target 0 name"},
+		{name: "empty target UID", mutate: func(app *platformv1alpha1.Application) {
+			app.Spec.ClusterRef = nil
+			app.Spec.Clusters = []platformv1alpha1.ApplicationClusterTarget{{Name: "cluster-a"}}
 		}, wantErr: "UID"},
 	}
 	for _, tt := range tests {

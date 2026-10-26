@@ -30,13 +30,16 @@ examples are in [`config/samples/`](../config/samples/) and
 
 | Field | Required | Notes |
 |-------|----------|-------|
+| `spec.description` | no | Optional human-readable description, max 280 characters. |
 | `spec.applicationDefinitionRef.name` | yes | Immutable. |
 | `spec.clusterRef.name` | one of | Single-cluster placement. Immutable. |
-| `spec.environment` | one of | Environment name plus explicit target snapshot. Immutable. |
+| `spec.clusters[]` | one of | Explicit target list of `{name, uid}`. Immutable. |
+| `spec.environment.name` | one of | Dynamic environment target set selected by Cluster label. Immutable. |
+| `spec.environment.targets` | no | Optional pinned target list. When omitted the set is dynamic. Immutable once set. |
 | `spec.releaseNamespace` | no | Only when the definition allows overrides. Immutable. |
 | `spec.values` | no | Only paths declared by the definition. |
 
-Exactly one of `clusterRef` or `environment` must be set.
+Exactly one of `clusterRef`, `clusters`, or `environment` must be set.
 
 ## CloudTarget
 

@@ -25,10 +25,13 @@ func (r *ApplicationReconciler) reconcileEnvironmentDelete(ctx context.Context, 
 	if app.Status.Binding != nil {
 		return r.environmentDeletePending(ctx, app, "LegacyBindingConflict")
 	}
-	if app.Spec.Environment == nil {
+	if !usesMultiTargetSelection(app) {
 		return r.environmentDeletePending(ctx, app, "SnapshotUnavailable")
 	}
-	targets := append([]platformv1alpha1.ApplicationEnvironmentTarget(nil), app.Spec.Environment.Targets...)
+	targets := make([]platformv1alpha1.ApplicationEnvironmentTarget, 0, len(app.Status.Instances))
+	for i := range app.Status.Instances {
+		targets = append(targets, platformv1alpha1.ApplicationEnvironmentTarget{Name: app.Status.Instances[i].ClusterName, UID: app.Status.Instances[i].ClusterUID})
+	}
 	slices.SortFunc(targets, func(a, b platformv1alpha1.ApplicationEnvironmentTarget) int { return cmp.Compare(a.Name, b.Name) })
 	blocked := false
 	for _, target := range targets {
@@ -65,13 +68,6 @@ func (r *ApplicationReconciler) reconcileEnvironmentDelete(ctx context.Context, 
 		if !done {
 			blocked = true
 			continue
-		}
-	}
-	// Include status entries outside the immutable snapshot as unexplained evidence.
-	for i := range app.Status.Instances {
-		inst := &app.Status.Instances[i]
-		if !slices.ContainsFunc(targets, func(t platformv1alpha1.ApplicationEnvironmentTarget) bool { return t.Name == inst.ClusterName }) && (inst.Binding != nil || inst.Applied != nil || inst.LastAttemptedIdentity != "" || inst.CleanupComplete) {
-			blocked = true
 		}
 	}
 	if blocked || !allEnvironmentBindingsCleaned(app) {
@@ -199,7 +195,7 @@ func releaseAbsent(inst *platformv1alpha1.ApplicationInstanceStatus) bool {
 }
 
 func allEnvironmentBindingsCleaned(app *platformv1alpha1.Application) bool {
-	if app.Status.Binding != nil || app.Spec.Environment == nil {
+	if app.Status.Binding != nil || !usesMultiTargetSelection(app) {
 		return false
 	}
 	for i := range app.Status.Instances {
@@ -211,11 +207,6 @@ func allEnvironmentBindingsCleaned(app *platformv1alpha1.Application) bool {
 			return false
 		}
 		if inst.Binding != nil && (app.Status.EnvironmentBinding == nil || inst.Binding.ApplicationDefinitionUID != app.Status.EnvironmentBinding.ApplicationDefinitionUID || inst.Binding.ReleaseNamespace != app.Status.EnvironmentBinding.ReleaseNamespace) {
-			return false
-		}
-		if inst.Binding != nil && !slices.ContainsFunc(app.Spec.Environment.Targets, func(target platformv1alpha1.ApplicationEnvironmentTarget) bool {
-			return target.Name == inst.ClusterName && target.UID == inst.ClusterUID && target.UID == inst.Binding.ClusterUID
-		}) {
 			return false
 		}
 		if inst.Binding == nil && (inst.Applied != nil || inst.LastAttemptedIdentity != "" || inst.CleanupComplete || releaseAbsent(inst)) {

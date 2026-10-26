@@ -198,9 +198,10 @@ target clusters.
 
 The chart installs a `ValidatingAdmissionPolicy` that rejects an `Application`
 create when the requesting user cannot `get` the referenced
-`ApplicationDefinition`, the referenced `Cluster`, or any `Cluster` in an
-environment target snapshot. It applies to dashboard impersonation and direct
-clients such as `kubectl`.
+`ApplicationDefinition`, the referenced `Cluster`, or any `Cluster` explicitly
+listed in a pinned environment target list. Dynamic environment targets are
+resolved by the controller, not supplied by the client. The policy applies to
+dashboard impersonation and direct clients such as `kubectl`.
 
 ```yaml
 admission:
