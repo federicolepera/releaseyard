@@ -5,7 +5,7 @@ set -euo pipefail
 CLUSTER_NAME="releaseyard-a"
 KUBE_CONTEXT="kind-${CLUSTER_NAME}"
 NAMESPACE="idp-system"
-DEPLOYMENT="idp-controller-manager"
+DEPLOYMENT="releaseyard-controller-manager"
 MANAGER_CONTAINER="manager"
 BRIDGE_CONTAINER="kind-loopback-bridge"
 ROLLOUT_TIMEOUT="180s"
