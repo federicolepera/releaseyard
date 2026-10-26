@@ -246,6 +246,34 @@ networkPolicy:
 dashboard:
   enabled: false
 
+  ## Number of dashboard replicas. Values greater than 1 require
+  ## dashboard.sessionStore.type=redis so sessions are shared.
+  ##
+  replicas: 1
+
+  ## Session storage. Use redis in production and whenever replicas > 1 so
+  ## sessions survive rollouts and are shared by all replicas.
+  ##
+  sessionStore:
+    type: memory
+    redis:
+      ## Required when type=redis, for example redis.example.com:6379.
+      ##
+      address: ""
+      username: ""
+      ## DB index. Defaults to 0.
+      ##
+      db: 0
+      ## Prefer an existing Secret over putting a password in Helm values.
+      ## When name is empty, no password is sent.
+      ##
+      passwordSecret:
+        name: ""
+        key: password
+      tls:
+        enabled: false
+      keyPrefix: "releaseyard:dashboard:"
+
   ## Namespace prefix used to derive per-team namespaces from identity-provider
   ## groups for multi-team Application placement.
   ##

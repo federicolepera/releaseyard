@@ -70,16 +70,34 @@ See [Access control](access-control.md).
 
 ## Sessions
 
-Sessions are server-side and stored in memory:
+Sessions are server-side:
 
 - 30-minute sliding idle timeout;
 - 8-hour absolute timeout;
-- signed, `HttpOnly`, `SameSite=Lax` cookies;
+- opaque, `HttpOnly`, `SameSite=Lax` cookies;
 - `Secure` when the public URL is HTTPS;
 - CSRF validation on state-changing requests.
 
-Because the store is in memory, a rollout signs everyone out and multiple
-dashboard replicas do not share sessions.
+Sessions and OIDC login transactions are stored in memory by default. For
+production and for more than one replica, enable Redis:
+
+```yaml
+dashboard:
+  replicas: 2
+  sessionStore:
+    type: redis
+    redis:
+      address: redis.example.com:6379
+      passwordSecret:
+        name: redis-auth
+        key: password
+      tls:
+        enabled: true
+```
+
+The in-memory store signs everyone out on rollout and is not shared between
+replicas. The Redis store shares sessions and login transactions and keeps users
+signed in across rollouts.
 
 ## Team scope
 

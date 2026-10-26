@@ -1,6 +1,7 @@
 package dashboard
 
 import (
+	"context"
 	"crypto"
 	"crypto/rand"
 	"crypto/rsa"
@@ -571,28 +572,32 @@ func TestOIDCExpiredTransactionAndSession(t *testing.T) {
 	state := "expired-state"
 	binding := "binding"
 	sessionID := "expired-session"
+	store := newMemorySessionStore()
+	store.transactions[state] = memoryTransactionEntry{
+		transaction: loginTransaction{state: state, binding: binding, expires: now.Add(-time.Second)},
+		expires:     now.Add(-time.Second),
+	}
+	store.sessions[sessionID] = memorySessionEntry{
+		session: dashboardSession{lastActivity: now.Add(-sessionIdleTTL - time.Second), expires: now.Add(time.Hour)},
+		expires: now.Add(time.Hour),
+	}
 	auth := &authHandler{
-		now: func() time.Time { return now },
-		transactions: map[string]loginTransaction{
-			state: {state: state, binding: binding, expires: now.Add(-time.Second)},
-		},
-		sessions: map[string]dashboardSession{
-			sessionID: {lastActivity: now.Add(-sessionIdleTTL - time.Second), expires: now.Add(time.Hour)},
-		},
+		now:   func() time.Time { return now },
+		store: store,
 	}
-	if _, ok := auth.consumeTransaction(state, binding); ok {
-		t.Fatal("expired login transaction was accepted")
+	if _, ok, err := auth.consumeTransaction(context.Background(), state, binding); err != nil || ok {
+		t.Fatalf("expired login transaction accepted or failed: ok=%t err=%v", ok, err)
 	}
-	if _, ok := auth.transactions[state]; ok {
+	if _, ok := store.transactions[state]; ok {
 		t.Fatal("expired login transaction was not consumed")
 	}
 	req := httptest.NewRequest(http.MethodGet, "http://dashboard.localhost/", nil)
 	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: sessionID})
 	response := httptest.NewRecorder()
-	if _, ok := auth.sessionFromRequest(response, req); ok {
-		t.Fatal("idle-expired session was accepted")
+	if _, ok, err := auth.sessionFromRequest(response, req); err != nil || ok {
+		t.Fatalf("idle-expired session accepted or failed: ok=%t err=%v", ok, err)
 	}
-	if _, ok := auth.sessions[sessionID]; ok {
+	if _, ok := store.sessions[sessionID]; ok {
 		t.Fatal("expired session was not invalidated")
 	}
 }

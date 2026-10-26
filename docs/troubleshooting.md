@@ -17,8 +17,9 @@ and port. The dashboard rejects unexpected hosts.
 ### `CSRF validation failed`
 
 The page is usually holding a token from before a dashboard rollout. Sign out
-and sign in again, or hard refresh the page. Sessions are in memory, so a
-rollout invalidates every existing session.
+and sign in again, or hard refresh the page. With the default in-memory session
+store, a rollout invalidates every existing session. Configure the Redis session
+store to keep sessions across rollouts.
 
 ### OIDC discovery fails
 

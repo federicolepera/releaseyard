@@ -1,9 +1,18 @@
 package main
 
 import (
+	"context"
+	"crypto/tls"
+	"errors"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/redis/go-redis/v9"
 
 	platformv1alpha1 "github.com/federicolepera/idp/api/v1alpha1"
 	"github.com/federicolepera/idp/internal/dashboard"
@@ -50,6 +59,12 @@ func main() {
 		return client.New(impersonating, client.Options{Scheme: scheme})
 	}
 
+	sessionStore, closeSessionStore, err := newSessionStore()
+	if err != nil {
+		log.Fatalf("configure dashboard session store: %v", err)
+	}
+	defer closeSessionStore()
+
 	handler, err := dashboard.NewLocalHandler(k8sClient, "idp-system", dashboard.LocalAuthConfig{
 		HashPath:                   os.Getenv("LOCAL_ADMIN_HASH_PATH"),
 		PublicURL:                  os.Getenv("DASHBOARD_PUBLIC_URL"),
@@ -57,6 +72,7 @@ func main() {
 		TeamNamespacePrefix:        envOr("TEAM_NAMESPACE_PREFIX", "releaseyard-team-"),
 		ApplicationEditorRole:      envOr("APPLICATION_EDITOR_ROLE", "releaseyard-application-editor-role"),
 		ClientFactory:              clientFactory,
+		SessionStore:               sessionStore,
 	})
 	if err != nil {
 		log.Fatalf("configure dashboard local authentication: %v", err)
@@ -72,4 +88,53 @@ func envOr(key, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+func newSessionStore() (dashboard.SessionStore, func(), error) {
+	switch storeType := strings.ToLower(strings.TrimSpace(os.Getenv("SESSION_STORE"))); storeType {
+	case "", "memory":
+		log.Printf("WARNING: dashboard sessions use in-memory storage; set SESSION_STORE=redis " +
+			"for multiple replicas and rollout-safe sessions")
+		return nil, func() {}, nil
+	case "redis":
+		address := strings.TrimSpace(os.Getenv("REDIS_ADDR"))
+		if address == "" {
+			return nil, nil, errors.New("REDIS_ADDR is required when SESSION_STORE=redis")
+		}
+		options := &redis.Options{
+			Addr:     address,
+			Username: os.Getenv("REDIS_USERNAME"),
+			Password: os.Getenv("REDIS_PASSWORD"),
+		}
+		if rawDB := strings.TrimSpace(os.Getenv("REDIS_DB")); rawDB != "" {
+			db, err := strconv.Atoi(rawDB)
+			if err != nil || db < 0 {
+				return nil, nil, fmt.Errorf("REDIS_DB must be a non-negative integer")
+			}
+			options.DB = db
+		}
+		if envBool("REDIS_TLS_ENABLED") {
+			options.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS12}
+		}
+		redisClient := redis.NewClient(options)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := redisClient.Ping(ctx).Err(); err != nil {
+			_ = redisClient.Close()
+			return nil, nil, fmt.Errorf("ping Redis at %s: %w", address, err)
+		}
+		log.Printf("dashboard sessions use Redis at %s", address)
+		return dashboard.NewRedisSessionStore(redisClient, envOr("REDIS_KEY_PREFIX", "releaseyard:dashboard:")), func() {
+			if err := redisClient.Close(); err != nil {
+				log.Printf("close Redis client: %v", err)
+			}
+		}, nil
+	default:
+		return nil, nil, fmt.Errorf("unsupported SESSION_STORE %q (use memory or redis)", storeType)
+	}
+}
+
+func envBool(key string) bool {
+	value, err := strconv.ParseBool(strings.TrimSpace(os.Getenv(key)))
+	return err == nil && value
 }

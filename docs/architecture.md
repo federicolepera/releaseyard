@@ -106,9 +106,10 @@ does not support chart dependencies, `values.schema.json`, hooks, or CRDs
 installed by the chart. Chart templates are trusted input; validation checks the
 contract and the archive digest, not whether Helm can render every template.
 
-The dashboard session store is in memory. A rollout signs everyone out, and
-sessions are not shared across dashboard replicas. Use a shared store before
-running multiple replicas in production.
+The dashboard supports an in-memory session store and a shared Redis store.
+The in-memory default is suitable only for a single replica: a rollout signs
+everyone out. Use Redis (`SESSION_STORE=redis`) for production, for multiple
+replicas, and to keep sessions across rollouts.
 
 ## Related docs
 

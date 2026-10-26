@@ -14,6 +14,12 @@ To learn more about the release, try:
   $ helm status {{ .Release.Name }} -n {{ .Release.Namespace }}
   $ helm get all {{ .Release.Name }} -n {{ .Release.Namespace }}
 {{- if .Values.dashboard.enabled }}
+{{- if eq (default "memory" .Values.dashboard.sessionStore.type) "memory" }}
+
+WARNING: dashboard sessions use in-memory storage. Every rollout invalidates
+all sessions and multiple replicas do not share them. Set
+dashboard.sessionStore.type=redis for production or HA.
+{{- end }}
 {{- if .Values.dashboard.bootstrap.enabled }}
 
 The dashboard is available at {{ .Values.dashboard.publicURL }} and starts with

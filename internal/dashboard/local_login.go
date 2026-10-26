@@ -1,6 +1,7 @@
 package dashboard
 
 import (
+	"errors"
 	"net/http"
 )
 
@@ -52,15 +53,14 @@ func (a *authHandler) localLogin(w http.ResponseWriter, r *http.Request) {
 		expires:      now.Add(sessionAbsoluteTTL),
 		authMethod:   authMethodLocal,
 	}
-	a.mu.Lock()
-	a.pruneSessionsLocked(now)
-	if len(a.sessions) >= maxSessions {
-		a.mu.Unlock()
-		writeError(w, http.StatusServiceUnavailable, "Session capacity reached")
+	if err := a.store.PutSession(r.Context(), sessionID, session, sessionTTL(session, now)); err != nil {
+		if errors.Is(err, errSessionCapacity) {
+			writeError(w, http.StatusServiceUnavailable, "Session capacity reached")
+		} else {
+			writeError(w, http.StatusServiceUnavailable, "Session store is unavailable")
+		}
 		return
 	}
-	a.sessions[sessionID] = session
-	a.mu.Unlock()
 	a.setSessionCookie(w, sessionID, session)
 	writeJSON(w, http.StatusOK, map[string]any{"csrfToken": csrfToken})
 }
