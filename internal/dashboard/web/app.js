@@ -3794,10 +3794,11 @@
     const button = $('#refresh-applications');
     button.disabled = true;
     try {
-      const [appsResult, definitionsResult] = await Promise.allSettled([getList(withTeam('/api/applications')), getList('/api/applicationdefinitions')]);
+      const [appsResult, definitionsResult, clustersResult] = await Promise.allSettled([getList(withTeam('/api/applications')), getList('/api/applicationdefinitions'), getList('/api/clusters')]);
       if (appsResult.status !== 'fulfilled') throw appsResult.reason;
       state.applications = appsResult.value;
       if (definitionsResult.status === 'fulfilled') state.definitions = definitionsResult.value;
+      if (clustersResult.status === 'fulfilled') state.clusters = clustersResult.value;
       const present = new Set(state.applications.map((app) => app.metadata?.name));
       state.deletionPending.forEach((name) => { if (!present.has(name)) state.deletionPending.delete(name); });
       renderApplications();
