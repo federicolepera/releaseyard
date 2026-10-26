@@ -92,6 +92,25 @@ spec:
 
 The Application produces one Helm release on that cluster.
 
+### Selected clusters
+
+```yaml
+spec:
+  clusters:
+    - name: releaseyard-managed-a
+      uid: <cluster-a-uid>
+    - name: releaseyard-managed-b
+      uid: <cluster-b-uid>
+```
+
+The Application deploys to exactly these Clusters. The list is immutable and is
+not expanded when new Clusters appear; remove or add targets by recreating the
+Application. `uid` guards against a Cluster being deleted and recreated under
+the same name.
+
+The dashboard exposes this mode as **Selected clusters**, where each target can
+be checked individually. A direct API client must resolve the Cluster UIDs.
+
 ### An environment
 
 ```yaml
@@ -125,8 +144,8 @@ If no Cluster currently matches, the Application stays not ready and becomes
 ready when a matching Cluster appears. Direct API clients only need
 `environment.name`; they do not need to resolve Cluster UIDs.
 
-Exactly one of `clusterRef` or `environment` must be set. The choice is
-immutable.
+Exactly one of `clusterRef`, `clusters`, or `environment` must be set. The
+choice is immutable.
 
 ## Release namespace
 

@@ -133,8 +133,8 @@ on `Application` create and asks the API server whether the requesting user may
 `get`:
 
 - the referenced `ApplicationDefinition`;
-- the referenced `Cluster`, or every `Cluster` explicitly listed in a pinned
-  environment target list.
+- the referenced `Cluster`, every `Cluster` in `spec.clusters`, or every
+  `Cluster` explicitly listed in a pinned environment target list.
 
 The policy applies to dashboard impersonation and to direct clients such as
 `kubectl`. It uses `failurePolicy: Fail` by default, so a policy evaluation
