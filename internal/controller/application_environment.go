@@ -32,7 +32,7 @@ func usesMultiTargetSelection(app *platformv1alpha1.Application) bool {
 func explicitClusterTargets(app *platformv1alpha1.Application) []platformv1alpha1.ApplicationEnvironmentTarget {
 	targets := make([]platformv1alpha1.ApplicationEnvironmentTarget, 0, len(app.Spec.Clusters))
 	for _, cluster := range app.Spec.Clusters {
-		targets = append(targets, platformv1alpha1.ApplicationEnvironmentTarget(cluster))
+		targets = append(targets, platformv1alpha1.ApplicationEnvironmentTarget{Name: cluster.Name, UID: types.UID(cluster.UID)})
 	}
 	return targets
 }

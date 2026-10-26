@@ -212,7 +212,7 @@ func validateClusterSelection(clusters []platformv1alpha1.ApplicationClusterTarg
 	if len(clusters) > 32 {
 		return fmt.Errorf("clusters must contain at most 32 Clusters")
 	}
-	seenUIDs := make(map[types.UID]struct{}, len(clusters))
+	seenUIDs := make(map[string]struct{}, len(clusters))
 	seenNames := make(map[string]struct{}, len(clusters))
 	for i, target := range clusters {
 		if !validClusterDNSSubdomain(target.Name) {

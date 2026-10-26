@@ -146,8 +146,8 @@ func TestExplicitClusterSelectionAppliesToEachSelectedCluster(t *testing.T) {
 	app.Spec.ClusterRef = nil
 	app.Spec.Environment = nil
 	app.Spec.Clusters = []platformv1alpha1.ApplicationClusterTarget{
-		{Name: secondCluster.Name, UID: secondCluster.UID},
-		{Name: e.cluster.Name, UID: e.cluster.UID},
+		{Name: secondCluster.Name, UID: string(secondCluster.UID)},
+		{Name: e.cluster.Name, UID: string(e.cluster.UID)},
 	}
 	if err := e.c.Update(context.Background(), app); err != nil {
 		t.Fatal(err)
@@ -160,6 +160,52 @@ func TestExplicitClusterSelectionAppliesToEachSelectedCluster(t *testing.T) {
 	requests := e.r.mapCluster(context.Background(), secondCluster)
 	if len(requests) != 1 || requests[0].NamespacedName != e.request.NamespacedName {
 		t.Fatalf("explicit Cluster event mapped to %#v, want %s", requests, e.request.NamespacedName)
+	}
+}
+
+func TestExplicitClusterSelectionCanChangeAfterCreation(t *testing.T) {
+	e, secondServer, secondCluster, _ := newEnvironmentMultiTargetTest(t, true)
+	helms := &environmentMultiHelm{t: t, state: make(map[string]environmentMultiHelmState)}
+	claims := newEnvironmentMultiClaims()
+	configureEnvironmentMultiReconciler(t, e, helms, claims, map[string]string{eHostForSecret(t, e.reader, testSecretName): "resource-a", secondServer.URL: "resource-b"})
+
+	app := e.getApp(t)
+	app.Spec.ClusterRef = nil
+	app.Spec.Environment = nil
+	app.Spec.Clusters = []platformv1alpha1.ApplicationClusterTarget{{Name: e.cluster.Name, UID: string(e.cluster.UID)}}
+	if err := e.c.Update(context.Background(), app); err != nil {
+		t.Fatal(err)
+	}
+	e.reconcile(t)
+	if got := e.getApp(t); len(got.Status.Instances) != 1 || got.Status.Instances[0].ClusterUID != e.cluster.UID {
+		t.Fatalf("initial explicit target was not applied: %#v", got.Status.Instances)
+	}
+
+	app = e.getApp(t)
+	app.Spec.Clusters = []platformv1alpha1.ApplicationClusterTarget{{Name: secondCluster.Name, UID: string(secondCluster.UID)}}
+	if err := e.c.Update(context.Background(), app); err != nil {
+		t.Fatal(err)
+	}
+	for range 6 {
+		e.reconcile(t)
+	}
+	got := e.getApp(t)
+	if len(got.Status.Instances) != 1 || got.Status.Instances[0].ClusterUID != secondCluster.UID {
+		t.Fatalf("replacement target was not applied and old instance removed: %#v", got.Status.Instances)
+	}
+	if _, exists := claims.claims[e.cluster.UID]; exists {
+		t.Fatalf("removed target claim still exists: %#v", claims.claims)
+	}
+	if len(helms.requests) < 2 || helms.requests[0].host != eHostForSecret(t, e.reader, testSecretName) || helms.requests[1].host != secondServer.URL {
+		t.Fatalf("unexpected apply sequence after placement change: %#v", helms.requests)
+	}
+	for _, request := range helms.requests[1:] {
+		if request.host != secondServer.URL {
+			t.Fatalf("removed target received another apply after replacement: %#v", helms.requests)
+		}
+	}
+	if condition := metaFindApplicationCondition(got.Status.Conditions, "Ready"); condition == nil || condition.Status != metav1.ConditionTrue {
+		t.Fatalf("placement change did not converge: %#v", condition)
 	}
 }
 

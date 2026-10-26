@@ -57,7 +57,7 @@ var _ = Describe("Application access admission", func() {
 			Rules: []rbacv1.PolicyRule{{
 				APIGroups: []string{"platform.releaseyard.io"},
 				Resources: []string{"applications"},
-				Verbs:     []string{"create"},
+				Verbs:     []string{"create", "update"},
 			}},
 		}
 		Expect(k8sClient.Create(ctx, role)).To(Succeed())
@@ -179,6 +179,22 @@ var _ = Describe("Application access admission", func() {
 		}
 
 		err := userClient.Create(ctx, app)
+		Expect(apierrors.IsForbidden(err)).To(BeTrue(), "expected Forbidden, got %v", err)
+		Expect(err.Error()).To(ContainSubstring("selected Cluster"))
+	})
+
+	It("rejects adding an unreadable Cluster to an existing explicit placement", func() {
+		app := testApplication(namespace, "placement-update-app", allowedDefinition, allowedCluster)
+		spec := app.Object["spec"].(map[string]any)
+		delete(spec, "clusterRef")
+		spec["clusters"] = []any{map[string]any{"name": allowedCluster, "uid": "allowed-uid"}}
+		Expect(userClient.Create(ctx, app)).To(Succeed())
+
+		app.Object["spec"].(map[string]any)["clusters"] = []any{
+			map[string]any{"name": allowedCluster, "uid": "allowed-uid"},
+			map[string]any{"name": deniedCluster, "uid": "denied-uid"},
+		}
+		err := userClient.Update(ctx, app)
 		Expect(apierrors.IsForbidden(err)).To(BeTrue(), "expected Forbidden, got %v", err)
 		Expect(err.Error()).To(ContainSubstring("selected Cluster"))
 	})
