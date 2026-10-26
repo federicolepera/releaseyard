@@ -2632,7 +2632,6 @@ spec:
       - v1alpha1
       operations:
       - CREATE
-      - UPDATE
       resources:
       - applications
       scope: Namespaced
@@ -2653,6 +2652,38 @@ spec:
     reason: Forbidden
 ---
 apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  labels:
+    app.kubernetes.io/component: admission
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: idp
+  name: idp-application-placement-policy
+spec:
+  failurePolicy: Fail
+  matchConditions:
+  - expression: has(object.spec.clusters) && (!has(oldObject.spec.clusters) || object.spec.clusters
+      != oldObject.spec.clusters)
+    name: clusters-changed
+  matchConstraints:
+    resourceRules:
+    - apiGroups:
+      - platform.releaseyard.io
+      apiVersions:
+      - v1alpha1
+      operations:
+      - UPDATE
+      resources:
+      - applications
+      scope: Namespaced
+  validations:
+  - expression: object.spec.clusters.all(target, (has(oldObject.spec.clusters) &&
+      oldObject.spec.clusters.exists(old, old.name == target.name && old.uid == target.uid))
+      || authorizer.group('platform.releaseyard.io').resource('clusters').name(target.name).check('get').allowed())
+    message: Every added Cluster must be readable by the requesting user.
+    reason: Forbidden
+---
+apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding
 metadata:
   labels:
@@ -2662,5 +2693,18 @@ metadata:
   name: idp-application-access-binding
 spec:
   policyName: idp-application-access-policy
+  validationActions:
+  - Deny
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  labels:
+    app.kubernetes.io/component: admission
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: idp
+  name: idp-application-placement-binding
+spec:
+  policyName: idp-application-placement-policy
   validationActions:
   - Deny
