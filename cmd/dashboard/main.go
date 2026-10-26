@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"strconv"
@@ -65,6 +66,10 @@ func main() {
 	}
 	defer closeSessionStore()
 
+	auditLogger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+		Level: slog.LevelInfo,
+	})).With("service", "releaseyard-dashboard")
+
 	handler, err := dashboard.NewLocalHandler(k8sClient, "idp-system", dashboard.LocalAuthConfig{
 		HashPath:                   os.Getenv("LOCAL_ADMIN_HASH_PATH"),
 		PublicURL:                  os.Getenv("DASHBOARD_PUBLIC_URL"),
@@ -73,6 +78,7 @@ func main() {
 		ApplicationEditorRole:      envOr("APPLICATION_EDITOR_ROLE", "releaseyard-application-editor-role"),
 		ClientFactory:              clientFactory,
 		SessionStore:               sessionStore,
+		AuditLogger:                auditLogger,
 	})
 	if err != nil {
 		log.Fatalf("configure dashboard local authentication: %v", err)

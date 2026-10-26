@@ -142,6 +142,30 @@ failure rejects the request. Requires Kubernetes 1.31 or newer. Disable it only
 for troubleshooting with `admission.enabled=false`; see
 [Configuration](configuration.md).
 
+## Audit logs
+
+The dashboard writes structured JSON audit events to stdout. They are meant for
+the cluster's log pipeline (for example Loki, Elastic, or CloudWatch), not for a
+dashboard-managed database. Kubernetes Events remain the per-object activity
+feed; the audit log is the security trail.
+
+Events include:
+
+- `auth.login.local` and `auth.login.oidc`, including failures and the reason;
+- `auth.logout`;
+- `api.write` for state-changing API requests;
+- `admin.identity_provider.*`, `admin.definition_access.*`,
+  `admin.cluster_access.*`, and `admin.application_access.*` for administration
+  changes.
+
+Each event includes `event`, `outcome`, `actor`, `groups`, `auth_method`,
+`impersonated`, `method`, `path`, `status`, `request_id`, `remote_addr`, and a
+failure `reason` when applicable. The response also carries `X-Request-ID`, so a
+browser request can be correlated with the audit line.
+
+Passwords, CSRF tokens, ID tokens, client secrets, and request bodies are never
+logged. Protect and retain the log sink according to your security policy.
+
 ## Known gaps
 
 - Environment snapshots are resolved by the dashboard for environment

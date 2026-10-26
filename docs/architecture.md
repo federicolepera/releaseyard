@@ -111,6 +111,12 @@ The in-memory default is suitable only for a single replica: a rollout signs
 everyone out. Use Redis (`SESSION_STORE=redis`) for production, for multiple
 replicas, and to keep sessions across rollouts.
 
+Security-relevant actions are written as structured JSON audit events to
+stdout: local and OIDC login outcomes, logout, state-changing API requests, and
+administration changes. The audit trail never includes passwords, tokens,
+client secrets, or request bodies; ship the container logs to a durable central
+sink.
+
 ## Related docs
 
 - [Applications](applications.md)
