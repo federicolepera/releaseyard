@@ -72,21 +72,24 @@ spec:
                 type: object
               environment:
                 description: |-
-                  environment selects a fixed snapshot of matching Cluster names and UIDs.
-                  The snapshot is immutable after Application creation.
+                  environment selects Clusters by their environment label. When targets is
+                  omitted the matching set is resolved dynamically on every reconcile. Set
+                  targets to pin a fixed snapshot instead.
                 properties:
                   name:
-                    description: name is the environment label value selected at creation.
+                    description: name is the environment label value used to select
+                      target Clusters.
                     maxLength: 63
                     minLength: 1
                     pattern: ^[A-Za-z0-9]([-A-Za-z0-9_.]*[A-Za-z0-9])?$
                     type: string
                   targets:
-                    description: targets contains the fixed set of Cluster identities
-                      selected for this Application.
+                    description: |-
+                      targets optionally pins the Cluster identities for this Application. When
+                      omitted or empty, the controller resolves the matching Clusters dynamically.
                     items:
-                      description: ApplicationEnvironmentTarget fixes one Cluster
-                        identity in an environment snapshot.
+                      description: ApplicationEnvironmentTarget pins one Cluster identity
+                        in an environment.
                       properties:
                         name:
                           description: name is the DNS subdomain name of the target
@@ -106,14 +109,12 @@ spec:
                       - message: uid must contain between 1 and 128 characters
                         rule: size(self.uid) >= 1 && size(self.uid) <= 128
                     maxItems: 32
-                    minItems: 1
                     type: array
                     x-kubernetes-list-map-keys:
                     - name
                     x-kubernetes-list-type: map
                 required:
                 - name
-                - targets
                 type: object
               releaseNamespace:
                 description: |-
@@ -353,8 +354,8 @@ spec:
                 - releaseNamespace
                 type: object
               instances:
-                description: instances contains one independent status entry per snapshotted
-                  Cluster UID.
+                description: instances contains one independent status entry per resolved
+                  target Cluster UID.
                 items:
                   description: ApplicationInstanceStatus records the independent state
                     of one environment target.

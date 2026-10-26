@@ -29,6 +29,6 @@ spec:
       message: The referenced Cluster must be readable by the requesting user.
       reason: Forbidden
     - expression: >-
-        !has(object.spec.environment) || object.spec.environment.targets.all(target, authorizer.group('platform.releaseyard.io').resource('clusters').name(target.name).check('get').allowed())
+        !has(object.spec.environment) || !has(object.spec.environment.targets) || object.spec.environment.targets.all(target, authorizer.group('platform.releaseyard.io').resource('clusters').name(target.name).check('get').allowed())
       message: Every environment target Cluster must be readable by the requesting user.
       reason: Forbidden
