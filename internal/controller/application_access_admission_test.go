@@ -160,6 +160,29 @@ var _ = Describe("Application access admission", func() {
 		Expect(err.Error()).To(ContainSubstring("environment target"))
 	})
 
+	It("allows an Application whose selected clusters are readable", func() {
+		app := testApplication(namespace, "allowed-clusters-app", allowedDefinition, allowedCluster)
+		spec := app.Object["spec"].(map[string]any)
+		delete(spec, "clusterRef")
+		spec["clusters"] = []any{map[string]any{"name": allowedCluster, "uid": "allowed-uid"}}
+
+		Expect(userClient.Create(ctx, app)).To(Succeed())
+	})
+
+	It("rejects an Application when any selected cluster is not readable", func() {
+		app := testApplication(namespace, "denied-clusters-app", allowedDefinition, allowedCluster)
+		spec := app.Object["spec"].(map[string]any)
+		delete(spec, "clusterRef")
+		spec["clusters"] = []any{
+			map[string]any{"name": allowedCluster, "uid": "allowed-uid"},
+			map[string]any{"name": deniedCluster, "uid": "denied-uid"},
+		}
+
+		err := userClient.Create(ctx, app)
+		Expect(apierrors.IsForbidden(err)).To(BeTrue(), "expected Forbidden, got %v", err)
+		Expect(err.Error()).To(ContainSubstring("selected Cluster"))
+	})
+
 	It("allows a dynamic environment Application without targets", func() {
 		app := testApplication(namespace, "dynamic-environment-app", allowedDefinition, allowedCluster)
 		spec := app.Object["spec"].(map[string]any)

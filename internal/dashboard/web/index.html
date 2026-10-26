@@ -99,14 +99,16 @@
             </div>
           </section>
           <section class="create-step">
-            <div class="step-heading"><span class="step-number">2</span><div><h2>Where should it run?</h2><p>Select the cluster or environment where the application will be deployed.</p></div></div>
+            <div class="step-heading"><span class="step-number">2</span><div><h2>Where should it run?</h2><p>Select one cluster, a list of clusters, or an environment.</p></div></div>
             <fieldset class="destination-picker">
               <div class="destination-modes">
                 <label class="destination-option"><input type="radio" name="destination-mode" value="cluster" checked><span class="destination-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2.5"/></svg></span><span class="destination-copy"><strong>One cluster</strong><small>Deploy in a single cluster.</small></span></label>
+                <label class="destination-option"><input type="radio" name="destination-mode" value="clusters"><span class="destination-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="6" r="2"/><circle cx="18" cy="6" r="2"/><circle cx="12" cy="18" r="2"/><path d="M8 7.2 10.5 16M16 7.2 13.5 16M8 6h8"/></svg></span><span class="destination-copy"><strong>Selected clusters</strong><small>Pick one or more specific clusters.</small></span></label>
                 <label class="destination-option"><input type="radio" name="destination-mode" value="environment"><span class="destination-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="5" r="2"/><circle cx="5" cy="18" r="2"/><circle cx="19" cy="18" r="2"/><path d="M11 7 6 16m7-9 5 9M7 18h10"/></svg></span><span class="destination-copy"><strong>All clusters in an environment</strong><small>Deploy across all clusters in the selected environment.</small></span></label>
               </div>
               <div class="form-grid">
                 <label id="cluster-destination" class="field"><span>Cluster <em class="required-star">*</em></span><select id="cluster" required><option value="">Select a cluster</option></select><small>Choose the target Kubernetes cluster.</small></label>
+                <div id="clusters-destination" class="field field-wide" hidden><span>Clusters <em class="required-star">*</em></span><div id="cluster-checklist" class="cluster-checklist"></div><small id="cluster-selection-count">Select one or more clusters. The list is fixed at creation.</small></div>
                 <label id="environment-destination" class="field" hidden><span>Environment <em class="required-star">*</em></span><select id="environment-select"><option value="">Select an environment</option></select><small>New matching clusters are added automatically.</small></label>
                 <label id="release-namespace-field" class="field" hidden><span>Target namespace</span><input id="release-namespace" name="releaseNamespace" type="text" autocomplete="off" maxlength="63" pattern="[a-z0-9]([-a-z0-9]*[a-z0-9])?" aria-describedby="release-namespace-hint"><small id="release-namespace-hint"></small></label>
               </div>

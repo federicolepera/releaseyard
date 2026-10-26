@@ -136,6 +136,33 @@ func TestEnvironmentMultiTargetApplyUsesIndependentRemoteState(t *testing.T) {
 	assertAggregatedEnvironmentHealthy(t, got)
 }
 
+func TestExplicitClusterSelectionAppliesToEachSelectedCluster(t *testing.T) {
+	e, secondServer, secondCluster, _ := newEnvironmentMultiTargetTest(t, true)
+	helms := &environmentMultiHelm{t: t, state: make(map[string]environmentMultiHelmState)}
+	claims := newEnvironmentMultiClaims()
+	configureEnvironmentMultiReconciler(t, e, helms, claims, map[string]string{eHostForSecret(t, e.reader, testSecretName): "resource-a", secondServer.URL: "resource-b"})
+
+	app := e.getApp(t)
+	app.Spec.ClusterRef = nil
+	app.Spec.Environment = nil
+	app.Spec.Clusters = []platformv1alpha1.ApplicationClusterTarget{
+		{Name: secondCluster.Name, UID: secondCluster.UID},
+		{Name: e.cluster.Name, UID: e.cluster.UID},
+	}
+	if err := e.c.Update(context.Background(), app); err != nil {
+		t.Fatal(err)
+	}
+
+	e.reconcile(t)
+	assertEnvironmentMultiStatus(t, e, helms, claims, secondCluster, "resource-a", "resource-b")
+	assertAggregatedEnvironmentHealthy(t, e.getApp(t))
+
+	requests := e.r.mapCluster(context.Background(), secondCluster)
+	if len(requests) != 1 || requests[0].NamespacedName != e.request.NamespacedName {
+		t.Fatalf("explicit Cluster event mapped to %#v, want %s", requests, e.request.NamespacedName)
+	}
+}
+
 func TestEnvironmentDynamicTargetsFollowClusterLabels(t *testing.T) {
 	e, secondServer, secondCluster, _ := newEnvironmentMultiTargetTest(t, true)
 	helms := &environmentMultiHelm{t: t, state: make(map[string]environmentMultiHelmState)}

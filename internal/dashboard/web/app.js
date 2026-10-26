@@ -35,7 +35,8 @@
       try { localStorage.setItem('idp-sidebar', next ? 'collapsed' : 'open'); } catch (_) { /* Storage can be unavailable. */ }
     });
   }
-  const state = { definitions: [], applications: [], clusters: [], clusterQuery: '', clusterStatus: '', selectedApplication: null, selectedCluster: null, selectedInstanceUID: '', detailTab: 'overview', deleting: false, deletionPending: new Set(), editingValues: false, valuesDraft: Object.create(null), savingValues: false, definitionQuery: '', definitionSort: 'name', definitionType: '', definitionView: 'grid', destinationMode: 'cluster', preview: null, previewController: null, previewSequence: 0, previewLoading: false, savingEnvironment: false, creating: false, teams: [], team: '', resourcesQuery: '', resourcesKind: '', resourcesStatus: '', resourcesExpanded: new Set(), resourcesLive: null, resourcesLiveKey: '', selectedResourceUID: '', resourcePanelTab: 'overview', activityRange: '24h', activityType: '', activitySource: '', activityQuery: '', applicationQuery: '', applicationCluster: '', applicationNamespace: '', applicationStatus: '', applicationSort: { key: 'name', direction: 'asc' }, cloudTargets: [], cloudDefinitions: [], cloudResources: [], selectedCloudResource: null, cloudDetailTab: 'overview', cloudCreating: false, cloudSaving: false, cloudDeleting: false, cloudResourcesError: '', cloudSearch: '', cloudStatusFilter: '', cloudTargetFilter: '', cloudDefinitionFilter: '', cloudSort: { key: 'name', direction: 'asc' }, cloudDefinitionsExpanded: false, cloudTargetsExpanded: false, cloudActivityExpanded: false };
+  const state = { definitions: [], applications: [], clusters: [], clusterQuery: '', clusterStatus: '', selectedApplication: null, selectedCluster: null, selectedInstanceUID: '', detailTab: 'overview', deleting: false, deletionPending: new Set(), editingValues: false, valuesDraft: Object.create(null), savingValues: false, definitionQuery: '', definitionSort: 'name', definitionType: '', definitionView: 'grid', destinationMode: 'cluster', selectedClusters: new Map(), preview: null, previewController: null, previewSequence: 0, previewLoading: false, savingEnvironment: false, creating: false, teams: [], team: '', resourcesQuery: '', resourcesKind: '', resourcesStatus: '', resourcesExpanded: new Set(), resourcesLive: null, resourcesLiveKey: '', selectedResourceUID: '', resourcePanelTab: 'overview', activityRange: '24h', activityType: '', activitySource: '', activityQuery: '', applicationQuery: '', applicationCluster: '', applicationNamespace: '', applicationStatus: '', applicationSort: { key: 'name', direction: 'asc' }, cloudTargets: [], cloudDefinitions: [], cloudResources: [], selectedCloudResource: null, cloudDetailTab: 'overview', cloudCreating: false, cloudSaving: false, cloudDeleting: false, cloudResourcesError: '', cloudSearch: '', cloudStatusFilter: '', cloudTargetFilter: '', cloudDefinitionFilter: '', cloudSort: { key: 'name', direction: 'asc' }, cloudDefinitionsExpanded: false, cloudTargetsExpanded: false, cloudActivityExpanded: false };
+  const maxClusterTargets = 32;
   state.selectedDefinition = null;
   state.canCreateApps = false;
   state.canDeleteApps = false;
@@ -390,6 +391,7 @@
   }
 
   function applicationTargets(app) {
+    if (Array.isArray(app.spec?.clusters) && app.spec.clusters.length) return app.spec.clusters;
     if (!app.spec?.environment) return null;
     if (Array.isArray(app.spec.environment.targets) && app.spec.environment.targets.length) return app.spec.environment.targets;
     return Array.isArray(app.status?.instances) ? app.status.instances.map((instance) => ({ name: instance.clusterName, uid: instance.clusterUID })) : [];
@@ -599,6 +601,11 @@
       if (targets?.length === 1) return targets[0].name || app.spec.environment.name;
       if (targets?.length > 1) return `${app.spec.environment.name} · ${targets.length} clusters`;
       return app.spec.environment.name;
+    }
+    if (app.spec?.clusters) {
+      if (targets?.length === 1) return targets[0].name;
+      if (targets?.length > 1) return `${targets.length} selected clusters`;
+      return 'Selected clusters';
     }
     return app.spec?.clusterRef?.name || '—';
   }
@@ -2326,7 +2333,7 @@
   function resourcePanel(app, node, fresh) {
     const resource = node.resource || {};
     const live = state.resourcesLive?.get(resource.uid) || null;
-    const clusterName = app.spec?.clusterRef?.name || app.spec?.environment?.name || '';
+    const clusterName = app.spec?.clusterRef?.name || selectedApplicationInstance(app)?.target?.name || app.spec?.environment?.name || '';
     const aside = element('aside', 'res-panel');
     aside.setAttribute('aria-label', 'Resource details');
 
@@ -2727,11 +2734,12 @@
     state.selectedDefinition = null;
     renderCreateBreadcrumb(null);
     $('#create-form').reset();
-    state.destinationMode = 'cluster'; state.preview = null; state.previewLoading = false;
+    state.destinationMode = 'cluster'; state.selectedClusters.clear(); state.preview = null; state.previewLoading = false;
     if (state.previewController) state.previewController.abort();
     const clusterMode = document.querySelector('input[name="destination-mode"][value="cluster"]');
     if (clusterMode) clusterMode.checked = true;
     if ($('#environment-select')) $('#environment-select').value = '';
+    renderClusterChecklist();
     updateDestinationControls();
     $('#catalog-view').hidden = false;
     $('#create-view').hidden = true;
@@ -2739,6 +2747,66 @@
     $('#values-fields').hidden = true;
     const cards = [...$('#definitions').querySelectorAll('button:not(:disabled)')];
     (cards.find((card) => card.dataset.definitionName === selectedName) || cards[0])?.focus();
+  }
+
+  function selectedClusterTargets() {
+    return state.clusters
+      .filter((cluster) => cluster.metadata?.name && cluster.metadata?.uid && state.selectedClusters.get(cluster.metadata.name) === cluster.metadata.uid)
+      .map((cluster) => ({ name: cluster.metadata.name, uid: cluster.metadata.uid }))
+      .sort((a, b) => a.name.localeCompare(b.name, 'en'));
+  }
+
+  function updateClusterSelectionSummary() {
+    const node = $('#cluster-selection-count');
+    if (!node) return;
+    const count = selectedClusterTargets().length;
+    node.textContent = count
+      ? `${count} cluster${count === 1 ? '' : 's'} selected. The list is fixed at creation.`
+      : 'Select one or more clusters. The list is fixed at creation.';
+  }
+
+  function renderClusterChecklist() {
+    const root = $('#cluster-checklist');
+    if (!root) return;
+    const selectedCount = selectedClusterTargets().length;
+    const clusters = [...state.clusters].sort((a, b) => (a.metadata?.name || '').localeCompare(b.metadata?.name || '', 'en'));
+    root.replaceChildren();
+    if (!clusters.length) {
+      root.append(element('p', 'cluster-checklist-empty', 'No clusters available.'));
+      updateClusterSelectionSummary();
+      return;
+    }
+    clusters.forEach((cluster) => {
+      const name = cluster.metadata?.name || '';
+      const uid = cluster.metadata?.uid;
+      const deleting = Boolean(cluster.metadata?.deletionTimestamp);
+      const connected = condition(cluster, 'Connected')?.status === 'True';
+      const input = document.createElement('input');
+      input.type = 'checkbox';
+      input.value = name;
+      input.dataset.clusterName = name;
+      input.dataset.clusterUid = uid || '';
+      input.checked = Boolean(uid && state.selectedClusters.get(name) === uid);
+      input.disabled = !uid || deleting || (!input.checked && selectedCount >= maxClusterTargets);
+      input.addEventListener('change', () => {
+        if (input.checked) {
+          if (selectedClusterTargets().length >= maxClusterTargets) {
+            input.checked = false;
+            showNotice(`Select at most ${maxClusterTargets} clusters.`, 'error');
+            return;
+          }
+          state.selectedClusters.set(name, uid);
+        } else {
+          state.selectedClusters.delete(name);
+        }
+        renderClusterChecklist();
+        updateSubmit();
+      });
+      const label = element('label', `cluster-check${deleting ? ' is-deleting' : ''}`);
+      label.append(input, element('span', 'cluster-check-name', safe(name)), badge(deleting ? 'Deleting' : connected ? 'Connected' : 'Not connected', deleting ? 'error' : connected ? 'good' : 'muted'));
+      root.append(label);
+    });
+    updateClusterSelectionSummary();
   }
 
   function renderClusters() {
@@ -2756,16 +2824,23 @@
       if (environments.includes(oldEnvironment)) environmentSelect.value = oldEnvironment;
       if (environmentSelect.value) fetchEnvironmentPreview(environmentSelect.value);
     }
+    renderClusterChecklist();
     updateDestinationControls();
   }
 
   function updateDestinationControls() {
     const clusterField = $('#cluster-destination');
+    const clustersField = $('#clusters-destination');
     const environmentField = $('#environment-destination');
-    if (!clusterField || !environmentField) return;
+    if (!clusterField || !clustersField || !environmentField) return;
+    const clusterMode = state.destinationMode === 'cluster';
+    const clustersMode = state.destinationMode === 'clusters';
     const envMode = state.destinationMode === 'environment';
-    clusterField.hidden = envMode; environmentField.hidden = !envMode;
-    $('#cluster').required = !envMode; $('#environment-select').required = envMode;
+    clusterField.hidden = !clusterMode;
+    clustersField.hidden = !clustersMode;
+    environmentField.hidden = !envMode;
+    $('#cluster').required = clusterMode;
+    $('#environment-select').required = envMode;
     if (!envMode) {
       state.preview = null;
       if (state.previewController) state.previewController.abort();
@@ -2979,6 +3054,11 @@
     if (state.destinationMode === 'cluster') {
       const selected = $('#cluster')?.selectedOptions?.[0];
       destination = selected && selected.value ? selected.value : '—';
+    } else if (state.destinationMode === 'clusters') {
+      const selected = selectedClusterTargets();
+      destination = selected.length
+        ? `${selected.length} cluster${selected.length === 1 ? '' : 's'} · ${selected.map((cluster) => cluster.name).join(', ')}`
+        : '—';
     } else {
       const environment = $('#environment-select')?.value;
       const targets = state.preview?.environment === environment ? state.preview.targets : null;
@@ -2993,7 +3073,11 @@
   function updateSubmit() {
     const def = state.selectedDefinition;
     const blocked = !definitionReadiness(def).ready;
-    const destinationReady = state.destinationMode === 'cluster' ? Boolean($('#cluster').value) : Boolean($('#environment-select').value && !state.previewLoading && state.preview && state.preview.environment === $('#environment-select').value);
+    const destinationReady = state.destinationMode === 'cluster'
+      ? Boolean($('#cluster').value)
+      : state.destinationMode === 'clusters'
+        ? selectedClusterTargets().length > 0
+        : Boolean($('#environment-select').value && !state.previewLoading && state.preview && state.preview.environment === $('#environment-select').value);
     $('#submit').disabled =
     !state.canCreateApps ||
     state.creating ||
@@ -4527,9 +4611,14 @@
     const submittedMode = state.destinationMode;
     const submittedEnvironment = submittedMode === 'environment' ? $('#environment-select').value : '';
     const submittedCluster = submittedMode === 'cluster' ? $('#cluster').value : '';
+    const submittedClusters = submittedMode === 'clusters' ? selectedClusterTargets() : [];
     const reviewedPreview = submittedMode === 'environment' ? state.preview : null;
     if (submittedMode === 'environment' && (!submittedEnvironment || state.previewLoading || !reviewedPreview || reviewedPreview.environment !== submittedEnvironment)) {
       showNotice('Select an environment before creating.', 'error');
+      return;
+    }
+    if (submittedMode === 'clusters' && !submittedClusters.length) {
+      showNotice('Select at least one cluster before creating.', 'error');
       return;
     }
     const values = Object.create(null);
@@ -4558,14 +4647,14 @@
     const submittedReleaseNamespace = def.spec?.release?.allowNamespaceOverride === true ? $('#release-namespace').value.trim() : '';
     const payload = {
       name: submittedName, description: $('#app-description')?.value.trim() || '', definitionName: submittedDefinition,
-      ...(submittedMode === 'environment' ? { environmentName: submittedEnvironment } : { clusterName: submittedCluster }), values,
+      ...(submittedMode === 'environment' ? { environmentName: submittedEnvironment } : submittedMode === 'clusters' ? { clusters: submittedClusters } : { clusterName: submittedCluster }), values,
       ...(state.team ? { namespace: state.team } : {}),
       ...(submittedReleaseNamespace ? { releaseNamespace: submittedReleaseNamespace } : {})
     };
     state.creating = true;
     button.disabled = true;
     button.textContent = 'Creating…';
-    document.querySelectorAll('input[name="destination-mode"], #cluster, #environment-select').forEach((control) => { control.disabled = true; });
+    document.querySelectorAll('input[name="destination-mode"], #cluster, #environment-select, #cluster-checklist input').forEach((control) => { control.disabled = true; });
     try {
       const response = await apiFetch('/api/applications', {
         method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
@@ -4588,6 +4677,7 @@
     } finally {
       state.creating = false;
       document.querySelectorAll('input[name="destination-mode"], #cluster, #environment-select').forEach((control) => { control.disabled = false; });
+      renderClusterChecklist();
       button.textContent = 'Create application';
       updateSubmit();
     }

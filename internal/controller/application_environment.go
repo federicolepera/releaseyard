@@ -25,6 +25,18 @@ var (
 	errEnvironmentTooManyTargets = errors.New("environment has too many matching Clusters")
 )
 
+func usesMultiTargetSelection(app *platformv1alpha1.Application) bool {
+	return app.Spec.Environment != nil || len(app.Spec.Clusters) > 0
+}
+
+func explicitClusterTargets(app *platformv1alpha1.Application) []platformv1alpha1.ApplicationEnvironmentTarget {
+	targets := make([]platformv1alpha1.ApplicationEnvironmentTarget, 0, len(app.Spec.Clusters))
+	for _, cluster := range app.Spec.Clusters {
+		targets = append(targets, platformv1alpha1.ApplicationEnvironmentTarget(cluster))
+	}
+	return targets
+}
+
 // reconcileEnvironmentApply resolves the environment target set serially. A
 // non-empty spec.environment.targets list pins the set; an empty list follows
 // the Cluster environment label dynamically. It deliberately does not share the
@@ -32,16 +44,16 @@ var (
 //
 //nolint:gocyclo // orchestration handler; splitting would obscure the sequential flow.
 func (r *ApplicationReconciler) reconcileEnvironmentApply(ctx context.Context, app *platformv1alpha1.Application) (ctrl.Result, error) {
-	if err := validateEnvironmentSnapshot(app); err != nil {
-		return r.fail(ctx, app, "InvalidEnvironmentSnapshot", "Environment target selector is invalid")
+	if err := validateMultiTargetSelection(app); err != nil {
+		return r.fail(ctx, app, "InvalidTargetSelector", "Application target selector is invalid")
 	}
-	targets, err := r.resolveEnvironmentTargets(ctx, app)
+	targets, err := r.resolveMultiTargets(ctx, app)
 	if err != nil {
 		switch {
 		case errors.Is(err, errEnvironmentTooManyTargets):
-			return r.environmentFail(ctx, app, "TooManyEnvironmentTargets", "Environment has more than 32 matching Clusters")
+			return r.environmentFail(ctx, app, "TooManyEnvironmentTargets", "Target selector has more than 32 Clusters")
 		default:
-			return r.environmentFail(ctx, app, "EnvironmentTargetsUnavailable", "Environment targets could not be resolved")
+			return r.environmentFail(ctx, app, "TargetsUnavailable", "Application targets could not be resolved")
 		}
 	}
 	result, stopped, err := r.reconcileEnvironmentRemovals(ctx, app, targets)
@@ -49,7 +61,10 @@ func (r *ApplicationReconciler) reconcileEnvironmentApply(ctx context.Context, a
 		return result, err
 	}
 	if len(targets) == 0 {
-		return r.environmentFail(ctx, app, "NoEnvironmentTargets", "No Clusters match the environment")
+		if app.Spec.Environment != nil {
+			return r.environmentFail(ctx, app, "NoEnvironmentTargets", "No Clusters match the environment")
+		}
+		return r.environmentFail(ctx, app, "NoClusterTargets", "No Clusters are selected")
 	}
 	var definition platformv1alpha1.ApplicationDefinition
 	if err := r.getAuthoritative(ctx, types.NamespacedName{Name: app.Spec.ApplicationDefinitionRef.Name}, &definition); err != nil {
@@ -123,6 +138,13 @@ func (r *ApplicationReconciler) reconcileEnvironmentApply(ctx context.Context, a
 		return environmentPersistFailure(err)
 	}
 	return ctrl.Result{RequeueAfter: applicationRequeue}, nil
+}
+
+func (r *ApplicationReconciler) resolveMultiTargets(ctx context.Context, app *platformv1alpha1.Application) ([]platformv1alpha1.ApplicationEnvironmentTarget, error) {
+	if len(app.Spec.Clusters) > 0 {
+		return explicitClusterTargets(app), nil
+	}
+	return r.resolveEnvironmentTargets(ctx, app)
 }
 
 func (r *ApplicationReconciler) resolveEnvironmentTargets(ctx context.Context, app *platformv1alpha1.Application) ([]platformv1alpha1.ApplicationEnvironmentTarget, error) {
@@ -243,12 +265,21 @@ func (r *ApplicationReconciler) preflightEnvironmentTargets(ctx context.Context,
 	return nil
 }
 
-func validateEnvironmentSnapshot(app *platformv1alpha1.Application) error {
-	if app.Spec.Environment == nil || app.Spec.ClusterRef != nil {
+func validateMultiTargetSelection(app *platformv1alpha1.Application) error {
+	if app.Spec.ClusterRef != nil {
+		return errors.New("invalid selector")
+	}
+	var targets []platformv1alpha1.ApplicationEnvironmentTarget
+	switch {
+	case app.Spec.Environment != nil && len(app.Spec.Clusters) == 0:
+		targets = app.Spec.Environment.Targets
+	case app.Spec.Environment == nil && len(app.Spec.Clusters) > 0:
+		targets = explicitClusterTargets(app)
+	default:
 		return errors.New("invalid selector")
 	}
 	seenNames, seenUIDs := map[string]bool{}, map[types.UID]bool{}
-	for _, target := range app.Spec.Environment.Targets {
+	for _, target := range targets {
 		if target.Name == "" || target.UID == "" || seenNames[target.Name] || seenUIDs[target.UID] {
 			return errors.New("invalid target identity")
 		}
@@ -423,7 +454,7 @@ func (r *ApplicationReconciler) recoverEnvironmentApply(ctx context.Context, att
 	if err := r.getAuthoritative(ctx, types.NamespacedName{Namespace: attempted.Namespace, Name: attempted.Name}, &current); err != nil {
 		return ctrl.Result{RequeueAfter: staleInputRequeue}, false, nil
 	}
-	if current.UID != attempted.UID || !current.DeletionTimestamp.IsZero() || current.Spec.Environment == nil || !environmentTargetAllowed(&current, target) {
+	if current.UID != attempted.UID || !current.DeletionTimestamp.IsZero() || !usesMultiTargetSelection(&current) || !environmentTargetAllowed(&current, target) {
 		return ctrl.Result{RequeueAfter: staleInputRequeue}, false, nil
 	}
 	if current.Status.EnvironmentBinding == nil || current.Status.EnvironmentBinding.ApplicationDefinitionUID != binding.ApplicationDefinitionUID || current.Status.EnvironmentBinding.ReleaseNamespace != binding.ReleaseNamespace {
@@ -461,6 +492,9 @@ func (r *ApplicationReconciler) recoverEnvironmentApply(ctx context.Context, att
 }
 
 func environmentTargetAllowed(app *platformv1alpha1.Application, target platformv1alpha1.ApplicationEnvironmentTarget) bool {
+	if len(app.Spec.Clusters) > 0 {
+		return environmentHasTarget(explicitClusterTargets(app), target)
+	}
 	if app.Spec.Environment == nil {
 		return false
 	}

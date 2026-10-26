@@ -437,6 +437,50 @@ func TestCreateApplicationForEnvironment(t *testing.T) {
 	})
 }
 
+func TestCreateApplicationForExplicitClusters(t *testing.T) {
+	definition := validDefinition(testDefinitionName, true)
+	makeCluster := func(name string, uid types.UID) *platformv1alpha1.Cluster {
+		return &platformv1alpha1.Cluster{ObjectMeta: metav1.ObjectMeta{Name: name, UID: uid}}
+	}
+
+	t.Run("stores the selected cluster identities", func(t *testing.T) {
+		h, c := testHandler(t, definition, makeCluster("alpha", "uid-a"), makeCluster("beta", "uid-b"))
+		body := `{"name":"selected-app","definitionName":"sample","clusters":[{"name":"beta","uid":"uid-b"},{"name":"alpha","uid":"uid-a"}],"values":{"replica":{"count":3}}}`
+		w := postJSON(h, body)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("POST status=%d body=%s", w.Code, w.Body)
+		}
+		stored := &platformv1alpha1.Application{}
+		if err := c.Get(context.Background(), client.ObjectKey{Namespace: testNamespace, Name: "selected-app"}, stored); err != nil {
+			t.Fatal(err)
+		}
+		if stored.Spec.ClusterRef != nil || stored.Spec.Environment != nil {
+			t.Fatalf("explicit selection also set another target mode: %+v", stored.Spec)
+		}
+		if len(stored.Spec.Clusters) != 2 || stored.Spec.Clusters[0].Name != "beta" || stored.Spec.Clusters[0].UID != "uid-b" || stored.Spec.Clusters[1].Name != "alpha" || stored.Spec.Clusters[1].UID != "uid-a" {
+			t.Fatalf("unexpected explicit cluster selection: %+v", stored.Spec.Clusters)
+		}
+	})
+
+	t.Run("request validation", func(t *testing.T) {
+		h, _ := testHandler(t, definition, makeCluster("alpha", "uid-a"), makeCluster("beta", "uid-b"))
+		for _, tc := range []struct {
+			body string
+			want int
+		}{
+			{body: `{"name":"bad-app","definitionName":"sample","clusters":[]}`, want: http.StatusBadRequest},
+			{body: `{"name":"bad-app","definitionName":"sample","clusterName":"alpha","clusters":[{"name":"beta","uid":"uid-b"}]}`, want: http.StatusBadRequest},
+			{body: `{"name":"bad-app","definitionName":"sample","clusters":[{"name":"alpha","uid":"uid-a"},{"name":"alpha","uid":"uid-b"}]}`, want: http.StatusBadRequest},
+			{body: `{"name":"bad-app","definitionName":"sample","clusters":[{"name":"alpha","uid":"stale"}]}`, want: http.StatusConflict},
+			{body: `{"name":"bad-app","definitionName":"sample","clusters":[{"name":"missing","uid":"uid-x"}]}`, want: http.StatusNotFound},
+		} {
+			if w := postJSON(h, tc.body); w.Code != tc.want {
+				t.Fatalf("POST body=%s status=%d, want %d: %s", tc.body, w.Code, tc.want, w.Body)
+			}
+		}
+	})
+}
+
 func TestDeleteApplication(t *testing.T) {
 	t.Run("accepted and removed", func(t *testing.T) {
 		app := &platformv1alpha1.Application{ObjectMeta: metav1.ObjectMeta{Name: "delete-me", Namespace: testNamespace}}

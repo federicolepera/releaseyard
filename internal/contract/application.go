@@ -108,15 +108,32 @@ func ValidateApplication(definition *platformv1alpha1.ApplicationDefinition, app
 	if !dnsSubdomainPattern.MatchString(application.Spec.ApplicationDefinitionRef.Name) {
 		return fmt.Errorf("applicationDefinitionRef name is invalid")
 	}
-	if (application.Spec.ClusterRef == nil) == (application.Spec.Environment == nil) {
-		return fmt.Errorf("exactly one of clusterRef or environment must be set")
-	}
+	targetModes := 0
 	if application.Spec.ClusterRef != nil {
+		targetModes++
+	}
+	if application.Spec.Environment != nil {
+		targetModes++
+	}
+	if len(application.Spec.Clusters) > 0 {
+		targetModes++
+	}
+	if targetModes != 1 {
+		return fmt.Errorf("exactly one of clusterRef, clusters, or environment must be set")
+	}
+	switch {
+	case application.Spec.ClusterRef != nil:
 		if !dnsSubdomainPattern.MatchString(application.Spec.ClusterRef.Name) {
 			return fmt.Errorf("clusterRef name is invalid")
 		}
-	} else if err := validateEnvironmentSelection(application.Spec.Environment); err != nil {
-		return err
+	case application.Spec.Environment != nil:
+		if err := validateEnvironmentSelection(application.Spec.Environment); err != nil {
+			return err
+		}
+	default:
+		if err := validateClusterSelection(application.Spec.Clusters); err != nil {
+			return err
+		}
 	}
 	if err := Validate(definition); err != nil {
 		return fmt.Errorf("application definition contract is invalid: %w", err)
@@ -182,6 +199,34 @@ func validateEnvironmentSelection(environment *platformv1alpha1.ApplicationEnvir
 		seenNames[target.Name] = struct{}{}
 		if _, exists := seenUIDs[target.UID]; exists {
 			return fmt.Errorf("environment target UID %q is duplicated", target.UID)
+		}
+		seenUIDs[target.UID] = struct{}{}
+	}
+	return nil
+}
+
+func validateClusterSelection(clusters []platformv1alpha1.ApplicationClusterTarget) error {
+	if len(clusters) == 0 {
+		return fmt.Errorf("clusters must contain at least one Cluster")
+	}
+	if len(clusters) > 32 {
+		return fmt.Errorf("clusters must contain at most 32 Clusters")
+	}
+	seenUIDs := make(map[types.UID]struct{}, len(clusters))
+	seenNames := make(map[string]struct{}, len(clusters))
+	for i, target := range clusters {
+		if !validClusterDNSSubdomain(target.Name) {
+			return fmt.Errorf("cluster target %d name is invalid", i)
+		}
+		if target.UID == "" || len(target.UID) > 128 {
+			return fmt.Errorf("cluster target %q UID must contain between 1 and 128 characters", target.Name)
+		}
+		if _, exists := seenNames[target.Name]; exists {
+			return fmt.Errorf("cluster target name %q is duplicated", target.Name)
+		}
+		seenNames[target.Name] = struct{}{}
+		if _, exists := seenUIDs[target.UID]; exists {
+			return fmt.Errorf("cluster target UID %q is duplicated", target.UID)
 		}
 		seenUIDs[target.UID] = struct{}{}
 	}

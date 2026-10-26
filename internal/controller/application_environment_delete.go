@@ -25,7 +25,7 @@ func (r *ApplicationReconciler) reconcileEnvironmentDelete(ctx context.Context, 
 	if app.Status.Binding != nil {
 		return r.environmentDeletePending(ctx, app, "LegacyBindingConflict")
 	}
-	if app.Spec.Environment == nil {
+	if !usesMultiTargetSelection(app) {
 		return r.environmentDeletePending(ctx, app, "SnapshotUnavailable")
 	}
 	targets := make([]platformv1alpha1.ApplicationEnvironmentTarget, 0, len(app.Status.Instances))
@@ -195,7 +195,7 @@ func releaseAbsent(inst *platformv1alpha1.ApplicationInstanceStatus) bool {
 }
 
 func allEnvironmentBindingsCleaned(app *platformv1alpha1.Application) bool {
-	if app.Status.Binding != nil || app.Spec.Environment == nil {
+	if app.Status.Binding != nil || !usesMultiTargetSelection(app) {
 		return false
 	}
 	for i := range app.Status.Instances {
