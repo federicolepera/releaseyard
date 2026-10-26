@@ -329,8 +329,9 @@ spec:
                 type: object
               clusters:
                 description: |-
-                  clusters explicitly selects one or more target Clusters. The list is
-                  immutable and is not expanded when new Clusters appear.
+                  clusters explicitly selects one or more target Clusters. The list can be
+                  updated after creation, but a target name must keep the same UID. It is not
+                  expanded automatically when new Clusters appear.
                 items:
                   description: ApplicationClusterTarget pins one explicitly selected
                     target Cluster.
@@ -343,14 +344,16 @@ spec:
                       type: string
                     uid:
                       description: uid identifies the exact target Cluster object.
+                      maxLength: 128
+                      minLength: 1
                       type: string
                   required:
                   - name
                   - uid
                   type: object
                   x-kubernetes-validations:
-                  - message: uid must contain between 1 and 128 characters
-                    rule: size(self.uid) >= 1 && size(self.uid) <= 128
+                  - message: a Cluster UID cannot change for an existing target name
+                    rule: self.uid == oldSelf.uid
                 maxItems: 32
                 minItems: 1
                 type: array
@@ -441,9 +444,6 @@ spec:
             - message: the Application target selector is immutable
               rule: (!has(self.environment) && !has(oldSelf.environment)) || (has(self.environment)
                 && has(oldSelf.environment) && self.environment == oldSelf.environment)
-            - message: the Application target selector is immutable
-              rule: (!has(self.clusters) && !has(oldSelf.clusters)) || (has(self.clusters)
-                && has(oldSelf.clusters) && self.clusters == oldSelf.clusters)
           status:
             description: status defines the observed state of Application
             properties:
@@ -2632,6 +2632,7 @@ spec:
       - v1alpha1
       operations:
       - CREATE
+      - UPDATE
       resources:
       - applications
       scope: Namespaced
