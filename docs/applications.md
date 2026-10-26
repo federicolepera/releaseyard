@@ -97,15 +97,32 @@ The Application produces one Helm release on that cluster.
 spec:
   environment:
     name: staging
+```
+
+The controller resolves the target set from Clusters whose
+`platform.releaseyard.io/environment` label equals `staging`. It re-resolves on
+every reconcile: a new matching Cluster receives a release, and a Cluster that
+leaves the environment is uninstalled and its instance removed. The resolved
+set is recorded in `status.instances`; `spec.environment.targets` stays empty.
+
+To pin a fixed target set instead, set `targets` explicitly:
+
+```yaml
+spec:
+  environment:
+    name: staging
     targets:
       - name: releaseyard-managed-a
         uid: <cluster-uid>
 ```
 
-The targets are an immutable snapshot of the clusters selected by the
-`platform.releaseyard.io/environment` label at creation time. Creating an
-environment Application through the dashboard resolves and previews this
-snapshot. Direct API clients must provide an explicit target list.
+Pinned targets are immutable after creation and are intended for stateful
+workloads where automatic placement changes are unsafe. Dynamic and pinned are
+selected by the presence of `targets`; you cannot switch modes later.
+
+If no Cluster currently matches, the Application stays not ready and becomes
+ready when a matching Cluster appears. Direct API clients only need
+`environment.name`; they do not need to resolve Cluster UIDs.
 
 Exactly one of `clusterRef` or `environment` must be set. The choice is
 immutable.

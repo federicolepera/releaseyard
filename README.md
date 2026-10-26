@@ -54,7 +54,7 @@ It is built around a small set of ideas:
   proprietary state store, and the platform is GitOps-friendly.
 - **Curated catalog**: an `ApplicationDefinition` pins a chart, its defaults,
   and the only values an `Application` may override.
-- **Multi-cluster delivery**: target one `Cluster` or snapshot every cluster
+- **Multi-cluster delivery**: target one `Cluster` or follow every cluster
   matching an environment.
 - **Safe installs**: chart bytes are verified by SHA-256 before Helm sees them,
   and the manager only downloads from allowed chart hosts.
@@ -124,9 +124,11 @@ An `Application` can target one cluster or an environment:
 
 - **One cluster**: set `spec.clusterRef`. The Application produces one Helm
   release on that cluster.
-- **All clusters in an environment**: set `spec.environment`. ReleaseYard stores
-  an immutable snapshot of the matching `Cluster` names and UIDs at creation
-  time and produces one release per target.
+- **All clusters in an environment**: set `spec.environment.name`. The
+  controller resolves the matching `Cluster`s dynamically and produces one
+  release per target. A new matching Cluster is added automatically; a Cluster
+  that leaves the environment is removed. Supply `spec.environment.targets` only
+  when you want to pin a fixed target set.
 
 The release namespace can be selected with `spec.releaseNamespace` when the
 definition allows it; otherwise the definition's `spec.release.namespace` is

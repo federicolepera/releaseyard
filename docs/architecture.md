@@ -60,10 +60,12 @@ Release ownership is recorded in a ConfigMap claim and in the release labels.
 
 ## Environment placement
 
-An Application with `spec.environment` stores a fixed snapshot of matching
-Cluster names and UIDs at creation time. Later label changes do not silently add
-or remove targets. The controller reconciles each snapshot entry independently
-and reports per-instance status.
+An Application with `spec.environment.name` follows the Clusters whose
+environment label matches. The controller re-resolves the set on every
+reconcile, adds releases on new matching Clusters, and uninstalls/removes
+instances for Clusters that leave. A non-empty `spec.environment.targets` pins
+the set instead; later label changes do not alter it. Each target is reconciled
+independently with per-instance status.
 
 `spec.clusterRef`, `spec.environment`, `spec.applicationDefinitionRef`, and
 `spec.releaseNamespace` are immutable after creation.
