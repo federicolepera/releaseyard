@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
@@ -51,6 +52,9 @@ type OIDCConfig struct {
 	// SessionStore persists sessions and login transactions. When nil an
 	// in-memory store is used.
 	SessionStore SessionStore
+	// AuditLogger emits structured security audit events. When nil audit
+	// logging is disabled.
+	AuditLogger *slog.Logger
 }
 
 // LocalAuthConfig configures the dashboard authentication. HashPath points at
@@ -73,6 +77,9 @@ type LocalAuthConfig struct {
 	// SessionStore persists sessions and login transactions. When nil an
 	// in-memory store is used.
 	SessionStore SessionStore
+	// AuditLogger emits structured security audit events. When nil audit
+	// logging is disabled.
+	AuditLogger *slog.Logger
 }
 
 type loginTransaction struct {
@@ -117,6 +124,7 @@ type authHandler struct {
 	clientFactory          ImpersonatingClientFactory
 	cloudProvisioning      bool
 	store                  SessionStore
+	auditLog               *slog.Logger
 
 	clients sync.Map // identity key -> client.Client
 
@@ -154,6 +162,7 @@ func NewOIDCHandler(k8s client.Client, namespace string, config OIDCConfig) (htt
 	publicURL.Path = ""
 	publicURL.RawPath = ""
 	auth := newAuthHandler(k8s, namespace, &publicURL, "", "", nil, config.TeamNamespacePrefix, config.ApplicationEditorRole, config.SessionStore)
+	auth.auditLog = config.AuditLogger
 	auth.oidc.Store(rt)
 	return securityHeaders(auth.middleware(NewHandler(k8s, namespace))), nil
 }
@@ -168,6 +177,7 @@ func NewLocalHandler(k8s client.Client, namespace string, config LocalAuthConfig
 		return nil, err
 	}
 	auth := newAuthHandler(k8s, namespace, publicURL, config.HashPath, resolveIdentityProviderSecretName(config.IdentityProviderSecretName), config.ClientFactory, config.TeamNamespacePrefix, config.ApplicationEditorRole, config.SessionStore)
+	auth.auditLog = config.AuditLogger
 	auth.cloudProvisioning = crossplaneInstalled(context.Background(), k8s)
 	auth.reloadIdentityProvider(context.Background())
 	auth.retryIdentityProvider(context.Background())
@@ -300,6 +310,26 @@ func (a *authHandler) middleware(next http.Handler) http.Handler {
 			return
 		}
 
+		var (
+			auditWriter *auditResponseWriter
+			session     dashboardSession
+			hasSession  bool
+		)
+		if a.auditLog != nil {
+			requestID := newAuditRequestID()
+			r = r.WithContext(withAuditRequestID(r.Context(), requestID))
+			if requestID != "" {
+				w.Header().Set("X-Request-ID", requestID)
+			}
+			auditWriter = &auditResponseWriter{ResponseWriter: w, status: http.StatusOK}
+			w = auditWriter
+		}
+		defer func() {
+			if auditWriter != nil {
+				a.auditHTTP(r, session, hasSession, auditWriter.status)
+			}
+		}()
+
 		// Public discovery endpoint used by the login page.
 		if r.Method == http.MethodGet && r.URL.Path == "/api/auth-methods" {
 			if !a.canonicalHost(r) {
@@ -383,6 +413,7 @@ func (a *authHandler) middleware(next http.Handler) http.Handler {
 			a.unauthorized(w, r)
 			return
 		}
+		hasSession = true
 		if !a.canonicalHost(r) {
 			writeError(w, http.StatusBadRequest, "Request host is not allowed")
 			return
@@ -530,6 +561,7 @@ func isStateChangingMethod(method string) bool {
 func (a *authHandler) login(w http.ResponseWriter, r *http.Request) {
 	runtime := a.oidc.Load()
 	if runtime == nil {
+		a.audit(r, auditEvent{Event: auditEventOIDCLogin, Outcome: auditOutcomeFailure, AuthMethod: authMethodOIDC, Reason: "identity_provider_unavailable", Status: http.StatusServiceUnavailable})
 		writeError(w, http.StatusServiceUnavailable, "Identity provider is not available")
 		return
 	}
@@ -551,11 +583,14 @@ func (a *authHandler) login(w http.ResponseWriter, r *http.Request) {
 	verifier := oauth2.GenerateVerifier()
 	transaction := loginTransaction{state: state, binding: binding, nonce: nonce, verifier: verifier, expires: a.now().Add(loginTransactionTTL)}
 	if err := a.store.PutTransaction(r.Context(), state, transaction, loginTransactionTTL); err != nil {
+		reason := "login_transaction_store_unavailable"
 		if errors.Is(err, errSessionCapacity) {
+			reason = "login_transaction_capacity_reached"
 			writeError(w, http.StatusServiceUnavailable, "Authentication is busy")
 		} else {
 			writeError(w, http.StatusServiceUnavailable, "Authentication store is unavailable")
 		}
+		a.audit(r, auditEvent{Event: auditEventOIDCLogin, Outcome: auditOutcomeFailure, AuthMethod: authMethodOIDC, Reason: reason, Status: http.StatusServiceUnavailable})
 		return
 	}
 	a.setCookie(w, loginBindingCookie, binding, int(loginTransactionTTL.Seconds()))
@@ -566,6 +601,7 @@ func (a *authHandler) login(w http.ResponseWriter, r *http.Request) {
 func (a *authHandler) callback(w http.ResponseWriter, r *http.Request) {
 	runtime := a.oidc.Load()
 	if runtime == nil {
+		a.audit(r, auditEvent{Event: auditEventOIDCLogin, Outcome: auditOutcomeFailure, AuthMethod: authMethodOIDC, Reason: "identity_provider_unavailable", Status: http.StatusServiceUnavailable})
 		writeError(w, http.StatusServiceUnavailable, "Identity provider is not available")
 		return
 	}
@@ -578,10 +614,12 @@ func (a *authHandler) callback(w http.ResponseWriter, r *http.Request) {
 	transaction, ok, err := a.consumeTransaction(r.Context(), state, binding)
 	a.clearCookie(w, loginBindingCookie)
 	if err != nil {
+		a.audit(r, auditEvent{Event: auditEventOIDCLogin, Outcome: auditOutcomeFailure, AuthMethod: authMethodOIDC, Reason: auditReasonSessionStoreUnavailable, Status: http.StatusServiceUnavailable})
 		writeError(w, http.StatusServiceUnavailable, "Authentication store is unavailable")
 		return
 	}
 	if !ok || r.URL.Query().Get("code") == "" {
+		a.audit(r, auditEvent{Event: auditEventOIDCLogin, Outcome: auditOutcomeDenied, AuthMethod: authMethodOIDC, Reason: "invalid_transaction", Status: http.StatusBadRequest})
 		writeError(w, http.StatusBadRequest, "Invalid or expired authentication transaction")
 		return
 	}
@@ -589,16 +627,19 @@ func (a *authHandler) callback(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	token, err := runtime.oauth.Exchange(ctx, r.URL.Query().Get("code"), oauth2.VerifierOption(transaction.verifier))
 	if err != nil {
+		a.audit(r, auditEvent{Event: auditEventOIDCLogin, Outcome: auditOutcomeDenied, AuthMethod: authMethodOIDC, Reason: "token_exchange_failed", Status: http.StatusUnauthorized})
 		writeError(w, http.StatusUnauthorized, "Authentication failed")
 		return
 	}
 	rawIDToken, ok := token.Extra("id_token").(string)
 	if !ok || rawIDToken == "" {
+		a.audit(r, auditEvent{Event: auditEventOIDCLogin, Outcome: auditOutcomeDenied, AuthMethod: authMethodOIDC, Reason: "missing_id_token", Status: http.StatusUnauthorized})
 		writeError(w, http.StatusUnauthorized, "Authentication failed")
 		return
 	}
 	idToken, err := runtime.verifier.Verify(ctx, rawIDToken)
 	if err != nil || subtle.ConstantTimeCompare([]byte(idToken.Nonce), []byte(transaction.nonce)) != 1 {
+		a.audit(r, auditEvent{Event: auditEventOIDCLogin, Outcome: auditOutcomeDenied, AuthMethod: authMethodOIDC, Reason: "id_token_invalid", Status: http.StatusUnauthorized})
 		writeError(w, http.StatusUnauthorized, "Authentication failed")
 		return
 	}
@@ -608,6 +649,7 @@ func (a *authHandler) callback(w http.ResponseWriter, r *http.Request) {
 		PreferredUsername string   `json:"preferred_username"`
 	}
 	if err := idToken.Claims(&claims); err != nil {
+		a.audit(r, auditEvent{Event: auditEventOIDCLogin, Outcome: auditOutcomeDenied, AuthMethod: authMethodOIDC, Reason: "claims_invalid", Status: http.StatusUnauthorized})
 		writeError(w, http.StatusUnauthorized, "Authentication failed")
 		return
 	}
@@ -622,20 +664,24 @@ func (a *authHandler) callback(w http.ResponseWriter, r *http.Request) {
 		username = idToken.Subject
 	}
 	if username == "" {
+		a.audit(r, auditEvent{Event: auditEventOIDCLogin, Outcome: auditOutcomeDenied, AuthMethod: authMethodOIDC, Reason: "username_missing", Status: http.StatusUnauthorized})
 		writeError(w, http.StatusUnauthorized, "Authentication failed")
 		return
 	}
 	if !idToken.Expiry.After(a.now()) {
+		a.audit(r, auditEvent{Event: auditEventOIDCLogin, Outcome: auditOutcomeDenied, Actor: username, Groups: claims.Groups, AuthMethod: authMethodOIDC, Reason: "id_token_expired", Status: http.StatusUnauthorized})
 		writeError(w, http.StatusUnauthorized, "Authentication failed")
 		return
 	}
 	csrfToken, err := randomOpaque()
 	if err != nil {
+		a.audit(r, auditEvent{Event: auditEventOIDCLogin, Outcome: auditOutcomeFailure, Actor: username, Groups: claims.Groups, AuthMethod: authMethodOIDC, Reason: "csrf_generation_failed", Status: http.StatusInternalServerError})
 		writeError(w, http.StatusInternalServerError, "Could not create session")
 		return
 	}
 	sessionID, err := randomOpaque()
 	if err != nil {
+		a.audit(r, auditEvent{Event: auditEventOIDCLogin, Outcome: auditOutcomeFailure, Actor: username, Groups: claims.Groups, AuthMethod: authMethodOIDC, Reason: "session_id_generation_failed", Status: http.StatusInternalServerError})
 		writeError(w, http.StatusInternalServerError, "Could not create session")
 		return
 	}
@@ -659,13 +705,17 @@ func (a *authHandler) callback(w http.ResponseWriter, r *http.Request) {
 	}
 	a.authzCache.Delete(authorizationCacheKey(session))
 	if err := a.store.PutSession(r.Context(), sessionID, session, sessionTTL(session, now)); err != nil {
+		reason := auditReasonSessionStoreUnavailable
 		if errors.Is(err, errSessionCapacity) {
+			reason = "session_capacity_reached"
 			writeError(w, http.StatusServiceUnavailable, "Session capacity reached")
 		} else {
 			writeError(w, http.StatusServiceUnavailable, "Session store is unavailable")
 		}
+		a.audit(r, auditEvent{Event: auditEventOIDCLogin, Outcome: auditOutcomeFailure, Actor: username, Groups: claims.Groups, AuthMethod: authMethodOIDC, Reason: reason, Status: http.StatusServiceUnavailable})
 		return
 	}
+	a.audit(r, auditEvent{Event: auditEventOIDCLogin, Outcome: auditOutcomeSuccess, Actor: username, Groups: claims.Groups, AuthMethod: authMethodOIDC, Status: http.StatusSeeOther})
 	a.setSessionCookie(w, sessionID, session)
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
@@ -711,14 +761,17 @@ func (a *authHandler) sessionFromRequest(w http.ResponseWriter, r *http.Request)
 func (a *authHandler) logout(w http.ResponseWriter, r *http.Request) {
 	session, ok, err := a.sessionFromRequest(w, r)
 	if err != nil {
+		a.audit(r, auditEvent{Event: auditEventLogout, Outcome: auditOutcomeFailure, Reason: auditReasonSessionStoreUnavailable, Status: http.StatusServiceUnavailable})
 		writeError(w, http.StatusServiceUnavailable, "Session store is unavailable")
 		return
 	}
 	if !ok {
+		a.audit(r, auditEvent{Event: auditEventLogout, Outcome: auditOutcomeDenied, Reason: "not_authenticated", Status: http.StatusUnauthorized})
 		writeError(w, http.StatusUnauthorized, "Authentication required")
 		return
 	}
 	if !a.canonicalHost(r) || !a.validCSRF(r, session) {
+		a.audit(r, auditEvent{Event: auditEventLogout, Outcome: auditOutcomeDenied, Actor: session.username, Groups: session.groups, AuthMethod: session.authMethod, Impersonated: session.authMethod == authMethodOIDC, Reason: "csrf_or_host_rejected", Status: http.StatusForbidden})
 		writeError(w, http.StatusForbidden, "CSRF validation failed")
 		return
 	}
@@ -726,10 +779,12 @@ func (a *authHandler) logout(w http.ResponseWriter, r *http.Request) {
 	// 1. Delete the local dashboard session and clear its cookie.
 	if cookie, err := r.Cookie(sessionCookie); err == nil {
 		if err := a.store.DeleteSession(r.Context(), cookie.Value); err != nil {
+			a.audit(r, auditEvent{Event: auditEventLogout, Outcome: auditOutcomeFailure, Actor: session.username, Groups: session.groups, AuthMethod: session.authMethod, Impersonated: session.authMethod == authMethodOIDC, Reason: auditReasonSessionStoreUnavailable, Status: http.StatusServiceUnavailable})
 			writeError(w, http.StatusServiceUnavailable, "Session store is unavailable")
 			return
 		}
 	}
+	a.audit(r, auditEvent{Event: auditEventLogout, Outcome: auditOutcomeSuccess, Actor: session.username, Groups: session.groups, AuthMethod: session.authMethod, Impersonated: session.authMethod == authMethodOIDC, Status: http.StatusOK})
 	a.clearCookie(w, sessionCookie)
 
 	// Local sessions have no upstream IdP session to terminate.

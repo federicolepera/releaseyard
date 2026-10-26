@@ -123,6 +123,14 @@ service or deploy it separately. The chart fails when `dashboard.replicas` is
 greater than 1 without the Redis store, or when Redis is selected without an
 address.
 
+## Audit logs
+
+The dashboard writes structured JSON audit events to stdout. They cover local
+and OIDC login outcomes, logout, state-changing API calls, and administration
+changes, with actor, groups, auth method, impersonation flag, HTTP status,
+request ID, and remote address. Passwords, tokens, secrets, and request bodies
+are never logged. Ship the container logs to your central log pipeline.
+
 ## Authorization (management cluster RBAC)
 
 Authorization is the management cluster's Kubernetes RBAC. The dashboard

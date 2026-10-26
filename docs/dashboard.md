@@ -99,6 +99,17 @@ The in-memory store signs everyone out on rollout and is not shared between
 replicas. The Redis store shares sessions and login transactions and keeps users
 signed in across rollouts.
 
+## Audit logs
+
+The dashboard emits JSON audit events to stdout for login success and failure,
+logout, state-changing API calls, and administration changes. Each event carries
+the actor, groups, auth method, impersonation flag, HTTP status, request ID, and
+remote address. Failed events also carry a reason.
+
+The logs are intended for a central log pipeline. Passwords, tokens, secrets,
+and request bodies are not logged. See [Access control](access-control.md) for
+the event list.
+
 ## Team scope
 
 For OIDC users, the dashboard derives candidate team namespaces from group
