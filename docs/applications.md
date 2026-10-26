@@ -66,6 +66,7 @@ metadata:
   name: demo
   namespace: releaseyard-team-platform
 spec:
+  description: Customer-facing demo application
   applicationDefinitionRef:
     name: releaseyard-demo
   clusterRef:

@@ -929,6 +929,7 @@
     const title = element('h1', 'detail-title', safe(app.metadata?.name)); title.id = 'application-detail-title';
     titleRow.append(title, applicationReadyBadge(view));
     header.append(topbar, titleRow);
+    if (app.spec?.description) header.append(element('p', 'detail-description', safe(app.spec.description)));
     root.append(header);
 
     const meta = element('div', 'detail-meta');
@@ -2716,6 +2717,7 @@
     state.selectedDefinition = def;
     $('#catalog-view').hidden = true;
     $('#create-view').hidden = false;
+    renderCreateBreadcrumb(def);
     renderSelectedDefinition();
     $('#app-name').focus();
   }
@@ -2723,6 +2725,7 @@
   function showCatalog() {
     const selectedName = state.selectedDefinition?.metadata?.name;
     state.selectedDefinition = null;
+    renderCreateBreadcrumb(null);
     $('#create-form').reset();
     state.destinationMode = 'cluster'; state.preview = null; state.previewLoading = false;
     if (state.previewController) state.previewController.abort();
@@ -2802,6 +2805,7 @@
       else if (targets.some((item) => item.deleting)) previewNode.append(element('p', 'warning', 'A matching cluster is being deleted. Choose another environment or wait until deletion finishes.'));
       else if (targets.some((item) => !item.connected)) previewNode.append(element('p', 'warning', 'One or more matching clusters are not connected. The application can still be created, but rollout may be delayed.'));
       previewNode.className = 'environment-preview';
+      updateReview();
       return body;
     } catch (error) {
       if (error.name === 'AbortError' || sequence !== state.previewSequence) return null;
@@ -2825,23 +2829,86 @@
     Object.defineProperty(cursor, parts[parts.length - 1], { value, enumerable: true, writable: true, configurable: true });
   }
 
+  function renderCreateBreadcrumb(def) {
+    const nav = $('#breadcrumb');
+    if (!nav) return;
+    nav.replaceChildren();
+    const catalog = element('a', 'breadcrumb-link', 'Catalog');
+    catalog.href = './';
+    nav.append(catalog);
+    if (!def) return;
+    nav.append(element('span', 'breadcrumb-separator', '/'), element('span', 'breadcrumb-text', def.metadata?.name || 'Template'));
+    nav.append(element('span', 'breadcrumb-separator', '/'), element('strong', 'breadcrumb-current', 'Create'));
+  }
+
+  function infoRow(label, value, options = {}) {
+    const row = element('div', 'info-row');
+    row.append(element('dt', '', label));
+    const cell = document.createElement('dd');
+    if (options.badge) cell.append(badge(String(value || '—'), 'good'));
+    else cell.textContent = value === undefined || value === null || value === '' ? '—' : String(value);
+    row.append(cell);
+    return row;
+  }
+
+  function renderTemplateInfo(def) {
+    const root = $('#template-info');
+    if (!root) return;
+    root.replaceChildren();
+    const chart = def.spec?.chart || {};
+    root.append(
+      infoRow('Name', def.metadata?.name),
+      infoRow('Version', chart.version),
+      infoRow('Type', definitionTypeLabel(definitionType(def)), { badge: true }),
+      infoRow('Description', def.spec?.description || 'No description provided.'),
+      infoRow('Chart', chart.name),
+      infoRow('Maintainer', def.metadata?.annotations?.['platform.releaseyard.io/maintainer']),
+      infoRow('Home', def.metadata?.annotations?.['platform.releaseyard.io/home'] || chart.repository)
+    );
+  }
+
+  function renderValuesSummary(def) {
+    const root = $('#values-summary');
+    const badgeNode = $('#values-count');
+    if (!root) return;
+    const fields = Array.isArray(def.spec?.configurableValues) ? def.spec.configurableValues : [];
+    const required = fields.filter((field) => field.required === true).length;
+    const optional = fields.length - required;
+    root.replaceChildren();
+    [
+      [fields.length, 'configurable values'],
+      [required, 'required values'],
+      [optional, 'optional values']
+    ].forEach(([count, label]) => {
+      const row = element('div', 'values-summary-row');
+      row.append(element('strong', '', String(count)), element('span', '', label));
+      root.append(row);
+    });
+    if (badgeNode) badgeNode.textContent = `${fields.length} value${fields.length === 1 ? '' : 's'}`;
+  }
+
   function renderSelectedDefinition() {
     const def = state.selectedDefinition;
     const root = $('#dynamic-fields');
-    const fieldset = $('#values-fields');
-    const detail = $('#definition-detail');
+    const valuesFields = $('#values-fields');
+    const valuesEmpty = $('#values-empty');
     const namespaceInput = $('#release-namespace');
     const previousNamespace = namespaceInput.value;
     root.replaceChildren();
-    detail.replaceChildren();
     if (!def) {
-      fieldset.hidden = true;
-      $('#form-hint').textContent = 'Choose a definition and cluster to get started.';
+      valuesFields.hidden = true;
+      valuesEmpty.hidden = false;
+      $('#form-hint').textContent = 'Choose a template to get started.';
       updateSubmit();
       return;
     }
     const chart = def.spec?.chart || {};
-    detail.append(element('p', 'resource-meta', [chart.name, chart.version, chart.repository].filter(Boolean).join(' · ') || 'Chart details unavailable'));
+    $('#create-definition-name').textContent = def.metadata?.name || 'Application template';
+    $('#create-chart-version').textContent = chart.version || '—';
+    $('#create-definition-description').textContent = def.spec?.description || 'Configure the parameters below to create a new application from this template.';
+    renderTemplateInfo(def);
+    renderValuesSummary(def);
+
     const release = def.spec?.release || {};
     const namespaceInfo = $('#release-namespace-info');
     const namespaceField = $('#release-namespace-field');
@@ -2849,28 +2916,29 @@
       namespaceInfo.hidden = true;
       namespaceField.hidden = false;
       namespaceInput.value = previousNamespace;
-      $('#release-namespace-hint').textContent = release.namespace ? `Optional. If blank, ${safe(release.namespace)} is used. The namespace must already exist.` : 'Optional. The namespace must already exist.';
+      $('#release-namespace-hint').textContent = release.namespace ? `Optional. If blank, ${release.namespace} is used. The namespace must already exist.` : 'Optional. The namespace must already exist.';
     } else {
       namespaceField.hidden = true;
       namespaceInput.value = '';
       namespaceInfo.hidden = false;
-      namespaceInfo.textContent = `Target namespace: ${safe(release.namespace || 'not specified in the definition')}`;
+      namespaceInfo.textContent = `Target namespace: ${release.namespace || 'not specified in the definition'}`;
     }
-    const readiness = definitionReadiness(def);
-    if (!readiness.ready) detail.append(element('p', 'warning', `Application Definition is not ready: ${safe(readiness.reason)}`));
+
     const fields = Array.isArray(def.spec?.configurableValues) ? def.spec.configurableValues : [];
-    fieldset.hidden = !fields.length;
+    valuesFields.hidden = !fields.length;
+    valuesEmpty.hidden = fields.length > 0;
     fields.forEach((config, index) => {
       const path = String(config.path || `value-${index + 1}`);
       const label = element('label', 'field');
-      const title = element('span', '', path);
-      if (config.required) title.append(element('span', 'required-mark', ' · required'));
+      const title = element('span', '');
+      title.append(document.createTextNode(path));
+      if (config.required) title.append(element('em', 'required-star', '*'));
       label.append(title);
       const type = config.type;
       let input;
       if (type === 'boolean') {
         input = document.createElement('select');
-        input.add(new Option('Not set', ''));
+        input.add(new Option('Use default', ''));
         input.add(new Option('Yes', 'true'));
         input.add(new Option('No', 'false'));
       } else {
@@ -2879,21 +2947,47 @@
         if (type === 'integer') input.step = '1';
         if (config.minimum !== undefined) input.min = config.minimum;
         if (config.maximum !== undefined) input.max = config.maximum;
-        input.placeholder = config.required ? 'Enter a value' : 'Optional';
+        input.placeholder = config.required ? 'Required' : 'Optional';
       }
       input.dataset.path = path;
       input.dataset.type = type || 'string';
       input.dataset.required = config.required ? 'true' : 'false';
       if (config.required) input.required = true;
-      label.append(input);
       const defaultValue = path.split('.').reduce((value, key) => value && typeof value === 'object' ? value[key] : undefined, def.spec?.defaults);
-      if (defaultValue !== undefined) label.append(element('small', '', `Default: ${typeof defaultValue === 'object' ? JSON.stringify(defaultValue) : String(defaultValue)}`));
-      if (config.minimum !== undefined || config.maximum !== undefined) label.append(element('small', '', `Range: ${config.minimum ?? 'no minimum'} – ${config.maximum ?? 'no maximum'}`));
+      if (type !== 'boolean' && defaultValue !== undefined && typeof defaultValue !== 'object') input.placeholder = String(defaultValue);
+      const hints = [];
+      if (config.required) hints.push('Required');
+      if (defaultValue !== undefined) hints.push(`Default: ${typeof defaultValue === 'object' ? JSON.stringify(defaultValue) : String(defaultValue)}`);
+      if (config.minimum !== undefined || config.maximum !== undefined) hints.push(`Min: ${config.minimum ?? '—'} · Max: ${config.maximum ?? '—'}`);
+      if (type) hints.push(`${type[0].toUpperCase()}${type.slice(1)}`);
+      label.append(input);
+      if (hints.length) label.append(element('small', '', hints.join(' · ')));
+      input.addEventListener('input', updateReview);
       root.append(label);
     });
+    const readiness = definitionReadiness(def);
     const blocked = !readiness.ready;
-    $('#form-hint').textContent = blocked ? `Creation is disabled. ${readiness.reason}` : fields.length ? 'Optional values are not sent when left blank.' : 'This definition has no additional configurable values.';
+    $('#form-hint').textContent = blocked ? `Creation is disabled. ${readiness.reason}` : 'Review the application details and create it when ready.';
     updateSubmit();
+  }
+
+  function updateReview() {
+    const form = $('#create-form');
+    if (!form) return;
+    const name = form.elements.name?.value.trim() || '—';
+    let destination = '—';
+    if (state.destinationMode === 'cluster') {
+      const selected = $('#cluster')?.selectedOptions?.[0];
+      destination = selected && selected.value ? selected.value : '—';
+    } else {
+      const environment = $('#environment-select')?.value;
+      const targets = state.preview?.environment === environment ? state.preview.targets : null;
+      destination = environment ? `${environment}${targets ? ` · ${targets.length} cluster${targets.length === 1 ? '' : 's'}` : ''}` : '—';
+    }
+    const configured = [...$('#dynamic-fields').querySelectorAll('input, select')].filter((input) => input.value !== '').length;
+    $('#review-name').textContent = name;
+    $('#review-destination').textContent = destination;
+    $('#review-values').textContent = configured ? `${configured} configured value${configured === 1 ? '' : 's'}` : 'Template defaults';
   }
 
   function updateSubmit() {
@@ -2907,7 +3001,7 @@
     !destinationReady ||
     !form.elements.name.value.trim() ||
     blocked;
-
+    updateReview();
   }
 
   function showNotice(message, kind = 'info') {
@@ -3454,7 +3548,7 @@
   }
 
   async function refreshCatalog(options = {}) {
-    const refreshButtons = [$('#refresh'), $('#refresh-create')].filter(Boolean);
+    const refreshButtons = [$('#refresh')].filter(Boolean);
     refreshButtons.forEach((button) => { button.disabled = true; });
     const results = await Promise.allSettled([
       getList('/api/applicationdefinitions'), getList('/api/clusters')
@@ -4415,8 +4509,8 @@
   }));
   $('#environment-select').addEventListener('change', () => { state.preview = null; fetchEnvironmentPreview($('#environment-select').value); updateSubmit(); });
   form.elements.name.addEventListener('input', updateSubmit);
+  $('#app-description')?.addEventListener('input', updateSubmit);
   $('#refresh').addEventListener('click', refreshCatalog);
-  $('#refresh-create').addEventListener('click', refreshCatalog);
   $('#definition-search').addEventListener('input', (event) => { state.definitionQuery = event.currentTarget.value; renderDefinitions(); });
   $('#definition-type').addEventListener('change', (event) => { state.definitionType = event.currentTarget.value; renderDefinitions(); });
   $('#definition-category').addEventListener('change', (event) => { state.definitionType = event.currentTarget.value; renderDefinitions(); });
@@ -4463,7 +4557,7 @@
     const submittedDefinition = def.metadata.name;
     const submittedReleaseNamespace = def.spec?.release?.allowNamespaceOverride === true ? $('#release-namespace').value.trim() : '';
     const payload = {
-      name: submittedName, definitionName: submittedDefinition,
+      name: submittedName, description: $('#app-description')?.value.trim() || '', definitionName: submittedDefinition,
       ...(submittedMode === 'environment' ? { environmentName: submittedEnvironment } : { clusterName: submittedCluster }), values,
       ...(state.team ? { namespace: state.team } : {}),
       ...(submittedReleaseNamespace ? { releaseNamespace: submittedReleaseNamespace } : {})

@@ -38,6 +38,11 @@ type ApplicationReference struct {
 // +kubebuilder:validation:XValidation:rule="has(self.clusterRef) != has(self.environment)",message="exactly one of clusterRef or environment must be set"
 // +kubebuilder:validation:XValidation:rule="(has(oldSelf.clusterRef) && has(self.clusterRef) && self.clusterRef == oldSelf.clusterRef && !has(self.environment) && !has(oldSelf.environment)) || (has(oldSelf.environment) && has(self.environment) && self.environment == oldSelf.environment && !has(self.clusterRef) && !has(oldSelf.clusterRef))",message="the Application target selector is immutable"
 type ApplicationSpec struct {
+	// description is an optional human-readable description of the Application.
+	// +kubebuilder:validation:MaxLength=280
+	// +optional
+	Description string `json:"description,omitempty"`
+
 	// applicationDefinitionRef identifies a cluster-scoped ApplicationDefinition.
 	// Its name cannot be changed after creation.
 	// +kubebuilder:validation:Required

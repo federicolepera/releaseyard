@@ -705,6 +705,7 @@ func (s *server) updateApplicationValues(w http.ResponseWriter, r *http.Request)
 
 type createApplicationRequest struct {
 	Name             string          `json:"name"`
+	Description      string          `json:"description"`
 	DefinitionName   string          `json:"definitionName"`
 	ClusterName      string          `json:"clusterName"`
 	EnvironmentName  string          `json:"environmentName"`
@@ -745,6 +746,10 @@ func (s *server) createApplication(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "Application name must be a valid DNS label of at most 53 characters")
 		return
 	}
+	if len(input.Description) > 280 {
+		writeError(w, http.StatusBadRequest, "Description must be at most 280 characters")
+		return
+	}
 	if input.DefinitionName == "" || (input.ClusterName == "") == (input.EnvironmentName == "") {
 		writeError(w, http.StatusBadRequest, "Specify a definition and exactly one target")
 		return
@@ -783,6 +788,7 @@ func (s *server) createApplication(w http.ResponseWriter, r *http.Request) {
 	app := &platformv1alpha1.Application{
 		ObjectMeta: metav1.ObjectMeta{Name: input.Name, Namespace: namespace},
 		Spec: platformv1alpha1.ApplicationSpec{
+			Description:              strings.TrimSpace(input.Description),
 			ApplicationDefinitionRef: platformv1alpha1.ApplicationReference{Name: definition.Name},
 		},
 	}

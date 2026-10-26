@@ -363,7 +363,7 @@ func TestCreateApplication(t *testing.T) {
 	definition := validDefinition(testDefinitionName, true)
 	cluster := &platformv1alpha1.Cluster{ObjectMeta: metav1.ObjectMeta{Name: testClusterName}}
 	h, c := testHandler(t, definition, cluster)
-	w := postJSON(h, `{"name":"my-app","definitionName":"sample","clusterName":"production","values":{"replica":{"count":3},"feature":{"enabled":true}}}`)
+	w := postJSON(h, `{"name":"my-app","description":"Customer portal","definitionName":"sample","clusterName":"production","values":{"replica":{"count":3},"feature":{"enabled":true}}}`)
 	if w.Code != http.StatusCreated {
 		t.Fatalf("POST status=%d body=%s", w.Code, w.Body)
 	}
@@ -373,6 +373,9 @@ func TestCreateApplication(t *testing.T) {
 	}
 	if app.Spec.Values == nil || string(app.Spec.Values.Raw) != `{"replica":{"count":3},"feature":{"enabled":true}}` {
 		t.Fatalf("values not preserved as raw JSON: %s", app.Spec.Values)
+	}
+	if app.Spec.Description != "Customer portal" {
+		t.Fatalf("description not preserved: %q", app.Spec.Description)
 	}
 	if app.Spec.ApplicationDefinitionRef.Name != testDefinitionName || app.Spec.ClusterRef == nil || app.Spec.ClusterRef.Name != testClusterName {
 		t.Fatalf("unexpected references: %+v", app.Spec)
