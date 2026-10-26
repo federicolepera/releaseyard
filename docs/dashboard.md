@@ -18,6 +18,8 @@ List Applications in the caller's team scope. The page supports filtering,
 status, placement, and a team selector. Opening an Application shows five tabs:
 
 - **Overview** — status, placement, release information, and recent activity.
+  Explicitly selected cluster placement can be edited here; removing a target
+  uninstalls its release.
 - **Resources** — rendered workload resources and their live state.
 - **Configuration** — definition contract, values, rendered YAML, and history.
 - **Observability** — live resource YAML, Pod logs, and Pod CPU/memory.

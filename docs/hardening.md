@@ -13,7 +13,7 @@ Status:
 
 ## Baseline already in place
 
-- Application target selection is immutable and validates Cluster UIDs.
+- `clusterRef` and `environment` are immutable; explicit `spec.clusters` targets can change only while keeping each Cluster UID.
 - Admission checks readable `ApplicationDefinition` and explicitly selected
   Clusters (`clusterRef`, `spec.clusters`, and pinned environment targets).
 - OIDC uses discovery, PKCE, state, nonce, and a short-lived login transaction.

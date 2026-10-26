@@ -61,19 +61,22 @@ Release ownership is recorded in a ConfigMap claim and in the release labels.
 ## Multi-target placement
 
 An Application can target one Cluster with `spec.clusterRef`, an explicit
-immutable list with `spec.clusters`, or an environment with
+cluster list with `spec.clusters`, or an environment with
 `spec.environment.name`.
 
 An environment Application follows the Clusters whose environment label
 matches. The controller re-resolves the set on every reconcile, adds releases on
 new matching Clusters, and uninstalls/removes instances for Clusters that leave.
 A non-empty `spec.environment.targets` pins the set instead; later label changes
-do not alter it. Explicit `spec.clusters` entries are always a fixed snapshot.
+do not alter it. Explicit `spec.clusters` entries are a fixed snapshot, but the
+list itself can be edited; adding and removing entries triggers the same
+per-target install and cleanup paths.
 
 Each target is reconciled independently with per-instance status.
 
-`spec.clusterRef`, `spec.clusters`, `spec.environment`, `spec.applicationDefinitionRef`, and
-`spec.releaseNamespace` are immutable after creation.
+`spec.clusterRef`, `spec.environment`, `spec.applicationDefinitionRef`, and
+`spec.releaseNamespace` are immutable after creation. `spec.clusters` can change,
+but an existing target name must keep its Cluster UID.
 
 ## Cloud reconciliation
 

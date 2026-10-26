@@ -54,8 +54,8 @@ It is built around a small set of ideas:
   proprietary state store, and the platform is GitOps-friendly.
 - **Curated catalog**: an `ApplicationDefinition` pins a chart, its defaults,
   and the only values an `Application` may override.
-- **Multi-cluster delivery**: target one `Cluster` or follow every cluster
-  matching an environment.
+- **Multi-cluster delivery**: target one `Cluster`, an explicit list of clusters,
+  or follow every cluster matching an environment.
 - **Safe installs**: chart bytes are verified by SHA-256 before Helm sees them,
   and the manager only downloads from allowed chart hosts.
 - **Real-time dashboard**: browse the catalog, create Applications, inspect live
@@ -86,7 +86,7 @@ resources:
 |------|-------|---------|
 | `Cluster` | Cluster | A target workload cluster, reached through a kubeconfig Secret. |
 | `ApplicationDefinition` | Cluster | A pinned Helm chart plus defaults and the typed value surface. |
-| `Application` | Namespaced | A request to deploy that chart on one cluster or an environment. |
+| `Application` | Namespaced | A request to deploy that chart on one cluster, a selected cluster list, or an environment. |
 | `CloudTarget` | Cluster | Where cloud resources should be created: provider, region, credentials. |
 | `ResourceDefinition` | Cluster | A golden path for a cloud resource: templates, mappings, and outputs. |
 | `Resource` | Namespaced | A team request for a cloud resource, rendered into Crossplane objects. |
@@ -120,10 +120,13 @@ See the [Dashboard documentation](docs/dashboard.md).
 
 ## Application delivery
 
-An `Application` can target one cluster or an environment:
+An `Application` can target one cluster, an explicit cluster list, or an environment:
 
 - **One cluster**: set `spec.clusterRef`. The Application produces one Helm
   release on that cluster.
+- **Selected clusters**: set `spec.clusters` to an explicit list of
+  `{name, uid}` targets. The list can be edited after creation; removing a target
+  uninstalls its release.
 - **All clusters in an environment**: set `spec.environment.name`. The
   controller resolves the matching `Cluster`s dynamically and produces one
   release per target. A new matching Cluster is added automatically; a Cluster
@@ -277,8 +280,8 @@ The main configuration surfaces are:
 
 - **`ApplicationDefinition`** — chart repository, name, pinned version, release
   namespace, defaults, and `configurableValues`.
-- **`Application`** — definition reference, one placement (`clusterRef` or
-  `environment`), optional `releaseNamespace`, and values.
+- **`Application`** — definition reference, one placement (`clusterRef`,
+  `clusters`, or `environment`), optional `releaseNamespace`, and values.
 - **`CloudTarget` / `ResourceDefinition` / `Resource`** — the optional cloud
   contract.
 - **Helm values** — manager image, allowed chart hosts, RBAC helpers, dashboard
