@@ -35,7 +35,7 @@
       try { localStorage.setItem('idp-sidebar', next ? 'collapsed' : 'open'); } catch (_) { /* Storage can be unavailable. */ }
     });
   }
-  const state = { definitions: [], applications: [], clusters: [], clusterQuery: '', clusterStatus: '', selectedApplication: null, selectedCluster: null, selectedInstanceUID: '', detailTab: 'overview', deleting: false, deletionPending: new Set(), editingValues: false, valuesDraft: Object.create(null), savingValues: false, definitionQuery: '', definitionSort: 'name', definitionType: '', definitionView: 'grid', destinationMode: 'cluster', selectedClusters: new Map(), preview: null, previewController: null, previewSequence: 0, previewLoading: false, savingEnvironment: false, creating: false, teams: [], team: '', resourcesQuery: '', resourcesKind: '', resourcesStatus: '', resourcesExpanded: new Set(), resourcesLive: null, resourcesLiveKey: '', selectedResourceUID: '', resourcePanelTab: 'overview', activityRange: '24h', activityType: '', activitySource: '', activityQuery: '', applicationQuery: '', applicationCluster: '', applicationNamespace: '', applicationStatus: '', applicationSort: { key: 'name', direction: 'asc' }, cloudTargets: [], cloudDefinitions: [], cloudResources: [], selectedCloudResource: null, cloudDetailTab: 'overview', cloudCreating: false, cloudSaving: false, cloudDeleting: false, cloudResourcesError: '', cloudSearch: '', cloudStatusFilter: '', cloudTargetFilter: '', cloudDefinitionFilter: '', cloudSort: { key: 'name', direction: 'asc' }, cloudDefinitionsExpanded: false, cloudTargetsExpanded: false, cloudActivityExpanded: false };
+  const state = { definitions: [], applications: [], clusters: [], clusterQuery: '', clusterStatus: '', selectedApplication: null, selectedCluster: null, selectedInstanceUID: '', detailTab: 'overview', deleting: false, deletionPending: new Set(), editingValues: false, valuesDraft: Object.create(null), savingValues: false, editingPlacement: false, placementDraft: new Map(), savingPlacement: false, definitionQuery: '', definitionSort: 'name', definitionType: '', definitionView: 'grid', destinationMode: 'cluster', selectedClusters: new Map(), preview: null, previewController: null, previewSequence: 0, previewLoading: false, savingEnvironment: false, creating: false, teams: [], team: '', resourcesQuery: '', resourcesKind: '', resourcesStatus: '', resourcesExpanded: new Set(), resourcesLive: null, resourcesLiveKey: '', selectedResourceUID: '', resourcePanelTab: 'overview', activityRange: '24h', activityType: '', activitySource: '', activityQuery: '', applicationQuery: '', applicationCluster: '', applicationNamespace: '', applicationStatus: '', applicationSort: { key: 'name', direction: 'asc' }, cloudTargets: [], cloudDefinitions: [], cloudResources: [], selectedCloudResource: null, cloudDetailTab: 'overview', cloudCreating: false, cloudSaving: false, cloudDeleting: false, cloudResourcesError: '', cloudSearch: '', cloudStatusFilter: '', cloudTargetFilter: '', cloudDefinitionFilter: '', cloudSort: { key: 'name', direction: 'asc' }, cloudDefinitionsExpanded: false, cloudTargetsExpanded: false, cloudActivityExpanded: false };
   const maxClusterTargets = 32;
   state.selectedDefinition = null;
   state.canCreateApps = false;
@@ -424,7 +424,7 @@
       && appliedChart?.digest === definition.status.digest && chartPin?.digest === definition.status.digest);
     const bindingCurrent = Boolean(target && binding && binding.clusterUID === target.uid && binding.remoteClaimUID
       && binding.applicationDefinitionUID === definition?.metadata?.uid
-      && binding.releaseName === app.metadata?.name && binding.releaseNamespace === environmentBinding?.releaseNamespace
+      && binding.releaseName && binding.releaseNamespace === environmentBinding?.releaseNamespace
       && environmentBinding?.releaseNamespace === targetNamespace(app));
     const observedAt = instance?.workloadObservedAt;
     const timestamp = typeof observedAt === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(observedAt) ? Date.parse(observedAt) : NaN;
@@ -873,10 +873,10 @@
     const page = $('#application-detail')?.closest('.page');
     if (page) page.classList.toggle('is-detail-open', open);
   }
-  function openApplication(app) { state.selectedApplication = app; state.selectedInstanceUID = ''; state.detailTab = 'overview'; state.editingValues = false; state.valuesDraft = Object.create(null); state.resourcesQuery = ''; state.resourcesKind = ''; state.resourcesStatus = ''; state.resourcesExpanded = new Set(); state.resourcesLive = null; state.resourcesLiveKey = ''; state.selectedResourceUID = ''; state.resourcePanelTab = 'overview'; state.activityRange = '24h'; state.activityType = ''; state.activitySource = ''; state.activityQuery = ''; $('#applications-list-view').hidden = true; setDetailChrome(true); renderApplicationDetail(); $('#application-detail .back-button').focus(); }
+  function openApplication(app) { state.selectedApplication = app; state.selectedInstanceUID = ''; state.detailTab = 'overview'; state.editingValues = false; state.valuesDraft = Object.create(null); state.editingPlacement = false; state.placementDraft = new Map(); state.resourcesQuery = ''; state.resourcesKind = ''; state.resourcesStatus = ''; state.resourcesExpanded = new Set(); state.resourcesLive = null; state.resourcesLiveKey = ''; state.selectedResourceUID = ''; state.resourcePanelTab = 'overview'; state.activityRange = '24h'; state.activityType = ''; state.activitySource = ''; state.activityQuery = ''; $('#applications-list-view').hidden = true; setDetailChrome(true); renderApplicationDetail(); $('#application-detail .back-button').focus(); }
   function closeApplication() {
     const name = state.selectedApplication?.metadata?.name;
-    state.selectedApplication = null; state.editingValues = false; state.valuesDraft = Object.create(null); $('#application-detail').hidden = true; $('#applications-list-view').hidden = false; setDetailChrome(false);
+    state.selectedApplication = null; state.editingValues = false; state.valuesDraft = Object.create(null); state.editingPlacement = false; state.placementDraft = new Map(); $('#application-detail').hidden = true; $('#applications-list-view').hidden = false; setDetailChrome(false);
     const links = [...$('#applications').querySelectorAll('.application-link')];
     (links.find((button) => button.textContent === name) || links[0] || $('#refresh-applications'))?.focus();
   }
@@ -1077,6 +1077,8 @@
     main.append(overviewActivityCard(app));
 
     side.append(overviewQuickInfo(app, view));
+    const placement = overviewPlacementCard(app);
+    if (placement) side.append(placement);
     side.append(overviewValueOverrides(app));
 
     grid.append(main, side);
@@ -1239,7 +1241,7 @@
     list.append(
       infoRow('Application', app.metadata?.name),
       infoRow('Target namespace', targetNamespace(app) || view.status?.binding?.releaseNamespace),
-      infoRow('Cluster', app.spec?.clusterRef?.name || app.spec?.environment?.name),
+      infoRow('Cluster', applicationClusterLabel(app)),
       infoRow('Definition', app.spec?.applicationDefinitionRef?.name),
       infoRow('Created', app.metadata?.creationTimestamp ? formatObservedTime(app.metadata.creationTimestamp) : '—'),
       infoRow('Last updated', view.status?.workloadObservedAt ? formatObservedTime(view.status.workloadObservedAt) : '—'),
@@ -1274,6 +1276,145 @@
     card.append(button);
     if (!available) card.append(element('p', 'helper', 'The Application Definition is unavailable, so values cannot be edited.'));
     return card;
+  }
+
+  function placementOptions(app) {
+    const known = new Map(state.clusters.filter((cluster) => cluster.metadata?.name).map((cluster) => [cluster.metadata.name, cluster]));
+    const options = state.clusters
+      .filter((cluster) => cluster.metadata?.name)
+      .map((cluster) => ({
+        name: cluster.metadata.name,
+        uid: cluster.metadata.uid || '',
+        connected: condition(cluster, 'Connected')?.status === 'True',
+        deleting: Boolean(cluster.metadata?.deletionTimestamp),
+        missing: false,
+      }));
+    (app.spec?.clusters || []).forEach((target) => {
+      if (!known.has(target.name)) {
+        options.push({ name: target.name, uid: target.uid || '', connected: false, deleting: false, missing: true });
+      }
+    });
+    return options.sort((a, b) => a.name.localeCompare(b.name, 'en'));
+  }
+
+  function overviewPlacementCard(app) {
+    if (!Array.isArray(app.spec?.clusters) || !app.spec.clusters.length) return null;
+    const card = element('section', 'ov-card ov-card-block placement-card');
+    const head = element('div', 'placement-head');
+    head.append(element('h4', 'ov-card-title', 'Placement'));
+    if (!state.editingPlacement) {
+      const edit = element('button', 'button button-secondary placement-edit', 'Edit placement');
+      edit.type = 'button';
+      edit.disabled = !state.canUpdateApps || state.savingPlacement;
+      if (!state.canUpdateApps) edit.title = 'Developer or administrator access is required to edit placement.';
+      edit.addEventListener('click', () => {
+        if (edit.disabled) return;
+        state.editingPlacement = true;
+        state.placementDraft = new Map((app.spec?.clusters || []).map((target) => [target.name, target.uid]));
+        renderApplicationDetail();
+      });
+      head.append(edit);
+    }
+    card.append(head);
+
+    if (!state.editingPlacement) {
+      const targets = app.spec.clusters;
+      const list = element('ul', 'preview-targets placement-targets');
+      targets.forEach((target) => {
+        const cluster = state.clusters.find((item) => item.metadata?.name === target.name && item.metadata?.uid === target.uid);
+        const connected = cluster && condition(cluster, 'Connected')?.status === 'True';
+        const item = element('li', 'preview-target');
+        item.append(element('span', '', safe(target.name)), badge(cluster ? (connected ? 'Connected' : 'Not connected') : 'Unavailable', cluster ? (connected ? 'good' : 'muted') : 'error'));
+        list.append(item);
+      });
+      card.append(element('p', 'ov-card-note', `${targets.length} explicit cluster${targets.length === 1 ? '' : 's'}`), list);
+      card.append(element('p', 'helper', 'Adding a cluster installs the release there. Removing one uninstalls its release and deletes its ownership claim.'));
+      return card;
+    }
+
+    card.append(element('p', 'helper', 'Select the clusters that should run this application. Removal is applied after the current targets are cleaned up.'));
+    const checklist = element('div', 'cluster-checklist placement-checklist');
+    const options = placementOptions(app);
+    options.forEach((option) => {
+      const input = document.createElement('input');
+      input.type = 'checkbox';
+      input.value = option.name;
+      input.checked = state.placementDraft.get(option.name) === option.uid;
+      input.dataset.uid = option.uid;
+      input.dataset.deleting = String(option.deleting);
+      input.dataset.missing = String(option.missing);
+      input.addEventListener('change', () => {
+        if (input.checked && state.placementDraft.size >= maxClusterTargets) {
+          input.checked = false;
+          showNotice(`Select at most ${maxClusterTargets} clusters.`, 'error');
+          return;
+        }
+        if (input.checked) state.placementDraft.set(option.name, option.uid);
+        else state.placementDraft.delete(option.name);
+        sync();
+      });
+      const label = element('label', `cluster-check${option.deleting ? ' is-deleting' : ''}`);
+      label.append(input, element('span', 'cluster-check-name', safe(option.name)), badge(option.missing ? 'Unavailable' : option.deleting ? 'Deleting' : option.connected ? 'Connected' : 'Not connected', option.missing || option.deleting ? 'error' : option.connected ? 'good' : 'muted'));
+      checklist.append(label);
+    });
+    card.append(checklist);
+    const summary = element('p', 'ov-card-note placement-summary');
+    const actions = element('div', 'placement-actions');
+    const cancel = element('button', 'button button-secondary', 'Cancel');
+    cancel.type = 'button';
+    cancel.disabled = state.savingPlacement;
+    cancel.addEventListener('click', () => { state.editingPlacement = false; state.placementDraft.clear(); renderApplicationDetail(); });
+    const save = element('button', 'button button-primary', state.savingPlacement ? 'Saving…' : 'Save placement');
+    save.type = 'button';
+    save.disabled = state.savingPlacement;
+    save.addEventListener('click', () => saveApplicationPlacement(app));
+    actions.append(cancel, save);
+    card.append(summary, actions);
+    const sync = () => {
+      const count = state.placementDraft.size;
+      summary.textContent = `${count} cluster${count === 1 ? '' : 's'} selected`;
+      save.disabled = state.savingPlacement || count === 0;
+      checklist.querySelectorAll('input[type="checkbox"]').forEach((checkbox) => {
+        const checked = checkbox.checked;
+        checkbox.disabled = checkbox.dataset.missing === 'true'
+          ? !checked
+          : checkbox.dataset.deleting === 'true'
+            ? !checked
+            : !checkbox.dataset.uid || (!checked && count >= maxClusterTargets);
+      });
+    };
+    sync();
+    return card;
+  }
+
+  async function saveApplicationPlacement(app) {
+    if (!state.canUpdateApps || state.savingPlacement) return;
+    const clusters = [...state.placementDraft].map(([name, uid]) => ({ name, uid })).sort((a, b) => a.name.localeCompare(b.name, 'en'));
+    if (!clusters.length) { showNotice('Select at least one cluster.', 'error'); return; }
+    state.savingPlacement = true;
+    renderApplicationDetail();
+    try {
+      const response = await apiFetch(withTeam(`/api/applications/${encodeURIComponent(app.metadata.name)}/placement`), {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ generation: app.metadata.generation, clusters })
+      });
+      const body = await response.json().catch(() => ({}));
+      if (response.status === 409) throw new Error('This application changed or a selected cluster changed. Refresh and try again.');
+      if (!response.ok) throw new Error(body.error || `Placement update failed (${response.status})`);
+      if (body?.metadata?.name) {
+        state.selectedApplication = body;
+        state.applications = state.applications.map((item) => item.metadata?.name === body.metadata.name ? body : item);
+      }
+      state.editingPlacement = false;
+      state.placementDraft.clear();
+      const refreshed = await refreshApplications();
+      if (refreshed) showNotice('Placement updated. The controller will add or remove releases as needed.', 'success');
+    } catch (error) {
+      showNotice(error.message || 'Could not update placement. Try again.', 'error');
+    } finally {
+      state.savingPlacement = false;
+      renderApplicationDetail();
+    }
   }
 
   function selectionTargets(app) {
@@ -3653,10 +3794,11 @@
     const button = $('#refresh-applications');
     button.disabled = true;
     try {
-      const [appsResult, definitionsResult] = await Promise.allSettled([getList(withTeam('/api/applications')), getList('/api/applicationdefinitions')]);
+      const [appsResult, definitionsResult, clustersResult] = await Promise.allSettled([getList(withTeam('/api/applications')), getList('/api/applicationdefinitions'), getList('/api/clusters')]);
       if (appsResult.status !== 'fulfilled') throw appsResult.reason;
       state.applications = appsResult.value;
       if (definitionsResult.status === 'fulfilled') state.definitions = definitionsResult.value;
+      if (clustersResult.status === 'fulfilled') state.clusters = clustersResult.value;
       const present = new Set(state.applications.map((app) => app.metadata?.name));
       state.deletionPending.forEach((name) => { if (!present.has(name)) state.deletionPending.delete(name); });
       renderApplications();

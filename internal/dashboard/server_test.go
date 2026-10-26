@@ -15,6 +15,7 @@ import (
 	platformv1alpha1 "github.com/federicolepera/idp/api/v1alpha1"
 	authorizationv1 "k8s.io/api/authorization/v1"
 	corev1 "k8s.io/api/core/v1"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -666,6 +667,105 @@ func TestUpdateApplicationValues(t *testing.T) {
 		large := fmt.Sprintf(`{"generation":1,"values":{"large":"%s"}}`, strings.Repeat("x", maxRequestBody))
 		if w := patchValues(h, "/api/applications/outside", large); w.Code != http.StatusRequestEntityTooLarge {
 			t.Fatalf("oversized body status=%d, want 413", w.Code)
+		}
+	})
+}
+
+func TestUpdateApplicationPlacement(t *testing.T) {
+	definition := validDefinition(testDefinitionName, true)
+	makeCluster := func(name string, uid types.UID) *platformv1alpha1.Cluster {
+		return &platformv1alpha1.Cluster{ObjectMeta: metav1.ObjectMeta{Name: name, UID: uid}}
+	}
+
+	t.Run("adds and removes explicit targets", func(t *testing.T) {
+		app := &platformv1alpha1.Application{
+			ObjectMeta: metav1.ObjectMeta{Name: "placement-app", Namespace: testNamespace, Generation: 3},
+			Spec: platformv1alpha1.ApplicationSpec{
+				ApplicationDefinitionRef: platformv1alpha1.ApplicationReference{Name: testDefinitionName},
+				Clusters:                 []platformv1alpha1.ApplicationClusterTarget{{Name: "alpha", UID: "uid-a"}},
+				Values:                   &apiextensionsv1.JSON{Raw: []byte(`{"replica":{"count":1}}`)},
+			},
+		}
+		h, c := testHandler(t, definition, makeCluster("alpha", "uid-a"), makeCluster("beta", "uid-b"), app)
+		w := patchValues(h, "/api/applications/placement-app/placement", `{"generation":3,"clusters":[{"name":"alpha","uid":"uid-a"},{"name":"beta","uid":"uid-b"}]}`)
+		if w.Code != http.StatusOK {
+			t.Fatalf("PATCH status=%d body=%s", w.Code, w.Body)
+		}
+		stored := &platformv1alpha1.Application{}
+		if err := c.Get(context.Background(), client.ObjectKey{Namespace: testNamespace, Name: "placement-app"}, stored); err != nil {
+			t.Fatal(err)
+		}
+		if len(stored.Spec.Clusters) != 2 || stored.Spec.Clusters[0].Name != "alpha" || stored.Spec.Clusters[1].Name != "beta" {
+			t.Fatalf("unexpected added placement: %+v", stored.Spec.Clusters)
+		}
+		if stored.Annotations["platform.releaseyard.io/change-history"] == "" {
+			t.Fatal("placement update did not record change history")
+		}
+
+		w = patchValues(h, "/api/applications/placement-app/placement", `{"generation":3,"clusters":[{"name":"beta","uid":"uid-b"}]}`)
+		if w.Code != http.StatusOK {
+			t.Fatalf("remove PATCH status=%d body=%s", w.Code, w.Body)
+		}
+		if err := c.Get(context.Background(), client.ObjectKey{Namespace: testNamespace, Name: "placement-app"}, stored); err != nil {
+			t.Fatal(err)
+		}
+		if len(stored.Spec.Clusters) != 1 || stored.Spec.Clusters[0].Name != "beta" {
+			t.Fatalf("unexpected removed placement: %+v", stored.Spec.Clusters)
+		}
+	})
+
+	t.Run("rejects invalid placement changes", func(t *testing.T) {
+		explicit := &platformv1alpha1.Application{
+			ObjectMeta: metav1.ObjectMeta{Name: "placement-app", Namespace: testNamespace, Generation: 3},
+			Spec: platformv1alpha1.ApplicationSpec{
+				ApplicationDefinitionRef: platformv1alpha1.ApplicationReference{Name: testDefinitionName},
+				Clusters:                 []platformv1alpha1.ApplicationClusterTarget{{Name: "alpha", UID: "uid-a"}},
+				Values:                   &apiextensionsv1.JSON{Raw: []byte(`{"replica":{"count":1}}`)},
+			},
+		}
+		environment := &platformv1alpha1.Application{
+			ObjectMeta: metav1.ObjectMeta{Name: "environment-app", Namespace: testNamespace, Generation: 3},
+			Spec: platformv1alpha1.ApplicationSpec{
+				ApplicationDefinitionRef: platformv1alpha1.ApplicationReference{Name: testDefinitionName},
+				Environment:              &platformv1alpha1.ApplicationEnvironmentSelection{Name: "prod"},
+			},
+		}
+		h, _ := testHandler(t, definition, makeCluster("alpha", "uid-a"), makeCluster("beta", "uid-b"), explicit, environment)
+		for _, tc := range []struct {
+			name string
+			path string
+			body string
+			want int
+		}{
+			{name: "empty selection", path: "/api/applications/placement-app/placement", body: `{"generation":3,"clusters":[]}`, want: http.StatusBadRequest},
+			{name: "stale generation", path: "/api/applications/placement-app/placement", body: `{"generation":2,"clusters":[{"name":"alpha","uid":"uid-a"}]}`, want: http.StatusConflict},
+			{name: "duplicate target", path: "/api/applications/placement-app/placement", body: `{"generation":3,"clusters":[{"name":"alpha","uid":"uid-a"},{"name":"alpha","uid":"uid-a"}]}`, want: http.StatusBadRequest},
+			{name: "unknown cluster", path: "/api/applications/placement-app/placement", body: `{"generation":3,"clusters":[{"name":"missing","uid":"uid-x"}]}`, want: http.StatusNotFound},
+			{name: "stale cluster UID", path: "/api/applications/placement-app/placement", body: `{"generation":3,"clusters":[{"name":"alpha","uid":"stale"}]}`, want: http.StatusConflict},
+			{name: "environment placement", path: "/api/applications/environment-app/placement", body: `{"generation":3,"clusters":[{"name":"alpha","uid":"uid-a"}]}`, want: http.StatusUnprocessableEntity},
+			{name: "unknown field", path: "/api/applications/placement-app/placement", body: `{"generation":3,"clusters":[{"name":"alpha","uid":"uid-a"}],"extra":true}`, want: http.StatusBadRequest},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				if w := patchValues(h, tc.path, tc.body); w.Code != tc.want {
+					t.Fatalf("PATCH status=%d, want %d body=%s", w.Code, tc.want, w.Body)
+				}
+			})
+		}
+	})
+
+	t.Run("rejects replacing a cluster UID under the same name", func(t *testing.T) {
+		app := &platformv1alpha1.Application{
+			ObjectMeta: metav1.ObjectMeta{Name: "placement-app", Namespace: testNamespace, Generation: 3},
+			Spec: platformv1alpha1.ApplicationSpec{
+				ApplicationDefinitionRef: platformv1alpha1.ApplicationReference{Name: testDefinitionName},
+				Clusters:                 []platformv1alpha1.ApplicationClusterTarget{{Name: "alpha", UID: "old-uid"}},
+				Values:                   &apiextensionsv1.JSON{Raw: []byte(`{"replica":{"count":1}}`)},
+			},
+		}
+		h, _ := testHandler(t, definition, makeCluster("alpha", "uid-a"), app)
+		w := patchValues(h, "/api/applications/placement-app/placement", `{"generation":3,"clusters":[{"name":"alpha","uid":"uid-a"}]}`)
+		if w.Code != http.StatusUnprocessableEntity {
+			t.Fatalf("PATCH status=%d, want 422 body=%s", w.Code, w.Body)
 		}
 	})
 }

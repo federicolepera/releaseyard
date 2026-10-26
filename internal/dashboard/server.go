@@ -97,6 +97,7 @@ func NewHandler(k8s client.Client, namespace string) http.Handler {
 	mux.HandleFunc("GET /api/environments/{name}/targets", s.previewEnvironmentTargets)
 	mux.HandleFunc("POST /api/applications", s.createApplication)
 	mux.HandleFunc("PATCH /api/applications/{name}", s.updateApplicationValues)
+	mux.HandleFunc("PATCH /api/applications/{name}/placement", s.updateApplicationPlacement)
 	mux.HandleFunc("DELETE /api/applications/{name}", s.deleteApplication)
 	mux.HandleFunc("GET /api/applications/{name}/resources", s.listApplicationResources)
 	mux.HandleFunc("GET /api/applications/{name}/pods/{pod}/logs", s.applicationPodLogs)
@@ -703,22 +704,184 @@ func (s *server) updateApplicationValues(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, app)
 }
 
-type createApplicationRequest struct {
-	Name             string                     `json:"name"`
-	Description      string                     `json:"description"`
-	DefinitionName   string                     `json:"definitionName"`
-	ClusterName      string                     `json:"clusterName"`
-	Clusters         []createApplicationCluster `json:"clusters"`
-	EnvironmentName  string                     `json:"environmentName"`
-	Namespace        string                     `json:"namespace"`
-	PreviewDigest    string                     `json:"previewDigest"`
-	ReleaseNamespace string                     `json:"releaseNamespace"`
-	Values           json.RawMessage            `json:"values"`
+type updateApplicationPlacementRequest struct {
+	Generation int64                     `json:"generation"`
+	Clusters   []applicationClusterInput `json:"clusters"`
 }
 
-type createApplicationCluster struct {
+//nolint:gocyclo // request validation and optimistic concurrency are intentionally explicit.
+func (s *server) updateApplicationPlacement(w http.ResponseWriter, r *http.Request) {
+	if !sameOrigin(r) {
+		writeError(w, http.StatusForbidden, "Request origin is not allowed")
+		return
+	}
+	name := r.PathValue("name")
+	if len(name) == 0 || len(name) > 53 || !applicationNamePattern.MatchString(name) {
+		writeError(w, http.StatusBadRequest, "Application name must be a valid DNS label of at most 53 characters")
+		return
+	}
+	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if err != nil || mediaType != mediaTypeJSON {
+		writeError(w, http.StatusUnsupportedMediaType, "Content-Type application/json is required")
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBody)
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	var input updateApplicationPlacementRequest
+	if err := decoder.Decode(&input); err != nil {
+		status := http.StatusBadRequest
+		if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
+			status = http.StatusRequestEntityTooLarge
+		}
+		writeError(w, status, "Request body is invalid")
+		return
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		writeError(w, http.StatusBadRequest, "Request body must contain exactly one JSON object")
+		return
+	}
+	if input.Generation <= 0 || len(input.Clusters) == 0 {
+		writeError(w, http.StatusBadRequest, "A positive generation and at least one cluster are required")
+		return
+	}
+
+	namespace, found, err := s.resolveApplicationNamespace(r, name)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Could not load application")
+		return
+	}
+	if !found {
+		writeError(w, http.StatusNotFound, "Application does not exist")
+		return
+	}
+	app := &platformv1alpha1.Application{}
+	key := types.NamespacedName{Namespace: namespace, Name: name}
+	if err := s.writeClient(r).Get(r.Context(), key, app); err != nil {
+		if apierrors.IsNotFound(err) {
+			writeError(w, http.StatusNotFound, "Application does not exist")
+		} else {
+			writeError(w, http.StatusInternalServerError, "Could not load application")
+		}
+		return
+	}
+	if app.Generation != input.Generation || app.DeletionTimestamp != nil {
+		writeError(w, http.StatusConflict, "Application has changed or is being deleted")
+		return
+	}
+	if app.Spec.ClusterRef != nil || app.Spec.Environment != nil || len(app.Spec.Clusters) == 0 {
+		writeError(w, http.StatusUnprocessableEntity, "Placement can only be edited for explicitly selected clusters")
+		return
+	}
+
+	definition := &platformv1alpha1.ApplicationDefinition{}
+	if err := s.client.Get(r.Context(), types.NamespacedName{Name: app.Spec.ApplicationDefinitionRef.Name}, definition); err != nil {
+		if apierrors.IsNotFound(err) {
+			writeError(w, http.StatusNotFound, "Selected definition does not exist")
+		} else {
+			writeError(w, http.StatusInternalServerError, "Could not verify definition")
+		}
+		return
+	}
+	if !isCurrentValidatedDefinition(definition) {
+		writeError(w, http.StatusUnprocessableEntity, "The selected application definition is not validated for its current generation")
+		return
+	}
+	targets, status, message := s.resolveApplicationClusters(r.Context(), input.Clusters)
+	if status != 0 {
+		writeError(w, status, message)
+		return
+	}
+	oldUIDs := make(map[string]string, len(app.Spec.Clusters))
+	for _, target := range app.Spec.Clusters {
+		oldUIDs[target.Name] = target.UID
+	}
+	for _, target := range targets {
+		if oldUID, exists := oldUIDs[target.Name]; exists && oldUID != target.UID {
+			writeError(w, http.StatusUnprocessableEntity, "A selected cluster changed. Remove the old target before adding the replacement")
+			return
+		}
+	}
+	prospective := app.DeepCopy()
+	prospective.Spec.Clusters = targets
+	if err := contract.ValidateApplication(definition, prospective); err != nil {
+		writeError(w, http.StatusUnprocessableEntity, "Selected clusters do not form a valid placement")
+		return
+	}
+	app.Spec.Clusters = targets
+	session, _ := sessionFromContext(r.Context())
+	recordChangeHistory(app, session.username, "Updated placement")
+	if err := s.writeClient(r).Update(r.Context(), app); err != nil {
+		if apierrors.IsConflict(err) {
+			writeError(w, http.StatusConflict, "Application was modified by another request")
+		} else if apierrors.IsNotFound(err) {
+			writeError(w, http.StatusNotFound, "Application does not exist")
+		} else if apierrors.IsInvalid(err) {
+			writeError(w, http.StatusUnprocessableEntity, "Selected clusters do not form a valid placement")
+		} else {
+			writeError(w, http.StatusInternalServerError, "Could not update application placement")
+		}
+		return
+	}
+	writeJSON(w, http.StatusOK, app)
+}
+
+type createApplicationRequest struct {
+	Name             string                    `json:"name"`
+	Description      string                    `json:"description"`
+	DefinitionName   string                    `json:"definitionName"`
+	ClusterName      string                    `json:"clusterName"`
+	Clusters         []applicationClusterInput `json:"clusters"`
+	EnvironmentName  string                    `json:"environmentName"`
+	Namespace        string                    `json:"namespace"`
+	PreviewDigest    string                    `json:"previewDigest"`
+	ReleaseNamespace string                    `json:"releaseNamespace"`
+	Values           json.RawMessage           `json:"values"`
+}
+
+type applicationClusterInput struct {
 	Name string    `json:"name"`
 	UID  types.UID `json:"uid"`
+}
+
+func (s *server) resolveApplicationClusters(ctx context.Context, input []applicationClusterInput) ([]platformv1alpha1.ApplicationClusterTarget, int, string) {
+	if len(input) == 0 {
+		return nil, http.StatusBadRequest, "Select at least one cluster"
+	}
+	if len(input) > maxEnvironmentTargets {
+		return nil, http.StatusBadRequest, "Select at most 32 clusters"
+	}
+	seenNames := make(map[string]struct{}, len(input))
+	seenUIDs := make(map[types.UID]struct{}, len(input))
+	targets := make([]platformv1alpha1.ApplicationClusterTarget, 0, len(input))
+	for _, selected := range input {
+		if len(validation.IsDNS1123Subdomain(selected.Name)) != 0 || selected.UID == "" || len(selected.UID) > 128 {
+			return nil, http.StatusBadRequest, "Selected clusters are invalid"
+		}
+		if _, exists := seenNames[selected.Name]; exists {
+			return nil, http.StatusBadRequest, "Selected clusters contain duplicates"
+		}
+		seenNames[selected.Name] = struct{}{}
+		if _, exists := seenUIDs[selected.UID]; exists {
+			return nil, http.StatusBadRequest, "Selected clusters contain duplicates"
+		}
+		seenUIDs[selected.UID] = struct{}{}
+		cluster := &platformv1alpha1.Cluster{}
+		if err := s.client.Get(ctx, types.NamespacedName{Name: selected.Name}, cluster); err != nil {
+			if apierrors.IsNotFound(err) {
+				return nil, http.StatusNotFound, "A selected cluster does not exist"
+			}
+			return nil, http.StatusInternalServerError, "Could not verify selected clusters"
+		}
+		if cluster.UID != selected.UID {
+			return nil, http.StatusConflict, "A selected cluster changed. Refresh the cluster list and try again"
+		}
+		if !cluster.DeletionTimestamp.IsZero() {
+			return nil, http.StatusUnprocessableEntity, "A selected cluster is being deleted"
+		}
+		targets = append(targets, platformv1alpha1.ApplicationClusterTarget{Name: cluster.Name, UID: string(cluster.UID)})
+	}
+	return targets, 0, ""
 }
 
 //nolint:gocyclo // orchestration handler; splitting would obscure the sequential flow.
@@ -775,28 +938,6 @@ func (s *server) createApplication(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "Environment is invalid")
 		return
 	}
-	if len(input.Clusters) > maxEnvironmentTargets {
-		writeError(w, http.StatusBadRequest, "Select at most 32 clusters")
-		return
-	}
-	seenNames := make(map[string]struct{}, len(input.Clusters))
-	seenUIDs := make(map[types.UID]struct{}, len(input.Clusters))
-	for _, target := range input.Clusters {
-		if len(validation.IsDNS1123Subdomain(target.Name)) != 0 || target.UID == "" || len(target.UID) > 128 {
-			writeError(w, http.StatusBadRequest, "Selected clusters are invalid")
-			return
-		}
-		if _, exists := seenNames[target.Name]; exists {
-			writeError(w, http.StatusBadRequest, "Selected clusters contain duplicates")
-			return
-		}
-		seenNames[target.Name] = struct{}{}
-		if _, exists := seenUIDs[target.UID]; exists {
-			writeError(w, http.StatusBadRequest, "Selected clusters contain duplicates")
-			return
-		}
-		seenUIDs[target.UID] = struct{}{}
-	}
 	if len(input.Values) != 0 {
 		var object map[string]json.RawMessage
 		if err := json.Unmarshal(input.Values, &object); err != nil || object == nil || string(input.Values) == "null" {
@@ -834,27 +975,12 @@ func (s *server) createApplication(w http.ResponseWriter, r *http.Request) {
 	case environmentMode:
 		app.Spec.Environment = &platformv1alpha1.ApplicationEnvironmentSelection{Name: input.EnvironmentName}
 	case len(input.Clusters) > 0:
-		app.Spec.Clusters = make([]platformv1alpha1.ApplicationClusterTarget, 0, len(input.Clusters))
-		for _, selected := range input.Clusters {
-			cluster := &platformv1alpha1.Cluster{}
-			if err := s.client.Get(r.Context(), types.NamespacedName{Name: selected.Name}, cluster); err != nil {
-				if apierrors.IsNotFound(err) {
-					writeError(w, http.StatusNotFound, "A selected cluster does not exist")
-				} else {
-					writeError(w, http.StatusInternalServerError, "Could not verify selected clusters")
-				}
-				return
-			}
-			if cluster.UID != selected.UID {
-				writeError(w, http.StatusConflict, "A selected cluster changed. Refresh the cluster list and try again")
-				return
-			}
-			if !cluster.DeletionTimestamp.IsZero() {
-				writeError(w, http.StatusUnprocessableEntity, "A selected cluster is being deleted")
-				return
-			}
-			app.Spec.Clusters = append(app.Spec.Clusters, platformv1alpha1.ApplicationClusterTarget{Name: cluster.Name, UID: cluster.UID})
+		targets, status, message := s.resolveApplicationClusters(r.Context(), input.Clusters)
+		if status != 0 {
+			writeError(w, status, message)
+			return
 		}
+		app.Spec.Clusters = targets
 	default:
 		cluster := &platformv1alpha1.Cluster{}
 		if err := s.client.Get(r.Context(), types.NamespacedName{Name: input.ClusterName}, cluster); err != nil {

@@ -1439,6 +1439,14 @@ html[data-theme="dark"] .cloud-count-pill { border-color: #2a3e47; background: #
 .cluster-check input { width: 16px; min-height: 16px; height: 16px; margin: 0; flex: 0 0 auto; accent-color: var(--accent); }
 .cluster-check-name { min-width: 0; flex: 1 1 auto; overflow-wrap: anywhere; }
 .cluster-checklist-empty { margin: 0; padding: 10px 12px; color: var(--muted); font-size: 12.5px; font-weight: 400; }
+.placement-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.placement-head .ov-card-title { margin-bottom: 10px; }
+.placement-edit { min-height: 34px; padding: 6px 11px; font-size: 12px; }
+.placement-targets { margin: 10px 0 12px; }
+.placement-checklist { margin: 12px 0; max-height: 220px; }
+.placement-summary { margin: 12px 0 0; }
+.placement-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+.placement-actions .button { min-height: 36px; padding: 7px 12px; font-size: 12px; }
 .values-fields { margin: 0; padding: 0; border: 0; }
 .values-fields .form-grid { gap: 18px 22px; }
 .values-empty { margin: 0; padding: 15px 16px; border: 1px dashed #d6e2df; border-radius: 9px; background: #fafcfb; color: var(--muted); font-size: 12.5px; }
@@ -1490,6 +1498,8 @@ html[data-theme="dark"] .review-row { border-color: #2a3e47; }
   .step-heading { grid-template-columns: 34px minmax(0, 1fr); }
   .values-count { grid-column: 2; justify-self: start; margin-top: 3px; }
   .destination-modes { grid-template-columns: 1fr; }
+  .placement-actions { align-items: stretch; flex-direction: column-reverse; }
+  .placement-actions .button { width: 100%; }
   .create-sidebar { grid-template-columns: 1fr; }
   .review-row { grid-template-columns: 96px minmax(0, 1fr); }
   .info-row { grid-template-columns: 78px minmax(0, 1fr); }

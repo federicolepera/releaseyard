@@ -1,0 +1,34 @@
+{{- if .Values.admission.enabled }}
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/name: {{ include "idp.name" . }}
+    app.kubernetes.io/component: admission
+    helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  name: {{ include "idp.resourceName" (dict "suffix" "application-placement-policy" "context" $) }}
+spec:
+  failurePolicy: {{ .Values.admission.failurePolicy | default "Fail" }}
+  matchConstraints:
+    resourceRules:
+      - apiGroups:
+          - platform.releaseyard.io
+        apiVersions:
+          - v1alpha1
+        operations:
+          - UPDATE
+        resources:
+          - applications
+        scope: Namespaced
+  matchConditions:
+    - name: clusters-changed
+      expression: >-
+        has(object.spec.clusters) && (!has(oldObject.spec.clusters) || object.spec.clusters != oldObject.spec.clusters)
+  validations:
+    - expression: >-
+        object.spec.clusters.all(target, (has(oldObject.spec.clusters) && oldObject.spec.clusters.exists(old, old.name == target.name && old.uid == target.uid)) || authorizer.group('platform.releaseyard.io').resource('clusters').name(target.name).check('get').allowed())
+      message: Every added Cluster must be readable by the requesting user.
+      reason: Forbidden
+{{- end }}

@@ -38,7 +38,6 @@ type ApplicationReference struct {
 // +kubebuilder:validation:XValidation:rule="(has(self.clusterRef) ? 1 : 0) + (has(self.environment) ? 1 : 0) + (has(self.clusters) ? 1 : 0) == 1",message="exactly one of clusterRef, clusters, or environment must be set"
 // +kubebuilder:validation:XValidation:rule="(!has(self.clusterRef) && !has(oldSelf.clusterRef)) || (has(self.clusterRef) && has(oldSelf.clusterRef) && self.clusterRef == oldSelf.clusterRef)",message="the Application target selector is immutable"
 // +kubebuilder:validation:XValidation:rule="(!has(self.environment) && !has(oldSelf.environment)) || (has(self.environment) && has(oldSelf.environment) && self.environment == oldSelf.environment)",message="the Application target selector is immutable"
-// +kubebuilder:validation:XValidation:rule="(!has(self.clusters) && !has(oldSelf.clusters)) || (has(self.clusters) && has(oldSelf.clusters) && self.clusters == oldSelf.clusters)",message="the Application target selector is immutable"
 type ApplicationSpec struct {
 	// description is an optional human-readable description of the Application.
 	// +kubebuilder:validation:MaxLength=280
@@ -55,8 +54,9 @@ type ApplicationSpec struct {
 	// Its name cannot be changed after creation.
 	// +optional
 	ClusterRef *ApplicationReference `json:"clusterRef,omitempty"`
-	// clusters explicitly selects one or more target Clusters. The list is
-	// immutable and is not expanded when new Clusters appear.
+	// clusters explicitly selects one or more target Clusters. The list can be
+	// updated after creation, but a target name must keep the same UID. It is not
+	// expanded automatically when new Clusters appear.
 	// +kubebuilder:validation:MinItems=1
 	// +kubebuilder:validation:MaxItems=32
 	// +listType=map
@@ -87,7 +87,7 @@ type ApplicationSpec struct {
 }
 
 // ApplicationClusterTarget pins one explicitly selected target Cluster.
-// +kubebuilder:validation:XValidation:rule="size(self.uid) >= 1 && size(self.uid) <= 128",message="uid must contain between 1 and 128 characters"
+// +kubebuilder:validation:XValidation:rule="self.uid == oldSelf.uid",message="a Cluster UID cannot change for an existing target name"
 type ApplicationClusterTarget struct {
 	// name is the DNS subdomain name of the target Cluster.
 	// +kubebuilder:validation:Required
@@ -97,7 +97,9 @@ type ApplicationClusterTarget struct {
 	Name string `json:"name"`
 	// uid identifies the exact target Cluster object.
 	// +kubebuilder:validation:Required
-	UID types.UID `json:"uid"`
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=128
+	UID string `json:"uid"`
 }
 
 // ApplicationEnvironmentSelection selects an environment. An empty targets list

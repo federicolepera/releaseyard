@@ -4,6 +4,8 @@ namePrefix: idp-
 resources:
   - application-access-policy.yaml
   - application-access-binding.yaml
+  - application-placement-policy.yaml
+  - application-placement-binding.yaml
 replacements:
   - source:
       kind: ValidatingAdmissionPolicy
@@ -13,5 +15,15 @@ replacements:
       - select:
           kind: ValidatingAdmissionPolicyBinding
           name: application-access-binding
+        fieldPaths:
+          - spec.policyName
+  - source:
+      kind: ValidatingAdmissionPolicy
+      name: application-placement-policy
+      fieldPath: metadata.name
+    targets:
+      - select:
+          kind: ValidatingAdmissionPolicyBinding
+          name: application-placement-binding
         fieldPaths:
           - spec.policyName

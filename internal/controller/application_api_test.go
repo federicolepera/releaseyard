@@ -180,6 +180,33 @@ var _ = Describe("Application API", func() {
 		Expect(apierrors.IsInvalid(err)).To(BeTrue(), "expected immutability validation error, got %v", err)
 	})
 
+	It("allows explicit cluster placement to change while keeping target UIDs", func() {
+		application := validClustersApplication(managementNamespace)
+		Expect(k8sClient.Create(ctx, application)).To(Succeed())
+
+		readBack := &unstructured.Unstructured{}
+		readBack.SetGroupVersionKind(applicationGVK)
+		key := types.NamespacedName{Namespace: managementNamespace, Name: application.GetName()}
+		Expect(k8sClient.Get(ctx, key, readBack)).To(Succeed())
+		targets := readBack.Object["spec"].(map[string]any)["clusters"].([]any)
+		readBack.Object["spec"].(map[string]any)["clusters"] = append(targets, map[string]any{"name": "cluster-c", "uid": "cluster-uid-c"})
+		Expect(k8sClient.Update(ctx, readBack)).To(Succeed())
+
+		readBack = &unstructured.Unstructured{}
+		readBack.SetGroupVersionKind(applicationGVK)
+		Expect(k8sClient.Get(ctx, key, readBack)).To(Succeed())
+		readBack.Object["spec"].(map[string]any)["clusters"] = []any{map[string]any{"name": "cluster-a", "uid": "cluster-uid-a"}}
+		Expect(k8sClient.Update(ctx, readBack)).To(Succeed())
+
+		readBack = &unstructured.Unstructured{}
+		readBack.SetGroupVersionKind(applicationGVK)
+		Expect(k8sClient.Get(ctx, key, readBack)).To(Succeed())
+		readBack.Object["spec"].(map[string]any)["clusters"] = []any{map[string]any{"name": "cluster-a", "uid": "replacement-uid"}}
+		err := k8sClient.Update(ctx, readBack)
+		Expect(err).To(HaveOccurred())
+		Expect(apierrors.IsInvalid(err)).To(BeTrue(), "expected target UID stability validation error, got %v", err)
+	})
+
 	It("rejects changing clusterRef.name after creation", func() {
 		application := validApplication(managementNamespace)
 		Expect(k8sClient.Create(ctx, application)).To(Succeed())
@@ -465,6 +492,14 @@ func validApplication(namespace string) *unstructured.Unstructured {
 			},
 		},
 	}}
+}
+
+func validClustersApplication(namespace string) *unstructured.Unstructured {
+	application := validApplication(namespace)
+	spec := application.Object["spec"].(map[string]any)
+	delete(spec, "clusterRef")
+	spec["clusters"] = validEnvironmentTargets()
+	return application
 }
 
 func validEnvironmentApplication(namespace string) *unstructured.Unstructured {

@@ -128,13 +128,13 @@ OIDC groups. This requires `rbac.helpers.enabled=true`.
 ## Application references
 
 Kubernetes `resourceNames` restricts `get`, not the references made by
-`create`. The chart therefore installs a `ValidatingAdmissionPolicy` that runs
-on `Application` create and asks the API server whether the requesting user may
-`get`:
+`create`. The chart therefore installs `ValidatingAdmissionPolicy` resources that
+ask the API server whether the requesting user may `get`:
 
-- the referenced `ApplicationDefinition`;
-- the referenced `Cluster`, every `Cluster` in `spec.clusters`, or every
-  `Cluster` explicitly listed in a pinned environment target list.
+- on create: the referenced `ApplicationDefinition`; the referenced `Cluster`,
+  every `Cluster` in `spec.clusters`, or every `Cluster` explicitly listed in a
+  pinned environment target list;
+- on update: only Clusters newly added to `spec.clusters`.
 
 The policy applies to dashboard impersonation and to direct clients such as
 `kubectl`. It uses `failurePolicy: Fail` by default, so a policy evaluation

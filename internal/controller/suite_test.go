@@ -94,6 +94,8 @@ func installApplicationAccessPolicy() {
 	for _, name := range []string{
 		"application-access-policy.yaml",
 		"application-access-binding.yaml",
+		"application-placement-policy.yaml",
+		"application-placement-binding.yaml",
 	} {
 		data, err := os.ReadFile(filepath.Join("..", "..", "config", "admission", name))
 		Expect(err).NotTo(HaveOccurred(), "reading %s", name)

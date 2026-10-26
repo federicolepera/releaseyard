@@ -103,13 +103,16 @@ spec:
       uid: <cluster-b-uid>
 ```
 
-The Application deploys to exactly these Clusters. The list is immutable and is
-not expanded when new Clusters appear; remove or add targets by recreating the
-Application. `uid` guards against a Cluster being deleted and recreated under
+The Application deploys to exactly these Clusters. The list is a fixed snapshot
+and is not expanded automatically when new Clusters appear, but it can be edited
+after creation. Adding a Cluster installs the release there; removing one
+uninstalls its release and deletes its ownership claim. A target name must keep
+the same `uid`, which guards against a Cluster being deleted and recreated under
 the same name.
 
 The dashboard exposes this mode as **Selected clusters**, where each target can
-be checked individually. A direct API client must resolve the Cluster UIDs.
+be checked individually and edited later from the Application overview. A direct
+API client must resolve the Cluster UIDs.
 
 ### An environment
 

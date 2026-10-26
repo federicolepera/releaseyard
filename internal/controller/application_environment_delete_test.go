@@ -137,7 +137,7 @@ func TestExplicitClusterSelectionDeletionCleansInstanceSnapshot(t *testing.T) {
 	e := newAppTestEnvironment(t, nil)
 	app := e.getApp(t)
 	app.Spec.ClusterRef = nil
-	app.Spec.Clusters = []platformv1alpha1.ApplicationClusterTarget{{Name: e.cluster.Name, UID: e.cluster.UID}}
+	app.Spec.Clusters = []platformv1alpha1.ApplicationClusterTarget{{Name: e.cluster.Name, UID: string(e.cluster.UID)}}
 	if err := e.c.Update(context.Background(), app); err != nil {
 		t.Fatal(err)
 	}

@@ -1,0 +1,12 @@
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: application-placement-binding
+  labels:
+    app.kubernetes.io/name: idp
+    app.kubernetes.io/component: admission
+    app.kubernetes.io/managed-by: kustomize
+spec:
+  policyName: application-placement-policy
+  validationActions:
+    - Deny
