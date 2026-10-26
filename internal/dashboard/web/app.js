@@ -390,7 +390,9 @@
   }
 
   function applicationTargets(app) {
-    return app.spec?.environment && Array.isArray(app.spec.environment.targets) ? app.spec.environment.targets : null;
+    if (!app.spec?.environment) return null;
+    if (Array.isArray(app.spec.environment.targets) && app.spec.environment.targets.length) return app.spec.environment.targets;
+    return Array.isArray(app.status?.instances) ? app.status.instances.map((instance) => ({ name: instance.clusterName, uid: instance.clusterUID })) : [];
   }
 
   function instanceFreshness(app, instance) {
@@ -593,9 +595,10 @@
 
   function applicationClusterLabel(app) {
     const targets = applicationTargets(app);
-    if (targets?.length) {
-      if (targets.length === 1) return targets[0].name || app.spec?.environment?.name || 'Environment';
-      return `${app.spec?.environment?.name || 'Environment'} · ${targets.length} clusters`;
+    if (app.spec?.environment) {
+      if (targets?.length === 1) return targets[0].name || app.spec.environment.name;
+      if (targets?.length > 1) return `${app.spec.environment.name} · ${targets.length} clusters`;
+      return app.spec.environment.name;
     }
     return app.spec?.clusterRef?.name || '—';
   }
@@ -2795,7 +2798,7 @@
         list.append(item);
       });
       previewNode.replaceChildren(element('p', 'preview-summary', `${targets.length} matching cluster${targets.length === 1 ? '' : 's'}`), list);
-      if (!targets.length) previewNode.append(element('p', 'warning', 'No clusters currently match this environment.'));
+      if (!targets.length) previewNode.append(element('p', 'warning', 'No clusters currently match this environment. The Application will follow matching clusters when they are added.'));
       else if (targets.some((item) => item.deleting)) previewNode.append(element('p', 'warning', 'A matching cluster is being deleted. Choose another environment or wait until deletion finishes.'));
       else if (targets.some((item) => !item.connected)) previewNode.append(element('p', 'warning', 'One or more matching clusters are not connected. The application can still be created, but rollout may be delayed.'));
       previewNode.className = 'environment-preview';
@@ -2896,7 +2899,7 @@
   function updateSubmit() {
     const def = state.selectedDefinition;
     const blocked = !definitionReadiness(def).ready;
-    const destinationReady = state.destinationMode === 'cluster' ? Boolean($('#cluster').value) : Boolean(state.preview?.digest && state.preview.targets?.length && !state.preview.targets.some((target) => target.deleting) && !state.previewLoading && state.preview.environment === $('#environment-select').value);
+    const destinationReady = state.destinationMode === 'cluster' ? Boolean($('#cluster').value) : Boolean($('#environment-select').value && !state.previewLoading && state.preview && state.preview.environment === $('#environment-select').value);
     $('#submit').disabled =
     !state.canCreateApps ||
     state.creating ||
@@ -4431,10 +4434,8 @@
     const submittedEnvironment = submittedMode === 'environment' ? $('#environment-select').value : '';
     const submittedCluster = submittedMode === 'cluster' ? $('#cluster').value : '';
     const reviewedPreview = submittedMode === 'environment' ? state.preview : null;
-    if (submittedMode === 'environment' && (!submittedEnvironment || state.previewLoading || !reviewedPreview
-      || reviewedPreview.environment !== submittedEnvironment || typeof reviewedPreview.digest !== 'string'
-      || !Array.isArray(reviewedPreview.targets) || !reviewedPreview.targets.length || reviewedPreview.targets.some((target) => target.deleting))) {
-      showNotice('Review a current environment preview with matching clusters that are not being deleted before creating.', 'error');
+    if (submittedMode === 'environment' && (!submittedEnvironment || state.previewLoading || !reviewedPreview || reviewedPreview.environment !== submittedEnvironment)) {
+      showNotice('Select an environment before creating.', 'error');
       return;
     }
     const values = Object.create(null);
@@ -4463,7 +4464,7 @@
     const submittedReleaseNamespace = def.spec?.release?.allowNamespaceOverride === true ? $('#release-namespace').value.trim() : '';
     const payload = {
       name: submittedName, definitionName: submittedDefinition,
-      ...(submittedMode === 'environment' ? { environmentName: submittedEnvironment, previewDigest: reviewedPreview.digest } : { clusterName: submittedCluster }), values,
+      ...(submittedMode === 'environment' ? { environmentName: submittedEnvironment } : { clusterName: submittedCluster }), values,
       ...(state.team ? { namespace: state.team } : {}),
       ...(submittedReleaseNamespace ? { releaseNamespace: submittedReleaseNamespace } : {})
     };
