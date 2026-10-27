@@ -22,7 +22,14 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 LOCAL_DIR="$REPO_ROOT/.local"
 CHARTS_DIR="$LOCAL_DIR/charts"
-CHART_SOURCE="$REPO_ROOT/hack/charts/$CHART_NAME"
+HELM_CHARTS_DIR="${HELM_CHARTS_DIR:-$REPO_ROOT/../helm-charts}"
+CHART_SOURCE="$HELM_CHARTS_DIR/charts/$CHART_NAME"
+
+if [[ ! -d "$CHART_SOURCE" ]]; then
+	printf 'Chart source not found: %s\n' "$CHART_SOURCE" >&2
+	printf 'Clone the helm-charts repository next to release-yard or set HELM_CHARTS_DIR.\n' >&2
+	exit 1
+fi
 
 if [[ -L "$LOCAL_DIR" ]]; then
 	printf 'Refusing symlinked local output directory: %s\n' "$LOCAL_DIR" >&2

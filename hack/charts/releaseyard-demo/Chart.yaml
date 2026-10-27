@@ -1,6 +1,0 @@
-apiVersion: v2
-name: releaseyard-demo
-description: A small nginx demo chart with configurable replicas, image, and page message.
-type: application
-version: 0.2.0
-appVersion: "1.27-alpine"
