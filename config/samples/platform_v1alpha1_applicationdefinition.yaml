@@ -9,8 +9,7 @@ metadata:
 spec:
   description: Sample application definition
   chart:
-    # Replace with your reachable HTTP(S) Helm repository.
-    repository: https://charts.example.com
+    repository: oci://ghcr.io/federicolepera/helm-charts
     name: releaseyard-demo
     version: 0.2.0
   release:

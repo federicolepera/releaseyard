@@ -217,8 +217,8 @@ spec:
                         description: name is the chart name.
                         type: string
                       repository:
-                        description: repository is the configured HTTP(S) Helm repository
-                          URL.
+                        description: repository is the configured HTTP(S) or OCI Helm
+                          repository URL.
                         type: string
                       version:
                         description: version is the pinned chart version.
@@ -299,8 +299,8 @@ spec:
                       description: name is the chart name.
                       type: string
                     repository:
-                      description: repository is the configured HTTP(S) Helm repository
-                        URL.
+                      description: repository is the configured HTTP(S) or OCI Helm
+                        repository URL.
                       type: string
                     version:
                       description: version is the pinned chart version.
@@ -428,8 +428,8 @@ spec:
                               description: name is the chart name.
                               type: string
                             repository:
-                              description: repository is the configured HTTP(S) Helm
-                                repository URL.
+                              description: repository is the configured HTTP(S) or
+                                OCI Helm repository URL.
                               type: string
                             version:
                               description: version is the pinned chart version.

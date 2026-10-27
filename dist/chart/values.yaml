@@ -27,9 +27,9 @@ manager:
   args:
     - --leader-elect
 
-  ## Comma-separated HTTP(S) Helm repository hosts the manager may fetch from.
-  ## When empty the binary default (127.0.0.1:18080) is used. Set this to your
-  ## repository authority, for example charts.example.com.
+  ## Comma-separated HTTP(S) or OCI Helm repository hosts the manager may fetch
+  ## from. When empty the binary default (127.0.0.1:18080) is used. For GHCR set
+  ## this to ghcr.io.
   ##
   allowedChartHosts: ""
 

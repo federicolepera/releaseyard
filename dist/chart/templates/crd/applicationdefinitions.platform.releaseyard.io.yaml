@@ -52,9 +52,10 @@ spec:
                     pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
                     type: string
                   repository:
-                    description: repository is the base URL of an HTTP(S) Helm repository.
+                    description: repository is the base URL of an HTTP(S) or OCI Helm
+                      repository.
                     minLength: 8
-                    pattern: ^https?://.+$
+                    pattern: ^(https?|oci)://.+$
                     type: string
                   version:
                     description: version is a pinned semantic version. Floating tags
