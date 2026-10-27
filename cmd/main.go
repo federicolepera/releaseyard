@@ -68,6 +68,8 @@ func main() {
 	var credentialsNamespace string
 	var allowedChartHosts string
 	var teamNamespacePrefix string
+	var argoCDNamespace string
+	var argoCDDestinationNamespace string
 	var tlsOpts []func(*tls.Config)
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
@@ -94,6 +96,10 @@ func main() {
 		"Comma-separated ChartMuseum HTTP(S) hosts allowed for ApplicationDefinition chart fetches")
 	flag.StringVar(&teamNamespacePrefix, "team-namespace-prefix", "releaseyard-team-",
 		"Namespace prefix stripped from an Application namespace to derive its team token for workload release names")
+	flag.StringVar(&argoCDNamespace, "argocd-namespace", "argocd",
+		"Namespace containing automatically managed Argo CD Applications")
+	flag.StringVar(&argoCDDestinationNamespace, "argocd-destination-namespace", "releaseyard-team-platform",
+		"Destination namespace for Argo CD Applications created for GitOps Projects")
 	opts := zap.Options{
 		Development: true,
 	}
@@ -251,12 +257,23 @@ func main() {
 		os.Exit(1)
 	}
 	if err := (&controller.ProjectReconciler{
+		Client:                     mgr.GetClient(),
+		APIReader:                  mgr.GetAPIReader(),
+		CredentialsNamespace:       credentialsNamespace,
+		Scheme:                     mgr.GetScheme(),
+		ArgoCDNamespace:            argoCDNamespace,
+		ArgoCDDestinationNamespace: argoCDDestinationNamespace,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "Failed to create controller", "controller", "project")
+		os.Exit(1)
+	}
+	if err := (&controller.ApplicationRequestReconciler{
 		Client:               mgr.GetClient(),
 		APIReader:            mgr.GetAPIReader(),
 		CredentialsNamespace: credentialsNamespace,
 		Scheme:               mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "Failed to create controller", "controller", "project")
+		setupLog.Error(err, "Failed to create controller", "controller", "applicationrequest")
 		os.Exit(1)
 	}
 	// +kubebuilder:scaffold:builder

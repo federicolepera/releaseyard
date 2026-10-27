@@ -35,7 +35,7 @@
       try { localStorage.setItem('idp-sidebar', next ? 'collapsed' : 'open'); } catch (_) { /* Storage can be unavailable. */ }
     });
   }
-  const state = { definitions: [], applications: [], clusters: [], clusterQuery: '', clusterStatus: '', selectedApplication: null, selectedCluster: null, selectedInstanceUID: '', detailTab: 'overview', deleting: false, deletionPending: new Set(), editingValues: false, valuesDraft: Object.create(null), savingValues: false, editingPlacement: false, placementDraft: new Map(), savingPlacement: false, definitionQuery: '', definitionSort: 'name', definitionType: '', definitionView: 'grid', destinationMode: 'cluster', selectedClusters: new Map(), preview: null, previewController: null, previewSequence: 0, previewLoading: false, savingEnvironment: false, creating: false, teams: [], team: '', resourcesQuery: '', resourcesKind: '', resourcesStatus: '', resourcesExpanded: new Set(), resourcesLive: null, resourcesLiveKey: '', selectedResourceUID: '', resourcePanelTab: 'overview', activityRange: '24h', activityType: '', activitySource: '', activityQuery: '', applicationQuery: '', applicationCluster: '', applicationNamespace: '', applicationStatus: '', applicationSort: { key: 'name', direction: 'asc' }, cloudTargets: [], cloudDefinitions: [], cloudResources: [], selectedCloudResource: null, cloudDetailTab: 'overview', cloudCreating: false, cloudSaving: false, cloudDeleting: false, cloudResourcesError: '', cloudSearch: '', cloudStatusFilter: '', cloudTargetFilter: '', cloudDefinitionFilter: '', cloudSort: { key: 'name', direction: 'asc' }, cloudDefinitionsExpanded: false, cloudTargetsExpanded: false, cloudActivityExpanded: false };
+  const state = { definitions: [], applications: [], clusters: [], projects: [], projectName: '', projectReady: false, delivery: 'direct', clusterQuery: '', clusterStatus: '', selectedApplication: null, selectedCluster: null, selectedInstanceUID: '', detailTab: 'overview', deleting: false, deletionPending: new Set(), editingValues: false, valuesDraft: Object.create(null), savingValues: false, editingPlacement: false, placementDraft: new Map(), savingPlacement: false, definitionQuery: '', definitionSort: 'name', definitionType: '', definitionView: 'grid', destinationMode: 'cluster', selectedClusters: new Map(), preview: null, previewController: null, previewSequence: 0, previewLoading: false, savingEnvironment: false, creating: false, teams: [], team: '', resourcesQuery: '', resourcesKind: '', resourcesStatus: '', resourcesExpanded: new Set(), resourcesLive: null, resourcesLiveKey: '', selectedResourceUID: '', resourcePanelTab: 'overview', activityRange: '24h', activityType: '', activitySource: '', activityQuery: '', applicationQuery: '', applicationCluster: '', applicationNamespace: '', applicationStatus: '', applicationSort: { key: 'name', direction: 'asc' }, cloudTargets: [], cloudDefinitions: [], cloudResources: [], selectedCloudResource: null, cloudDetailTab: 'overview', cloudCreating: false, cloudSaving: false, cloudDeleting: false, cloudResourcesError: '', cloudSearch: '', cloudStatusFilter: '', cloudTargetFilter: '', cloudDefinitionFilter: '', cloudSort: { key: 'name', direction: 'asc' }, cloudDefinitionsExpanded: false, cloudTargetsExpanded: false, cloudActivityExpanded: false };
   const maxClusterTargets = 32;
   state.selectedDefinition = null;
   state.canCreateApps = false;
@@ -2876,6 +2876,11 @@
     renderCreateBreadcrumb(null);
     $('#create-form').reset();
     state.destinationMode = 'cluster'; state.selectedClusters.clear(); state.preview = null; state.previewLoading = false;
+    state.projectName = ''; state.projectReady = false; state.delivery = 'direct';
+    if ($('#project')) $('#project').value = '';
+    if ($('#delivery')) $('#delivery').value = 'direct';
+    if ($('#delivery-field')) $('#delivery-field').hidden = true;
+    updateProjectDelivery();
     if (state.previewController) state.previewController.abort();
     const clusterMode = document.querySelector('input[name="destination-mode"][value="cluster"]');
     if (clusterMode) clusterMode.checked = true;
@@ -2967,6 +2972,74 @@
     }
     renderClusterChecklist();
     updateDestinationControls();
+  }
+
+  function projectDeliveryMode(project) {
+    return project?.spec?.delivery?.mode || 'direct';
+  }
+
+  function projectRepositoryReady(project) {
+    return condition(project, 'RepositoryReady')?.status === 'True' && Boolean(project.status?.repository);
+  }
+
+  function renderProjects() {
+    const select = $('#project');
+    if (!select) return;
+    const prior = state.projectName || select.value;
+    select.replaceChildren(new Option('No project (direct only)', ''));
+    [...state.projects].sort((a, b) => (a.metadata?.name || '').localeCompare(b.metadata?.name || '', 'en')).forEach((project) => {
+      const name = project.metadata?.name || '';
+      const mode = projectDeliveryMode(project);
+      const ready = projectRepositoryReady(project);
+      const modeLabel = mode === 'gitops' ? 'GitOps' : mode === 'both' ? 'Direct or GitOps' : 'Direct';
+      select.add(new Option(`${name} · ${modeLabel}${mode !== 'direct' && !ready ? ' · repo not ready' : ''}`, name));
+    });
+    if ([...select.options].some((option) => option.value === prior)) select.value = prior;
+    else select.value = '';
+    updateProjectDelivery();
+  }
+
+  function updateProjectDelivery() {
+    const select = $('#project');
+    const field = $('#delivery-field');
+    const delivery = $('#delivery');
+    if (!select || !field || !delivery) return;
+    state.projectName = select.value;
+    const project = state.projects.find((item) => item.metadata?.name === state.projectName);
+    const hint = $('#project-hint');
+    const deliveryHint = $('#delivery-hint');
+    if (!project) {
+      state.delivery = 'direct';
+      state.projectReady = false;
+      field.hidden = true;
+      delivery.value = 'direct';
+      if (hint) hint.textContent = 'Select a Project to enable GitOps delivery.';
+      updateSubmit();
+      return;
+    }
+    const mode = projectDeliveryMode(project);
+    const ready = projectRepositoryReady(project);
+    state.projectReady = ready;
+    if (hint) hint.textContent = ready ? `${state.projectName} repository is ready.` : `${state.projectName} repository is not ready yet.`;
+    if (mode === 'direct') {
+      state.delivery = 'direct';
+      field.hidden = true;
+      delivery.value = 'direct';
+      if (deliveryHint) deliveryHint.textContent = 'This Project allows direct creation only.';
+    } else if (mode === 'gitops') {
+      state.delivery = 'gitops';
+      field.hidden = true;
+      delivery.value = 'gitops';
+      if (deliveryHint) deliveryHint.textContent = ready ? 'This Project requires GitOps delivery.' : 'GitOps is unavailable until the Project repository is ready.';
+    } else {
+      field.hidden = false;
+      const gitopsOption = delivery.querySelector('option[value="gitops"]');
+      if (gitopsOption) gitopsOption.disabled = !ready;
+      if (state.delivery === 'gitops' && !ready) state.delivery = 'direct';
+      delivery.value = state.delivery;
+      if (deliveryHint) deliveryHint.textContent = ready ? 'Choose direct creation or a GitOps PR request.' : 'GitOps is unavailable until the Project repository is ready.';
+    }
+    updateSubmit();
   }
 
   function updateDestinationControls() {
@@ -3208,6 +3281,7 @@
     const configured = [...$('#dynamic-fields').querySelectorAll('input, select')].filter((input) => input.value !== '').length;
     $('#review-name').textContent = name;
     $('#review-destination').textContent = destination;
+    $('#review-delivery').textContent = state.projectName ? `${state.projectName} · ${state.delivery === 'gitops' ? 'GitOps request' : 'Direct'}` : 'Direct';
     $('#review-values').textContent = configured ? `${configured} configured value${configured === 1 ? '' : 's'}` : 'Template defaults';
   }
 
@@ -3219,11 +3293,13 @@
       : state.destinationMode === 'clusters'
         ? selectedClusterTargets().length > 0
         : Boolean($('#environment-select').value && !state.previewLoading && state.preview && state.preview.environment === $('#environment-select').value);
+    const deliveryReady = state.delivery !== 'gitops' || (Boolean(state.projectName) && state.projectReady);
     $('#submit').disabled =
     !state.canCreateApps ||
     state.creating ||
     !def ||
     !destinationReady ||
+    !deliveryReady ||
     !form.elements.name.value.trim() ||
     blocked;
     updateReview();
@@ -3776,14 +3852,14 @@
     const refreshButtons = [$('#refresh')].filter(Boolean);
     refreshButtons.forEach((button) => { button.disabled = true; });
     const results = await Promise.allSettled([
-      getList('/api/applicationdefinitions'), getList('/api/clusters')
+      getList('/api/applicationdefinitions'), getList('/api/clusters'), getList('/api/projects')
     ]);
     let failures = 0;
     results.forEach((result, index) => {
-      if (result.status === 'fulfilled') state[['definitions', 'clusters'][index]] = result.value;
+      if (result.status === 'fulfilled') state[['definitions', 'clusters', 'projects'][index]] = result.value;
       else failures++;
     });
-    renderDefinitions(); renderClusters();
+    renderDefinitions(); renderClusters(); renderProjects();
     refreshButtons.forEach((button) => { button.disabled = false; });
     if (failures) showNotice(`Could not load ${failures === 1 ? 'one list' : `${failures} lists`}. Try “Refresh data” again.`, 'error');
     else if (!options.preserveNotice) { notice.hidden = true; }
@@ -4726,6 +4802,8 @@
 
   if (form) {
   $('#back-to-catalog').addEventListener('click', showCatalog);
+  $('#project')?.addEventListener('change', updateProjectDelivery);
+  $('#delivery')?.addEventListener('change', () => { state.delivery = $('#delivery').value; updateSubmit(); });
   $('#cluster').addEventListener('change', updateSubmit);
   document.querySelectorAll('input[name="destination-mode"]').forEach((radio) => radio.addEventListener('change', () => {
     if (!radio.checked) return;
@@ -4791,6 +4869,7 @@
       name: submittedName, description: $('#app-description')?.value.trim() || '', definitionName: submittedDefinition,
       ...(submittedMode === 'environment' ? { environmentName: submittedEnvironment } : submittedMode === 'clusters' ? { clusters: submittedClusters } : { clusterName: submittedCluster }), values,
       ...(state.team ? { namespace: state.team } : {}),
+      ...(state.projectName ? { projectName: state.projectName, delivery: state.delivery } : {}),
       ...(submittedReleaseNamespace ? { releaseNamespace: submittedReleaseNamespace } : {})
     };
     state.creating = true;
@@ -4803,6 +4882,14 @@
         body: JSON.stringify(payload)
       });
       const body = await response.json().catch(() => ({}));
+      if (response.status === 202) {
+        const requestName = body.metadata?.name || submittedName;
+        form.reset();
+        showCatalog();
+        await refreshCatalog({ preserveNotice: true });
+        showNotice(`GitOps request “${requestName}” accepted. The bridge will open a pull request shortly.`, 'success');
+        return;
+      }
       if (response.status === 409 && submittedMode === 'environment') {
         state.preview = null;
         await fetchEnvironmentPreview(submittedEnvironment);

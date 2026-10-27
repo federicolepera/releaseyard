@@ -80,6 +80,19 @@ spec:
 Only paths declared in the definition can appear under `spec.values`. The
 controller merges the definition defaults with these overrides.
 
+## Optional GitOps creation
+
+The dashboard can create an Application directly or, when the selected Project
+allows it, through GitOps. The Application spec is the same in both cases.
+
+GitOps mode creates an `ApplicationRequest`; it does not create the Application
+until the PR bridge opens and merges the pull request. The bridge writes
+`apps/<app>/application.yaml` and `apps/<app>/kustomization.yaml`, updates
+`apps/kustomization.yaml`, creates a branch
+and opens a pull request. The request records the branch, commit and PR URL in
+`status`; inspect it in the dashboard namespace. See [Projects](projects.md) for
+`Project.spec.delivery.mode`.
+
 ## Placement
 
 ### One cluster

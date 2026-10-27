@@ -96,6 +96,8 @@
             <div class="form-grid">
               <label class="field"><span>Application name <em class="required-star">*</em></span><input id="app-name" name="name" autocomplete="off" required maxlength="53" pattern="[a-z0-9]([-a-z0-9]*[a-z0-9])?" placeholder="e.g. customer-portal"><small>Lowercase letters, numbers and hyphens. Max 53 characters.</small></label>
               <label class="field"><span>Description</span><input id="app-description" name="description" autocomplete="off" maxlength="280" placeholder="Optional"><small>A short description for this application.</small></label>
+              <label class="field"><span>Project</span><select id="project"><option value="">No project (direct only)</option></select><small id="project-hint">Select a Project to enable GitOps delivery.</small></label>
+              <label id="delivery-field" class="field" hidden><span>Delivery</span><select id="delivery"><option value="direct">Direct</option><option value="gitops">GitOps (PR request)</option></select><small id="delivery-hint"></small></label>
             </div>
           </section>
           <section class="create-step">
@@ -126,6 +128,7 @@
             <div id="review-summary" class="review-summary">
               <div class="review-row"><span>Application</span><strong id="review-name">—</strong></div>
               <div class="review-row"><span>Destination</span><strong id="review-destination">—</strong></div>
+              <div class="review-row"><span>Delivery</span><strong id="review-delivery">—</strong></div>
               <div class="review-row"><span>Values</span><strong id="review-values">—</strong></div>
             </div>
             <div class="form-actions"><p id="form-hint" class="helper">Choose a cluster to get started.</p><button id="submit" class="button button-primary" type="submit" disabled>Create application</button></div>

@@ -49,10 +49,41 @@ Exactly one of `clusterRef`, `clusters`, or `environment` must be set.
 | `spec.repository.connectionRef.namespace` | no | Defaults to the manager credentials namespace. Immutable with the reference. |
 | `spec.repository.name` | no | GitHub repository name. Defaults to the Project name. Immutable. |
 | `spec.description` | no | Applied to the repository; max 280 characters. |
+| `spec.delivery.mode` | no | `direct`, `gitops`, or `both`. Default `direct`. |
 
 `Project` is cluster-scoped. `status.repository` contains the web URL, HTTPS clone URL,
 SSH URL, default branch and provider ID. Project creation also seeds a minimal Kustomize
 structure (`README.md`, `kustomization.yaml`, `apps/kustomization.yaml`).
+
+## ApplicationRequest
+
+| Field | Required | Notes |
+|-------|----------|-------|
+| `spec.projectRef.name` | yes | Project that owns the target repository. |
+| `spec.applicationName` | yes | Requested Application name. |
+| `spec.applicationNamespace` | yes | Target namespace for the eventual Application. |
+| `spec.requestedBy` | yes | Authenticated dashboard user. |
+| `spec.idempotencyKey` | yes | Stable key for repeated submissions. |
+| `spec.application` | yes | Application spec to write to the Project repository. |
+| `status.phase` | no | `Accepted`, `Processing`, `BranchPushed`, `ChangeRequestOpen`, `Conflict`, or `Rejected`. |
+| `status.branch` | no | Branch created by the bridge. |
+| `status.commitSHA` | no | Commit written to the request branch. |
+| `status.changeRequestURL` | no | Pull request URL. |
+
+## Argo CD integration
+
+| Value | Default | Notes |
+|-------|---------|-------|
+| `manager.argocd.namespace` | `argocd` | Namespace of managed Argo CD Applications. |
+| `manager.argocd.destinationNamespace` | `releaseyard-team-platform` | Argo destination namespace for Project Applications. |
+
+The `Project` controller creates one Argo CD `Application` per GitOps Project,
+pointed at the Project repository's `apps` path. `spec.syncPolicy.automated` is
+left unset so sync remains manual until enabled in Argo CD.
+
+`ApplicationRequest` is namespaced and created in the dashboard namespace. The
+bridge writes `apps/<app>/application.yaml` and `apps/<app>/kustomization.yaml`,
+updates `apps/kustomization.yaml`, creates a branch and opens a pull request.
 
 ## GitConnection
 
