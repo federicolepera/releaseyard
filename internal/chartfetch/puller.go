@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Package chartfetch retrieves and verifies opaque HTTP Helm chart archives.
+// Package chartfetch retrieves and verifies opaque HTTP(S) and OCI Helm chart archives.
 package chartfetch
 
 import (
@@ -54,6 +54,7 @@ var (
 type Puller struct {
 	allowedHosts map[string]struct{}
 	client       *http.Client
+	blobClient   *http.Client
 }
 
 // NewPuller constructs a puller limited to the supplied DNS hosts/IPs, optionally
@@ -84,6 +85,10 @@ func NewPuller(allowedHosts []string) (*Puller, error) {
 			Transport: &safeTransport{hosts: hosts, base: transport}, Timeout: httpTimeout,
 			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 		},
+		blobClient: &http.Client{
+			Transport: &safeTransport{hosts: hosts, base: transport, allowOCIBlobRedirects: true}, Timeout: httpTimeout,
+			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+		},
 	}, nil
 }
 
@@ -100,12 +105,15 @@ func (p *Puller) PullVerified(ctx context.Context, chart platformv1alpha1.Applic
 	if p == nil || p.client == nil || chart.Name == "" || chart.Version == "" {
 		return nil, "", fmt.Errorf("invalid chart request")
 	}
+	ctx, cancel := context.WithTimeout(ctx, operationTimeout)
+	defer cancel()
+	if strings.HasPrefix(chart.Repository, "oci://") {
+		return p.pullOCI(ctx, chart)
+	}
 	base, err := parseBaseURL(chart.Repository, p.allowedHosts)
 	if err != nil {
 		return nil, "", err
 	}
-	ctx, cancel := context.WithTimeout(ctx, operationTimeout)
-	defer cancel()
 
 	indexURL := *base
 	indexURL.Path = strings.TrimSuffix(indexURL.Path, "/") + "/index.yaml"
@@ -316,13 +324,16 @@ func equalBytes(a, b []byte) bool {
 }
 
 type safeTransport struct {
-	hosts map[string]struct{}
-	base  http.RoundTripper
+	hosts                 map[string]struct{}
+	base                  http.RoundTripper
+	allowOCIBlobRedirects bool
 }
 
 func (t *safeTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	if err := validateTarget(req.URL, t.hosts); err != nil {
-		return nil, err
+		if !t.allowOCIBlobRedirects || req.URL.Scheme != httpsScheme || !trustedOCIBlobRedirectHost(req.URL.Host) {
+			return nil, err
+		}
 	}
 	return t.base.RoundTrip(req)
 }

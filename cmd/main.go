@@ -93,7 +93,7 @@ func main() {
 	flag.StringVar(&credentialsNamespace, "credentials-namespace", os.Getenv("POD_NAMESPACE"),
 		"Namespace containing referenced kubeconfig Secrets (defaults to POD_NAMESPACE)")
 	flag.StringVar(&allowedChartHosts, "allowed-chart-hosts", "127.0.0.1:18080",
-		"Comma-separated HTTP(S) Helm repository hosts allowed for ApplicationDefinition chart fetches")
+		"Comma-separated HTTP(S) or OCI Helm repository hosts allowed for ApplicationDefinition chart fetches")
 	flag.StringVar(&teamNamespacePrefix, "team-namespace-prefix", "releaseyard-team-",
 		"Namespace prefix stripped from an Application namespace to derive its team token for workload release names")
 	flag.StringVar(&argoCDNamespace, "argocd-namespace", "argocd",
