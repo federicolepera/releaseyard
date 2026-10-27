@@ -18,7 +18,7 @@ metadata:
 spec:
   description: Demo application
   chart:
-    repository: https://charts.example.com
+    repository: oci://ghcr.io/federicolepera/helm-charts
     name: releaseyard-demo
     version: 0.2.0
   release:
@@ -42,8 +42,9 @@ spec:
 
 Rules:
 
-- `chart.repository` must be HTTP(S) and the host must be allowed by the
-  controller.
+- `chart.repository` must be HTTP(S) or OCI, and the host must be allowed by
+  the controller. For OCI, the chart name is appended when the reference is a
+  repository base.
 - `chart.version` must be a pinned semantic version. Floating tags are rejected.
 - `release.namespace` is the target namespace on the workload cluster. It is
   immutable after creation.

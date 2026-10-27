@@ -57,7 +57,7 @@ The panel requires the local administrator or OIDC RBAC that allows `create` on
 
 Check `manager.allowedChartHosts` and that the controller can reach the chart
 repository. The host must match exactly. The binary default is
-`127.0.0.1:18080`; set it to your HTTP(S) Helm repository authority.
+`127.0.0.1:18080`; set it to your HTTP(S) or OCI repository authority.
 
 ```bash
 kubectl -n idp-system logs deploy/idp-controller-manager -c manager

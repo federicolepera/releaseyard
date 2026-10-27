@@ -42,14 +42,13 @@ kind load docker-image releaseyard-dashboard:dev --name releaseyard-a
 helm upgrade --install idp dist/chart \
   -n idp-system --create-namespace \
   --set manager.image.repository=releaseyard-controller \
-  --set manager.image.tag=dev
+  --set manager.image.tag=dev \
+  --set manager.allowedChartHosts=ghcr.io
 ```
 
-`allowedChartHosts` is the host allowlist used by the chart fetcher. Set it to
-the authority of your HTTP(S) Helm repository, for example
-`--set manager.allowedChartHosts=charts.example.com`.
-The demo chart is published as an OCI artifact to GHCR; OCI fetching is not yet
-implemented.
+`allowedChartHosts` is the host allowlist used by the chart fetcher. For the
+public demo chart, set it to `ghcr.io`. The sample definition uses
+`oci://ghcr.io/federicolepera/helm-charts`.
 
 ### 4. Deploy the dashboard
 
@@ -74,9 +73,7 @@ default) and contain the kubeconfig under the `kubeconfig` key.
 
 ### 6. Apply the samples
 
-Replace `https://charts.example.com` in the `ApplicationDefinition` with a
-reachable HTTP(S) Helm repository, and configure `manager.allowedChartHosts` for
-its host, before applying:
+The sample definition uses the public GHCR OCI chart:
 
 ```bash
 kubectl --context kind-releaseyard-a apply -f config/samples/platform_v1alpha1_cluster.yaml
@@ -108,7 +105,7 @@ A minimal controller install:
 helm upgrade --install idp dist/chart -n idp-system --create-namespace \
   --set manager.image.repository=<registry>/releaseyard-controller \
   --set manager.image.tag=<tag> \
-  --set manager.allowedChartHosts=<http-chart-host>
+  --set manager.allowedChartHosts=<chart-host>
 ```
 
 Enable the dashboard:

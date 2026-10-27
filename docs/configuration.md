@@ -9,7 +9,7 @@ examples are in [`config/samples/`](../config/samples/) and
 | Field | Required | Notes |
 |-------|----------|-------|
 | `spec.description` | no | Shown in the catalog. Max 280 characters. |
-| `spec.chart.repository` | yes | HTTP(S) Helm repository. Host must be allowed. |
+| `spec.chart.repository` | yes | HTTP(S) or OCI Helm repository. Host must be allowed. |
 | `spec.chart.name` | yes | Chart name. |
 | `spec.chart.version` | yes | Pinned semantic version; no floating tags. |
 | `spec.release.namespace` | yes | Existing namespace on the target cluster. Immutable. |
@@ -139,7 +139,7 @@ namespace. GitHub is the only provider implemented today; `Project` references a
 | `manager.replicas` | `1` | Use leader election for more replicas. |
 | `manager.image.repository` | `controller` | Controller image. |
 | `manager.image.tag` | chart appVersion | Image tag. |
-| `manager.allowedChartHosts` | `""` | Comma-separated chart hosts. Empty uses the binary default `127.0.0.1:18080`. |
+| `manager.allowedChartHosts` | `""` | Comma-separated HTTP(S) or OCI chart hosts. Empty uses the binary default `127.0.0.1:18080`. |
 | `manager.teamNamespacePrefix` | `releaseyard-team-` | Prefix used for team namespace and release-name derivation. |
 | `manager.args` | `["--leader-elect"]` | Extra manager arguments. |
 | `manager.healthProbe.port` | `8081` | Liveness/readiness port. |
