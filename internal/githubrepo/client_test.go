@@ -238,3 +238,118 @@ func testClient(t *testing.T, base string, hc *http.Client) *Client {
 	}
 	return c
 }
+
+func TestGitBridgeOperations(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/acme/demo/git/ref/heads/main":
+			_, _ = w.Write([]byte(`{"object":{"sha":"base-sha"}}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/acme/demo/git/commits/base-sha":
+			_, _ = w.Write([]byte(`{"tree":{"sha":"base-tree"}}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/acme/demo/contents/apps/kustomization.yaml":
+			if r.URL.Query().Get("ref") != "main" {
+				t.Errorf("ref query = %q", r.URL.Query().Get("ref"))
+			}
+			_, _ = w.Write([]byte(`{"sha":"file-sha","encoding":"base64","content":"YXBpVmVyc2lvbjogdjEKa2luZDogS3VzdG9taXphdGlvbg=="}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/repos/acme/demo/git/trees":
+			var payload struct {
+				BaseTree string      `json:"base_tree"`
+				Tree     []TreeEntry `json:"tree"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+				t.Fatal(err)
+			}
+			if payload.BaseTree != "base-tree" || len(payload.Tree) != 1 || payload.Tree[0].Path != "apps/test/application.yaml" || payload.Tree[0].Content != "kind: Application\n" {
+				t.Errorf("unexpected tree payload: %#v", payload)
+			}
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"sha":"tree-sha"}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/repos/acme/demo/git/commits":
+			var payload struct {
+				Message string   `json:"message"`
+				Tree    string   `json:"tree"`
+				Parents []string `json:"parents"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+				t.Fatal(err)
+			}
+			if payload.Message != "Add test" || payload.Tree != "tree-sha" || len(payload.Parents) != 1 || payload.Parents[0] != "base-sha" {
+				t.Errorf("unexpected commit payload: %#v", payload)
+			}
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"sha":"commit-sha"}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/repos/acme/demo/git/refs":
+			var payload map[string]string
+			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+				t.Fatal(err)
+			}
+			if payload["ref"] != "refs/heads/releaseyard/test-12345678" || payload["sha"] != "commit-sha" {
+				t.Errorf("unexpected ref payload: %#v", payload)
+			}
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/repos/acme/demo/pulls":
+			if r.URL.Query().Get("state") != "open" || r.URL.Query().Get("head") != "acme:releaseyard/test-12345678" {
+				t.Errorf("unexpected pull query: %q", r.URL.RawQuery)
+			}
+			_, _ = w.Write([]byte(`[{"number":7,"html_url":"https://github.com/acme/demo/pull/7","state":"open"}]`))
+		case r.Method == http.MethodPost && r.URL.Path == "/repos/acme/demo/pulls":
+			var payload map[string]string
+			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+				t.Fatal(err)
+			}
+			if payload["title"] != "Add test" || payload["head"] != "releaseyard/test-12345678" || payload["base"] != "main" || !strings.Contains(payload["body"], "Requested by") {
+				t.Errorf("unexpected pull payload: %#v", payload)
+			}
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"number":8,"html_url":"https://github.com/acme/demo/pull/8","state":"open"}`))
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.String())
+		}
+	}))
+	defer server.Close()
+	ctx := context.Background()
+	c := testClient(t, server.URL, nil)
+	if sha, err := c.GetBranchSHA(ctx, "acme", "demo", "main"); err != nil || sha != "base-sha" {
+		t.Fatalf("branch sha=%q err=%v", sha, err)
+	}
+	if sha, err := c.GetCommitTreeSHA(ctx, "acme", "demo", "base-sha"); err != nil || sha != "base-tree" {
+		t.Fatalf("tree sha=%q err=%v", sha, err)
+	}
+	file, err := c.GetFile(ctx, "acme", "demo", "main", "apps/kustomization.yaml")
+	if err != nil || file.SHA != "file-sha" || string(file.Content) != "apiVersion: v1\nkind: Kustomization" {
+		t.Fatalf("file=%#v err=%v", file, err)
+	}
+	treeSHA, err := c.CreateTree(ctx, "acme", "demo", "base-tree", []TreeEntry{{Path: "apps/test/application.yaml", Mode: "100644", Type: "blob", Content: "kind: Application\n"}})
+	if err != nil || treeSHA != "tree-sha" {
+		t.Fatalf("tree=%q err=%v", treeSHA, err)
+	}
+	commitSHA, err := c.CreateCommit(ctx, "acme", "demo", "Add test", "tree-sha", "base-sha")
+	if err != nil || commitSHA != "commit-sha" {
+		t.Fatalf("commit=%q err=%v", commitSHA, err)
+	}
+	if err := c.CreateBranch(ctx, "acme", "demo", "releaseyard/test-12345678", "commit-sha"); err != nil {
+		t.Fatal(err)
+	}
+	pr, err := c.FindOpenPullRequest(ctx, "acme", "demo", "releaseyard/test-12345678")
+	if err != nil || pr.Number != 7 || pr.HTMLURL == "" {
+		t.Fatalf("pr=%#v err=%v", pr, err)
+	}
+	created, err := c.CreatePullRequest(ctx, "acme", "demo", CreatePullRequestInput{
+		Title: "Add test", Head: "releaseyard/test-12345678", Base: "main", Body: "Requested by flepera",
+	})
+	if err != nil || created.Number != 8 || created.HTMLURL == "" {
+		t.Fatalf("created=%#v err=%v", created, err)
+	}
+}
+
+func TestFindOpenPullRequestEmpty(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`[]`))
+	}))
+	defer server.Close()
+	_, err := testClient(t, server.URL, nil).FindOpenPullRequest(context.Background(), "acme", "demo", "branch")
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("empty list error = %v, want ErrNotFound", err)
+	}
+}

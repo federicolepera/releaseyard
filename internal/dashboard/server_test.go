@@ -386,6 +386,85 @@ func TestCreateApplication(t *testing.T) {
 	}
 }
 
+func TestListProjects(t *testing.T) {
+	project := &platformv1alpha1.Project{ObjectMeta: metav1.ObjectMeta{Name: "payments"}, Spec: platformv1alpha1.ProjectSpec{Delivery: platformv1alpha1.ProjectDeliverySpec{Mode: platformv1alpha1.DeliveryModeBoth}}}
+	h, _ := testHandler(t, project)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/projects", nil))
+	if w.Code != http.StatusOK || !strings.Contains(w.Header().Get("Cache-Control"), "no-store") {
+		t.Fatalf("GET projects: status=%d headers=%v body=%s", w.Code, w.Header(), w.Body)
+	}
+	var list platformv1alpha1.ProjectList
+	if err := json.Unmarshal(w.Body.Bytes(), &list); err != nil || len(list.Items) != 1 || list.Items[0].Spec.Delivery.Mode != platformv1alpha1.DeliveryModeBoth {
+		t.Fatalf("unexpected project list: %#v err=%v", list, err)
+	}
+}
+
+func TestCreateApplicationGitOpsRequest(t *testing.T) {
+	definition := validDefinition(testDefinitionName, true)
+	cluster := &platformv1alpha1.Cluster{ObjectMeta: metav1.ObjectMeta{Name: testClusterName}}
+	project := &platformv1alpha1.Project{
+		ObjectMeta: metav1.ObjectMeta{Name: "payments"},
+		Spec:       platformv1alpha1.ProjectSpec{Delivery: platformv1alpha1.ProjectDeliverySpec{Mode: platformv1alpha1.DeliveryModeBoth}},
+		Status: platformv1alpha1.ProjectStatus{
+			Repository: &platformv1alpha1.ProjectRepositoryStatus{ID: 1, Owner: "acme", Name: "payments"},
+			Conditions: []metav1.Condition{{Type: platformv1alpha1.ProjectConditionRepositoryReady, Status: metav1.ConditionTrue, ObservedGeneration: 1}},
+		},
+	}
+	h, c := testHandler(t, definition, cluster, project)
+	w := postJSON(h, `{"name":"gitops-app","definitionName":"sample","clusterName":"production","projectName":"payments","delivery":"gitops","values":{"replica":{"count":2}}}`)
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("POST status=%d body=%s", w.Code, w.Body)
+	}
+	var request platformv1alpha1.ApplicationRequest
+	if err := c.Get(context.Background(), client.ObjectKey{Namespace: testNamespace, Name: "gitops-app"}, &request); err != nil {
+		t.Fatal(err)
+	}
+	if request.Spec.ProjectRef.Name != "payments" || request.Spec.ApplicationName != "gitops-app" || request.Spec.ApplicationNamespace != testNamespace || request.Spec.RequestedBy != "" {
+		t.Fatalf("unexpected request: %#v", request.Spec)
+	}
+	if request.Spec.Application.ClusterRef == nil || request.Spec.Application.ClusterRef.Name != testClusterName {
+		t.Fatalf("request did not preserve application spec: %#v", request.Spec.Application)
+	}
+	if request.Status.Phase != "" {
+		t.Fatalf("new request status=%q, want empty until the bridge reconciles it", request.Status.Phase)
+	}
+	var app platformv1alpha1.Application
+	if err := c.Get(context.Background(), client.ObjectKey{Namespace: testNamespace, Name: "gitops-app"}, &app); err == nil {
+		t.Fatal("GitOps request also created an Application")
+	}
+}
+
+func TestCreateApplicationDeliveryValidation(t *testing.T) {
+	definition := validDefinition(testDefinitionName, true)
+	cluster := &platformv1alpha1.Cluster{ObjectMeta: metav1.ObjectMeta{Name: testClusterName}}
+	ready := []metav1.Condition{{Type: platformv1alpha1.ProjectConditionRepositoryReady, Status: metav1.ConditionTrue, ObservedGeneration: 1}}
+	notReady := []metav1.Condition{{Type: platformv1alpha1.ProjectConditionRepositoryReady, Status: metav1.ConditionFalse, ObservedGeneration: 1}}
+	cases := []struct {
+		name    string
+		project *platformv1alpha1.Project
+		body    string
+		want    int
+	}{
+		{name: "gitops needs project", body: `{"name":"app","definitionName":"sample","clusterName":"production","delivery":"gitops","values":{"replica":{"count":1}}}`, want: http.StatusUnprocessableEntity},
+		{name: "direct project rejects gitops", project: &platformv1alpha1.Project{ObjectMeta: metav1.ObjectMeta{Name: "p"}, Spec: platformv1alpha1.ProjectSpec{Delivery: platformv1alpha1.ProjectDeliverySpec{Mode: platformv1alpha1.DeliveryModeDirect}}, Status: platformv1alpha1.ProjectStatus{Conditions: ready}}, body: `{"name":"app","definitionName":"sample","clusterName":"production","projectName":"p","delivery":"gitops","values":{"replica":{"count":1}}}`, want: http.StatusUnprocessableEntity},
+		{name: "gitops project rejects direct", project: &platformv1alpha1.Project{ObjectMeta: metav1.ObjectMeta{Name: "p"}, Spec: platformv1alpha1.ProjectSpec{Delivery: platformv1alpha1.ProjectDeliverySpec{Mode: platformv1alpha1.DeliveryModeGitOps}}, Status: platformv1alpha1.ProjectStatus{Conditions: ready}}, body: `{"name":"app","definitionName":"sample","clusterName":"production","projectName":"p","delivery":"direct","values":{"replica":{"count":1}}}`, want: http.StatusUnprocessableEntity},
+		{name: "gitops needs ready repo", project: &platformv1alpha1.Project{ObjectMeta: metav1.ObjectMeta{Name: "p"}, Spec: platformv1alpha1.ProjectSpec{Delivery: platformv1alpha1.ProjectDeliverySpec{Mode: platformv1alpha1.DeliveryModeGitOps}}, Status: platformv1alpha1.ProjectStatus{Conditions: notReady}}, body: `{"name":"app","definitionName":"sample","clusterName":"production","projectName":"p","delivery":"gitops","values":{"replica":{"count":1}}}`, want: http.StatusUnprocessableEntity},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			objects := []client.Object{definition, cluster}
+			if tc.project != nil {
+				objects = append(objects, tc.project)
+			}
+			h, _ := testHandler(t, objects...)
+			if got := postJSON(h, tc.body).Code; got != tc.want {
+				t.Fatalf("status=%d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestCreateApplicationForEnvironment(t *testing.T) {
 	definition := validDefinition(testDefinitionName, true)
 	makeCluster := func(name string, uid types.UID) *platformv1alpha1.Cluster {

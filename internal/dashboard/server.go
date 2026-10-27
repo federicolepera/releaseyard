@@ -25,6 +25,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/validation"
@@ -59,6 +60,8 @@ const (
 	statusRunning        = "Running"
 	statusPending        = "Pending"
 	statusHealthy        = "Healthy"
+	deliveryDirect       = "direct"
+	deliveryGitOps       = "gitops"
 	toneGood             = "good"
 	toneMuted            = "muted"
 )
@@ -85,6 +88,7 @@ func NewHandler(k8s client.Client, namespace string) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", s.health)
 	mux.HandleFunc("GET /api/applicationdefinitions", s.listDefinitions)
+	mux.HandleFunc("GET /api/projects", s.listProjects)
 	mux.HandleFunc("GET /api/applications", s.listApplications)
 	mux.HandleFunc("GET /api/activity", s.listActivity)
 	mux.HandleFunc("GET /api/clusters", s.listClusters)
@@ -134,6 +138,18 @@ func securityHeaders(next http.Handler) http.Handler {
 func (s *server) health(w http.ResponseWriter, _ *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte("ok\n"))
+}
+
+func (s *server) listProjects(w http.ResponseWriter, r *http.Request) {
+	items := &platformv1alpha1.ProjectList{}
+	if err := s.client.List(r.Context(), items); err != nil {
+		writeError(w, http.StatusInternalServerError, "Could not load projects")
+		return
+	}
+	if items.Items == nil {
+		items.Items = []platformv1alpha1.Project{}
+	}
+	writeJSON(w, http.StatusOK, items)
 }
 
 func (s *server) listDefinitions(w http.ResponseWriter, r *http.Request) {
@@ -837,6 +853,8 @@ type createApplicationRequest struct {
 	PreviewDigest    string                    `json:"previewDigest"`
 	ReleaseNamespace string                    `json:"releaseNamespace"`
 	Values           json.RawMessage           `json:"values"`
+	ProjectName      string                    `json:"projectName"`
+	Delivery         string                    `json:"delivery"`
 }
 
 type applicationClusterInput struct {
@@ -1007,7 +1025,37 @@ func (s *server) createApplication(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnprocessableEntity, "Values do not meet the application definition's requirements")
 		return
 	}
+	delivery, project, status, message := s.resolveDelivery(r.Context(), input.ProjectName, input.Delivery)
+	if status != 0 {
+		writeError(w, status, message)
+		return
+	}
 	session, _ := sessionFromContext(r.Context())
+	if delivery == deliveryGitOps {
+		request := &platformv1alpha1.ApplicationRequest{
+			ObjectMeta: metav1.ObjectMeta{Name: app.Name, Namespace: s.namespace},
+			Spec: platformv1alpha1.ApplicationRequestSpec{
+				ProjectRef:           platformv1alpha1.ProjectRequestReference{Name: project.Name},
+				ApplicationName:      app.Name,
+				ApplicationNamespace: namespace,
+				RequestedBy:          session.username,
+				IdempotencyKey:       applicationRequestKey(app),
+				Application:          app.Spec,
+			},
+		}
+		if err := s.writeClient(r).Create(r.Context(), request); err != nil {
+			if apierrors.IsAlreadyExists(err) {
+				writeError(w, http.StatusConflict, "A GitOps request with this application name already exists")
+			} else if apierrors.IsForbidden(err) {
+				writeError(w, http.StatusForbidden, "You do not have permission to create GitOps requests")
+			} else {
+				writeError(w, http.StatusInternalServerError, "Could not create GitOps request")
+			}
+			return
+		}
+		writeJSON(w, http.StatusAccepted, request)
+		return
+	}
 	recordChangeHistory(app, session.username, "Initial configuration")
 	if err := s.writeClient(r).Create(r.Context(), app); err != nil {
 		if apierrors.IsAlreadyExists(err) {
@@ -1022,6 +1070,51 @@ func (s *server) createApplication(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, app)
+}
+
+func (s *server) resolveDelivery(ctx context.Context, projectName, requested string) (string, *platformv1alpha1.Project, int, string) {
+	delivery := requested
+	if delivery == "" {
+		delivery = deliveryDirect
+	}
+	if delivery != deliveryDirect && delivery != deliveryGitOps {
+		return "", nil, http.StatusBadRequest, "Delivery must be direct or gitops"
+	}
+	if projectName == "" {
+		if delivery == deliveryGitOps {
+			return "", nil, http.StatusUnprocessableEntity, "Select a Project for GitOps delivery"
+		}
+		return delivery, nil, 0, ""
+	}
+	project := &platformv1alpha1.Project{}
+	if err := s.client.Get(ctx, types.NamespacedName{Name: projectName}, project); err != nil {
+		if apierrors.IsNotFound(err) {
+			return "", nil, http.StatusNotFound, "Selected Project does not exist"
+		}
+		return "", nil, http.StatusInternalServerError, "Could not verify Project"
+	}
+	mode := project.Spec.Delivery.Mode
+	if mode == "" {
+		mode = platformv1alpha1.DeliveryModeDirect
+	}
+	if mode == platformv1alpha1.DeliveryModeDirect && delivery == deliveryGitOps {
+		return "", nil, http.StatusUnprocessableEntity, "GitOps is disabled for this Project"
+	}
+	if mode == platformv1alpha1.DeliveryModeGitOps && delivery == deliveryDirect {
+		return "", nil, http.StatusUnprocessableEntity, "This Project requires GitOps delivery"
+	}
+	if delivery == deliveryGitOps {
+		if project.Status.Repository == nil || !meta.IsStatusConditionTrue(project.Status.Conditions, platformv1alpha1.ProjectConditionRepositoryReady) {
+			return "", nil, http.StatusUnprocessableEntity, "Project repository is not ready for GitOps"
+		}
+	}
+	return delivery, project, 0, ""
+}
+
+func applicationRequestKey(app *platformv1alpha1.Application) string {
+	payload, _ := json.Marshal(app.Spec)
+	sum := sha256.Sum256([]byte(app.Namespace + "\x00" + app.Name + "\x00" + string(payload)))
+	return hex.EncodeToString(sum[:])
 }
 
 // isCurrentValidatedDefinition deliberately requires the condition itself and

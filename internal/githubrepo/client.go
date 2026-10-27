@@ -251,6 +251,199 @@ func (c *Client) GetRepository(ctx context.Context, owner, name string) (Reposit
 	return toRepository(repo), nil
 }
 
+// File is a repository file read through the Contents API.
+type File struct {
+	Path    string
+	SHA     string
+	Content []byte
+}
+
+// PullRequest is the subset of a GitHub pull request used by the bridge.
+type PullRequest struct {
+	Number  int    `json:"number"`
+	HTMLURL string `json:"html_url"`
+	State   string `json:"state"`
+}
+
+// CreatePullRequestInput describes a pull request to open.
+type CreatePullRequestInput struct {
+	Title string
+	Head  string
+	Base  string
+	Body  string
+}
+
+// TreeEntry is a file written into a Git tree.
+type TreeEntry struct {
+	Path    string `json:"path"`
+	Mode    string `json:"mode"`
+	Type    string `json:"type"`
+	Content string `json:"content"`
+}
+
+// GetBranchSHA returns the commit SHA at the head of a branch.
+func (c *Client) GetBranchSHA(ctx context.Context, owner, name, branch string) (string, error) {
+	data, err := c.do(ctx, http.MethodGet, "/repos/"+escapeSegment(owner)+"/"+escapeSegment(name)+"/git/ref/heads/"+escapePath(branch), nil)
+	if err != nil {
+		return "", err
+	}
+	var ref struct {
+		Object struct {
+			SHA string `json:"sha"`
+		} `json:"object"`
+	}
+	if err := json.Unmarshal(data, &ref); err != nil || ref.Object.SHA == "" {
+		return "", errors.New("invalid GitHub API response")
+	}
+	return ref.Object.SHA, nil
+}
+
+// GetCommitTreeSHA returns the tree SHA for a commit.
+func (c *Client) GetCommitTreeSHA(ctx context.Context, owner, name, commitSHA string) (string, error) {
+	data, err := c.do(ctx, http.MethodGet, "/repos/"+escapeSegment(owner)+"/"+escapeSegment(name)+"/git/commits/"+escapeSegment(commitSHA), nil)
+	if err != nil {
+		return "", err
+	}
+	var commit struct {
+		Tree struct {
+			SHA string `json:"sha"`
+		} `json:"tree"`
+	}
+	if err := json.Unmarshal(data, &commit); err != nil || commit.Tree.SHA == "" {
+		return "", errors.New("invalid GitHub API response")
+	}
+	return commit.Tree.SHA, nil
+}
+
+// GetFile returns a file at a ref through the Contents API.
+func (c *Client) GetFile(ctx context.Context, owner, name, ref, path string) (File, error) {
+	var result File
+	query := url.Values{}
+	if ref != "" {
+		query.Set("ref", ref)
+	}
+	data, err := c.doQuery(ctx, http.MethodGet, "/repos/"+escapeSegment(owner)+"/"+escapeSegment(name)+"/contents/"+escapePath(path), query, nil)
+	if err != nil {
+		return result, err
+	}
+	var file struct {
+		Content  string `json:"content"`
+		Encoding string `json:"encoding"`
+		SHA      string `json:"sha"`
+	}
+	if err := json.Unmarshal(data, &file); err != nil || file.SHA == "" {
+		return result, errors.New("invalid GitHub API response")
+	}
+	if file.Encoding != "base64" {
+		return result, errors.New("unsupported GitHub file encoding")
+	}
+	content, err := base64.StdEncoding.DecodeString(strings.ReplaceAll(file.Content, "\n", ""))
+	if err != nil {
+		return result, errors.New("invalid GitHub file content")
+	}
+	return File{Path: path, SHA: file.SHA, Content: content}, nil
+}
+
+// CreateTree creates a tree based on an existing tree.
+func (c *Client) CreateTree(ctx context.Context, owner, name, baseTree string, entries []TreeEntry) (string, error) {
+	body, err := json.Marshal(struct {
+		BaseTree string      `json:"base_tree"`
+		Tree     []TreeEntry `json:"tree"`
+	}{BaseTree: baseTree, Tree: entries})
+	if err != nil {
+		return "", errors.New("could not encode GitHub request")
+	}
+	data, err := c.do(ctx, http.MethodPost, "/repos/"+escapeSegment(owner)+"/"+escapeSegment(name)+"/git/trees", body)
+	if err != nil {
+		return "", err
+	}
+	var tree struct {
+		SHA string `json:"sha"`
+	}
+	if err := json.Unmarshal(data, &tree); err != nil || tree.SHA == "" {
+		return "", errors.New("invalid GitHub API response")
+	}
+	return tree.SHA, nil
+}
+
+// CreateCommit creates a commit with one parent.
+func (c *Client) CreateCommit(ctx context.Context, owner, name, message, treeSHA, parentSHA string) (string, error) {
+	body, err := json.Marshal(struct {
+		Message string   `json:"message"`
+		Tree    string   `json:"tree"`
+		Parents []string `json:"parents"`
+	}{Message: message, Tree: treeSHA, Parents: []string{parentSHA}})
+	if err != nil {
+		return "", errors.New("could not encode GitHub request")
+	}
+	data, err := c.do(ctx, http.MethodPost, "/repos/"+escapeSegment(owner)+"/"+escapeSegment(name)+"/git/commits", body)
+	if err != nil {
+		return "", err
+	}
+	var commit struct {
+		SHA string `json:"sha"`
+	}
+	if err := json.Unmarshal(data, &commit); err != nil || commit.SHA == "" {
+		return "", errors.New("invalid GitHub API response")
+	}
+	return commit.SHA, nil
+}
+
+// CreateBranch creates a branch at a commit SHA.
+func (c *Client) CreateBranch(ctx context.Context, owner, name, branch, sha string) error {
+	body, err := json.Marshal(struct {
+		Ref string `json:"ref"`
+		SHA string `json:"sha"`
+	}{Ref: "refs/heads/" + branch, SHA: sha})
+	if err != nil {
+		return errors.New("could not encode GitHub request")
+	}
+	_, err = c.do(ctx, http.MethodPost, "/repos/"+escapeSegment(owner)+"/"+escapeSegment(name)+"/git/refs", body)
+	return err
+}
+
+// FindOpenPullRequest returns the first open pull request whose head is branch.
+func (c *Client) FindOpenPullRequest(ctx context.Context, owner, name, branch string) (PullRequest, error) {
+	var result PullRequest
+	query := url.Values{}
+	query.Set("state", "open")
+	query.Set("head", owner+":"+branch)
+	data, err := c.doQuery(ctx, http.MethodGet, "/repos/"+escapeSegment(owner)+"/"+escapeSegment(name)+"/pulls", query, nil)
+	if err != nil {
+		return result, err
+	}
+	var pulls []PullRequest
+	if err := json.Unmarshal(data, &pulls); err != nil {
+		return result, errors.New("invalid GitHub API response")
+	}
+	if len(pulls) == 0 || pulls[0].HTMLURL == "" {
+		return result, ErrNotFound
+	}
+	return pulls[0], nil
+}
+
+// CreatePullRequest opens a pull request.
+func (c *Client) CreatePullRequest(ctx context.Context, owner, name string, input CreatePullRequestInput) (PullRequest, error) {
+	var result PullRequest
+	body, err := json.Marshal(struct {
+		Title string `json:"title"`
+		Head  string `json:"head"`
+		Base  string `json:"base"`
+		Body  string `json:"body,omitempty"`
+	}{Title: input.Title, Head: input.Head, Base: input.Base, Body: input.Body})
+	if err != nil {
+		return result, errors.New("could not encode GitHub request")
+	}
+	data, err := c.do(ctx, http.MethodPost, "/repos/"+escapeSegment(owner)+"/"+escapeSegment(name)+"/pulls", body)
+	if err != nil {
+		return result, err
+	}
+	if err := json.Unmarshal(data, &result); err != nil || result.HTMLURL == "" {
+		return PullRequest{}, errors.New("invalid GitHub API response")
+	}
+	return result, nil
+}
+
 func toRepository(r repoResponse) Repository {
 	return Repository{
 		ID:            r.ID,
@@ -267,6 +460,10 @@ func toRepository(r repoResponse) Repository {
 }
 
 func (c *Client) do(ctx context.Context, method, path string, body []byte) ([]byte, error) {
+	return c.doQuery(ctx, method, path, nil, body)
+}
+
+func (c *Client) doQuery(ctx context.Context, method, path string, query url.Values, body []byte) ([]byte, error) {
 	u := *c.baseURL
 	u.Path = strings.TrimRight(u.Path, "/") + path
 	u.RawPath = strings.TrimRight(c.baseURL.EscapedPath(), "/") + path
@@ -276,6 +473,9 @@ func (c *Client) do(ctx context.Context, method, path string, body []byte) ([]by
 		return nil, errors.New("invalid GitHub API path")
 	}
 	u.Path = decoded
+	if len(query) > 0 {
+		u.RawQuery = query.Encode()
+	}
 	var reader io.Reader
 	if body != nil {
 		reader = bytes.NewReader(body)

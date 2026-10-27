@@ -20,12 +20,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -41,6 +44,13 @@ const (
 	projectForbiddenRetryInterval = 30 * time.Minute
 	projectMarkerPrefix           = "[releaseyard-project-uid:"
 	projectReasonConflict         = "Conflict"
+	argocdApplicationManagedBy    = "releaseyard"
+	argocdApplicationManagedLabel = "platform.releaseyard.io/managed-by"
+	argocdProjectLabel            = "platform.releaseyard.io/project"
+	argocdProjectUIDAnnotation    = "platform.releaseyard.io/project-uid"
+	argocdApplicationPath         = "apps"
+	argocdDestinationServer       = "https://kubernetes.default.svc"
+	argocdNamespaceField          = "namespace"
 )
 
 var errRequeue = errors.New("requeue")
@@ -54,15 +64,18 @@ type projectGit interface {
 // ProjectReconciler provisions and periodically verifies private Git repositories.
 type ProjectReconciler struct {
 	client.Client
-	APIReader            client.Reader
-	CredentialsNamespace string
-	Scheme               *runtime.Scheme
-	GitHubFactory        func(token string) projectGit
+	APIReader                  client.Reader
+	CredentialsNamespace       string
+	Scheme                     *runtime.Scheme
+	GitHubFactory              func(token string) projectGit
+	ArgoCDNamespace            string
+	ArgoCDDestinationNamespace string
 }
 
 // +kubebuilder:rbac:groups=platform.releaseyard.io,resources=projects,verbs=get;list;watch
 // +kubebuilder:rbac:groups=platform.releaseyard.io,resources=projects/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=platform.releaseyard.io,resources=gitconnections,verbs=get
+// +kubebuilder:rbac:groups=argoproj.io,resources=applications,verbs=get;list;watch;create;update;patch
 
 func (r *ProjectReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	var project platformv1alpha1.Project
@@ -317,7 +330,7 @@ func (r *ProjectReconciler) recordRepository(ctx context.Context, project *platf
 	if err := r.Client.Status().Update(ctx, project); err != nil {
 		return ctrl.Result{}, err
 	}
-	return ctrl.Result{RequeueAfter: projectRetryInterval}, nil
+	return r.ensureGitOpsApplication(ctx, project.Name, project.UID, repo)
 }
 
 func (r *ProjectReconciler) recordCreated(ctx context.Context, name string, created githubrepo.Repository) (ctrl.Result, error) {
@@ -335,7 +348,7 @@ func (r *ProjectReconciler) recordCreated(ctx context.Context, name string, crea
 	if err := r.Client.Status().Update(ctx, &latest); err != nil {
 		return ctrl.Result{}, err
 	}
-	return ctrl.Result{RequeueAfter: projectRetryInterval}, nil
+	return r.ensureGitOpsApplication(ctx, latest.Name, latest.UID, created)
 }
 
 func projectRepositoryStatus(repo githubrepo.Repository) *platformv1alpha1.ProjectRepositoryStatus {
@@ -356,6 +369,116 @@ func matchesProjectRepository(repo githubrepo.Repository, owner, name, marker st
 		return false
 	}
 	return strings.Contains(repo.Description, marker)
+}
+
+func (r *ProjectReconciler) ensureGitOpsApplication(ctx context.Context, projectName string, projectUID types.UID, repo githubrepo.Repository) (ctrl.Result, error) {
+	project, err := r.freshProject(ctx, projectName)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if project.Spec.Delivery.Mode == platformv1alpha1.DeliveryModeDirect {
+		return ctrl.Result{RequeueAfter: projectRetryInterval}, nil
+	}
+	namespace := r.ArgoCDNamespace
+	if namespace == "" {
+		namespace = "argocd"
+	}
+	destinationNamespace := r.ArgoCDDestinationNamespace
+	if destinationNamespace == "" {
+		destinationNamespace = "releaseyard-team-platform"
+	}
+	if repo.CloneURL == "" || repo.DefaultBranch == "" {
+		return ctrl.Result{RequeueAfter: projectRetryInterval}, r.setGitOpsCondition(ctx, projectName, metav1.ConditionFalse, "RepositoryIncomplete", "Project repository clone URL or default branch is unavailable")
+	}
+	desired := &unstructured.Unstructured{}
+	desired.SetAPIVersion("argoproj.io/v1alpha1")
+	desired.SetKind("Application")
+	desired.SetName(projectName)
+	desired.SetNamespace(namespace)
+	desired.SetLabels(map[string]string{
+		"app.kubernetes.io/managed-by": argocdApplicationManagedBy,
+		argocdApplicationManagedLabel:  argocdApplicationManagedBy,
+		argocdProjectLabel:             projectName,
+	})
+	desired.SetAnnotations(map[string]string{argocdProjectUIDAnnotation: string(projectUID)})
+	desired.Object["spec"] = map[string]any{
+		"project": "default",
+		"source": map[string]any{
+			"repoURL":        repo.CloneURL,
+			"targetRevision": repo.DefaultBranch,
+			"path":           argocdApplicationPath,
+		},
+		"destination": map[string]any{
+			"server":             argocdDestinationServer,
+			argocdNamespaceField: destinationNamespace,
+		},
+	}
+	key := types.NamespacedName{Namespace: namespace, Name: projectName}
+	existing := &unstructured.Unstructured{}
+	existing.SetAPIVersion("argoproj.io/v1alpha1")
+	existing.SetKind("Application")
+	if err := r.Get(ctx, key, existing); err != nil {
+		if apierrors.IsNotFound(err) {
+			if err := r.Create(ctx, desired); err != nil {
+				return ctrl.Result{RequeueAfter: projectRetryInterval}, r.setGitOpsCondition(ctx, projectName, metav1.ConditionFalse, "GitOpsApplicationUnavailable", "Argo CD Application could not be created")
+			}
+			return ctrl.Result{RequeueAfter: projectRetryInterval}, r.setGitOpsCondition(ctx, projectName, metav1.ConditionTrue, "GitOpsApplicationReady", "Argo CD Application is ready with manual sync")
+		}
+		if meta.IsNoMatchError(err) {
+			return ctrl.Result{RequeueAfter: projectRetryInterval}, r.setGitOpsCondition(ctx, projectName, metav1.ConditionFalse, "GitOpsApplicationUnavailable", "Argo CD Application API is not installed")
+		}
+		return ctrl.Result{RequeueAfter: projectRetryInterval}, r.setGitOpsCondition(ctx, projectName, metav1.ConditionUnknown, "GitOpsApplicationUnavailable", "Argo CD Application could not be checked")
+	}
+	uid := existing.GetAnnotations()[argocdProjectUIDAnnotation]
+	managedBy := existing.GetLabels()[argocdApplicationManagedLabel]
+	if (uid != "" && uid != string(projectUID)) || (uid == "" && managedBy != argocdApplicationManagedBy) {
+		return ctrl.Result{}, r.setGitOpsCondition(ctx, projectName, metav1.ConditionFalse, "GitOpsApplicationConflict", "An Argo CD Application with this Project name already exists and is not managed by ReleaseYard")
+	}
+	before := existing.DeepCopy()
+	labels := existing.GetLabels()
+	if labels == nil {
+		labels = map[string]string{}
+	}
+	labels["app.kubernetes.io/managed-by"] = argocdApplicationManagedBy
+	labels[argocdApplicationManagedLabel] = argocdApplicationManagedBy
+	labels[argocdProjectLabel] = projectName
+	existing.SetLabels(labels)
+	annotations := existing.GetAnnotations()
+	if annotations == nil {
+		annotations = map[string]string{}
+	}
+	annotations[argocdProjectUIDAnnotation] = string(projectUID)
+	existing.SetAnnotations(annotations)
+	spec, _ := existing.Object["spec"].(map[string]any)
+	if spec == nil {
+		spec = map[string]any{}
+	}
+	spec["project"] = "default"
+	spec["source"] = map[string]any{
+		"repoURL":        repo.CloneURL,
+		"targetRevision": repo.DefaultBranch,
+		"path":           argocdApplicationPath,
+	}
+	spec["destination"] = map[string]any{
+		"server":             argocdDestinationServer,
+		argocdNamespaceField: destinationNamespace,
+	}
+	existing.Object["spec"] = spec
+	if !reflect.DeepEqual(before.Object, existing.Object) {
+		if err := r.Update(ctx, existing); err != nil {
+			return ctrl.Result{RequeueAfter: projectRetryInterval}, r.setGitOpsCondition(ctx, projectName, metav1.ConditionFalse, "GitOpsApplicationUnavailable", "Argo CD Application could not be updated")
+		}
+	}
+	return ctrl.Result{RequeueAfter: projectRetryInterval}, r.setGitOpsCondition(ctx, projectName, metav1.ConditionTrue, "GitOpsApplicationReady", "Argo CD Application is ready with manual sync")
+}
+
+func (r *ProjectReconciler) setGitOpsCondition(ctx context.Context, name string, status metav1.ConditionStatus, reason, message string) error {
+	project, err := r.freshProject(ctx, name)
+	if err != nil {
+		return err
+	}
+	meta.SetStatusCondition(&project.Status.Conditions, metav1.Condition{Type: platformv1alpha1.ProjectConditionGitOpsApplicationReady, Status: status, ObservedGeneration: project.Generation, LastTransitionTime: metav1.Now(), Reason: reason, Message: message})
+	return r.Client.Status().Update(ctx, &project)
 }
 
 // SetupWithManager sets up the controller with the Manager.

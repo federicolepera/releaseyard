@@ -10,7 +10,9 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -99,6 +101,111 @@ func reconcileProject(t *testing.T, r *ProjectReconciler) error {
 	t.Helper()
 	_, err := r.Reconcile(context.Background(), reconcile.Request{NamespacedName: types.NamespacedName{Name: "demo"}})
 	return err
+}
+
+func setupProjectControllerWithArgo(t *testing.T, project *platformv1alpha1.Project, gh *projectGitMock) (*ProjectReconciler, client.Client) {
+	t.Helper()
+	scheme := runtime.NewScheme()
+	_ = corev1.AddToScheme(scheme)
+	_ = platformv1alpha1.AddToScheme(scheme)
+	gvk := schema.GroupVersionKind{Group: "argoproj.io", Version: "v1alpha1", Kind: "Application"}
+	scheme.AddKnownTypeWithName(gvk, &unstructured.Unstructured{})
+	scheme.AddKnownTypeWithName(gvk.GroupVersion().WithKind("ApplicationList"), &unstructured.UnstructuredList{})
+	connection := &platformv1alpha1.GitConnection{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "manager-ns", Name: "github", UID: "connection-uid"},
+		Spec: platformv1alpha1.GitConnectionSpec{
+			Provider:       platformv1alpha1.GitProviderGitHub,
+			TokenSecretRef: platformv1alpha1.GitTokenSecretReference{Name: "token"},
+			GitHub:         &platformv1alpha1.GitHubProviderConfig{Organization: "acme"},
+		},
+	}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(project).WithObjects(project, connection,
+		&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Namespace: "manager-ns", Name: "token"}, Data: map[string][]byte{"token": []byte("secret-token")}}).Build()
+	r := &ProjectReconciler{
+		Client: c, APIReader: c, CredentialsNamespace: "manager-ns", Scheme: scheme,
+		GitHubFactory:   func(string) projectGit { return gh },
+		ArgoCDNamespace: "argocd", ArgoCDDestinationNamespace: "releaseyard-team-platform",
+	}
+	return r, c
+}
+
+func TestProjectCreatesManualArgoCDApplication(t *testing.T) {
+	project := projectFixture()
+	project.Spec.Delivery.Mode = platformv1alpha1.DeliveryModeBoth
+	gh := &projectGitMock{repo: readyRepo()}
+	r, c := setupProjectControllerWithArgo(t, project, gh)
+	if err := reconcileProject(t, r); err != nil {
+		t.Fatal(err)
+	}
+	app := &unstructured.Unstructured{}
+	app.SetAPIVersion("argoproj.io/v1alpha1")
+	app.SetKind("Application")
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "argocd", Name: "demo"}, app); err != nil {
+		t.Fatal(err)
+	}
+	for path, want := range map[string]string{
+		"spec.source.repoURL":        "https://github.com/acme/demo.git",
+		"spec.source.targetRevision": "main",
+		"spec.source.path":           "apps",
+		"spec.destination.server":    "https://kubernetes.default.svc",
+		"spec.destination.namespace": "releaseyard-team-platform",
+	} {
+		got, _, _ := unstructured.NestedString(app.Object, strings.Split(path, ".")...)
+		if got != want {
+			t.Fatalf("%s = %q, want %q", path, got, want)
+		}
+	}
+	if _, found, _ := unstructured.NestedMap(app.Object, "spec", "syncPolicy"); found {
+		t.Fatalf("syncPolicy should be left manual by default: %#v", app.Object)
+	}
+	if app.GetAnnotations()["platform.releaseyard.io/project-uid"] != "project-uid" || app.GetLabels()["platform.releaseyard.io/managed-by"] != "releaseyard" {
+		t.Fatalf("Argo Application ownership metadata missing: %#v", app.GetAnnotations())
+	}
+	var got platformv1alpha1.Project
+	if err := c.Get(context.Background(), types.NamespacedName{Name: "demo"}, &got); err != nil {
+		t.Fatal(err)
+	}
+	if condition := findProjectConditionType(got.Status.Conditions, platformv1alpha1.ProjectConditionGitOpsApplicationReady); condition == nil || condition.Status != metav1.ConditionTrue {
+		t.Fatalf("GitOpsApplicationReady condition missing: %#v", got.Status.Conditions)
+	}
+}
+
+func TestProjectPreservesManualArgoCDSyncPolicy(t *testing.T) {
+	project := projectFixture()
+	project.Spec.Delivery.Mode = platformv1alpha1.DeliveryModeGitOps
+	gh := &projectGitMock{repo: readyRepo()}
+	r, c := setupProjectControllerWithArgo(t, project, gh)
+	existing := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "argoproj.io/v1alpha1",
+		"kind":       "Application",
+		"metadata": map[string]any{
+			"name":        "demo",
+			"namespace":   "argocd",
+			"labels":      map[string]any{"platform.releaseyard.io/managed-by": "releaseyard"},
+			"annotations": map[string]any{"platform.releaseyard.io/project-uid": "project-uid"},
+		},
+		"spec": map[string]any{
+			"source":      map[string]any{"repoURL": "old", "targetRevision": "old", "path": "old"},
+			"destination": map[string]any{"server": "old", "namespace": "old"},
+			"syncPolicy":  map[string]any{"automated": map[string]any{"prune": true, "selfHeal": true}},
+		},
+	}}
+	if err := c.Create(context.Background(), existing); err != nil {
+		t.Fatal(err)
+	}
+	if err := reconcileProject(t, r); err != nil {
+		t.Fatal(err)
+	}
+	app := &unstructured.Unstructured{}
+	app.SetAPIVersion("argoproj.io/v1alpha1")
+	app.SetKind("Application")
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "argocd", Name: "demo"}, app); err != nil {
+		t.Fatal(err)
+	}
+	syncPolicy, found, _ := unstructured.NestedMap(app.Object, "spec", "syncPolicy")
+	if !found || syncPolicy["automated"] == nil {
+		t.Fatalf("automated sync policy was lost: %#v", app.Object)
+	}
 }
 
 func TestProjectCreatesAndSeedsPrivateMarkedRepository(t *testing.T) {
@@ -455,8 +562,12 @@ func TestProjectIgnoresDeletionAndMissingProject(t *testing.T) {
 }
 
 func findProjectCondition(conditions []metav1.Condition) *metav1.Condition {
+	return findProjectConditionType(conditions, platformv1alpha1.ProjectConditionRepositoryReady)
+}
+
+func findProjectConditionType(conditions []metav1.Condition, conditionType string) *metav1.Condition {
 	for i := range conditions {
-		if conditions[i].Type == platformv1alpha1.ProjectConditionRepositoryReady {
+		if conditions[i].Type == conditionType {
 			return &conditions[i]
 		}
 	}
