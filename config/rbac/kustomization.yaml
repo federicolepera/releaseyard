@@ -43,4 +43,3 @@ resources:
 - cluster_editor_role.yaml
 - cluster_viewer_role.yaml
 
-

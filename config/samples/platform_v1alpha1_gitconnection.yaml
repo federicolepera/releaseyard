@@ -1,0 +1,14 @@
+apiVersion: platform.releaseyard.io/v1alpha1
+kind: GitConnection
+metadata:
+  labels:
+    app.kubernetes.io/name: idp
+    app.kubernetes.io/managed-by: kustomize
+  name: acme
+  namespace: idp-system
+spec:
+  provider: github
+  tokenSecretRef:
+    name: releaseyard-git-acme
+  github:
+    organization: federicolepera

@@ -1,0 +1,14 @@
+apiVersion: platform.releaseyard.io/v1alpha1
+kind: Project
+metadata:
+  labels:
+    app.kubernetes.io/name: idp
+    app.kubernetes.io/managed-by: kustomize
+  name: project-sample
+spec:
+  repository:
+    name: project-sample
+    connectionRef:
+      name: acme
+      namespace: idp-system
+  description: Repository del progetto esempio

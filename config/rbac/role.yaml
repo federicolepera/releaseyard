@@ -29,6 +29,7 @@ rules:
   - applicationdefinitions
   - cloudtargets
   - clusters
+  - projects
   - resourcedefinitions
   verbs:
   - get
@@ -40,6 +41,7 @@ rules:
   - applicationdefinitions/status
   - applications/status
   - clusters/status
+  - projects/status
   - resources/status
   verbs:
   - get
@@ -65,6 +67,12 @@ rules:
   - resources/finalizers
   verbs:
   - update
+- apiGroups:
+  - platform.releaseyard.io
+  resources:
+  - gitconnections
+  verbs:
+  - get
 - apiGroups:
   - s3.aws.m.upbound.io
   resources:

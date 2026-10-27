@@ -8,6 +8,8 @@ resources:
 - bases/platform.releaseyard.io_cloudtargets.yaml
 - bases/platform.releaseyard.io_resourcedefinitions.yaml
 - bases/platform.releaseyard.io_resources.yaml
+- bases/platform.releaseyard.io_projects.yaml
+- bases/platform.releaseyard.io_gitconnections.yaml
 # +kubebuilder:scaffold:crdkustomizeresource
 
 patches:
