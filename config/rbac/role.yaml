@@ -12,6 +12,17 @@ rules:
   - create
   - patch
 - apiGroups:
+  - argoproj.io
+  resources:
+  - applications
+  verbs:
+  - create
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
   - ec2.aws.m.upbound.io
   resources:
   - instances
@@ -27,6 +38,7 @@ rules:
   - platform.releaseyard.io
   resources:
   - applicationdefinitions
+  - applicationrequests
   - cloudtargets
   - clusters
   - projects
@@ -39,6 +51,7 @@ rules:
   - platform.releaseyard.io
   resources:
   - applicationdefinitions/status
+  - applicationrequests/status
   - applications/status
   - clusters/status
   - projects/status

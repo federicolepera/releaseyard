@@ -55,6 +55,15 @@ rules:
     verbs:
       - get
       - list
+  # Platform administrators can request GitOps application creation.
+  - apiGroups:
+      - platform.releaseyard.io
+    resources:
+      - applicationrequests
+    verbs:
+      - get
+      - list
+      - create
   # Platform administrators can manage cloud resources from the dashboard.
   - apiGroups:
       - platform.releaseyard.io

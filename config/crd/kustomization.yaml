@@ -10,6 +10,7 @@ resources:
 - bases/platform.releaseyard.io_resources.yaml
 - bases/platform.releaseyard.io_projects.yaml
 - bases/platform.releaseyard.io_gitconnections.yaml
+- bases/platform.releaseyard.io_applicationrequests.yaml
 # +kubebuilder:scaffold:crdkustomizeresource
 
 patches:

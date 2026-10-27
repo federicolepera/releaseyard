@@ -9,6 +9,7 @@ rules:
       - platform.releaseyard.io
     resources:
       - applications
+      - applicationrequests
     verbs:
       - get
       - list
@@ -91,6 +92,7 @@ rules:
       - platform.releaseyard.io
     resources:
       - applicationdefinitions
+      - projects
     verbs:
       - get
       - list

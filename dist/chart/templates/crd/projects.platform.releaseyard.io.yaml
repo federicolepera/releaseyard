@@ -40,6 +40,21 @@ spec:
           spec:
             description: spec defines the desired state of Project
             properties:
+              delivery:
+                default:
+                  mode: direct
+                description: delivery controls how Applications for this Project may
+                  be created.
+                properties:
+                  mode:
+                    default: direct
+                    description: mode is direct, gitops, or both.
+                    enum:
+                    - direct
+                    - gitops
+                    - both
+                    type: string
+                type: object
               description:
                 description: description is attached to the provisioned repository.
                 maxLength: 280

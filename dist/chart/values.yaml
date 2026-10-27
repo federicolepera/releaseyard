@@ -39,6 +39,14 @@ manager:
   ##
   teamNamespacePrefix: "releaseyard-team-"
 
+  ## Argo CD integration for GitOps Projects. ReleaseYard creates one
+  ## Application per Project pointing at the Project repository `apps` path.
+  ## Sync policy is intentionally left manual; enable automated sync in Argo CD.
+  ##
+  argocd:
+    namespace: argocd
+    destinationNamespace: releaseyard-team-platform
+
   ## Health probes.
   ## The manager serves the liveness (/healthz) and readiness (/readyz) endpoints on this port.
   ##

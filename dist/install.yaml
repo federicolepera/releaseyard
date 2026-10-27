@@ -261,6 +261,277 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.22.0
+  name: applicationrequests.platform.releaseyard.io
+spec:
+  group: platform.releaseyard.io
+  names:
+    kind: ApplicationRequest
+    listKind: ApplicationRequestList
+    plural: applicationrequests
+    singular: applicationrequest
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .status.branch
+      name: Branch
+      type: string
+    - jsonPath: .status.changeRequestURL
+      name: PR
+      type: string
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: ApplicationRequest is a durable GitOps request waiting for the
+          bridge.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: spec defines the requested Application.
+            properties:
+              application:
+                description: application is the Application spec to write to the Project
+                  repository.
+                properties:
+                  applicationDefinitionRef:
+                    description: |-
+                      applicationDefinitionRef identifies a cluster-scoped ApplicationDefinition.
+                      Its name cannot be changed after creation.
+                    properties:
+                      name:
+                        description: name identifies the referenced resource.
+                        maxLength: 253
+                        minLength: 1
+                        pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
+                        type: string
+                    required:
+                    - name
+                    type: object
+                    x-kubernetes-validations:
+                    - message: applicationDefinitionRef is immutable
+                      rule: self.name == oldSelf.name
+                  clusterRef:
+                    description: |-
+                      clusterRef identifies the target cluster-scoped Cluster resource.
+                      Its name cannot be changed after creation.
+                    properties:
+                      name:
+                        description: name identifies the referenced resource.
+                        maxLength: 253
+                        minLength: 1
+                        pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
+                        type: string
+                    required:
+                    - name
+                    type: object
+                  clusters:
+                    description: |-
+                      clusters explicitly selects one or more target Clusters. The list can be
+                      updated after creation, but a target name must keep the same UID. It is not
+                      expanded automatically when new Clusters appear.
+                    items:
+                      description: ApplicationClusterTarget pins one explicitly selected
+                        target Cluster.
+                      properties:
+                        name:
+                          description: name is the DNS subdomain name of the target
+                            Cluster.
+                          maxLength: 253
+                          minLength: 1
+                          pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
+                          type: string
+                        uid:
+                          description: uid identifies the exact target Cluster object.
+                          maxLength: 128
+                          minLength: 1
+                          type: string
+                      required:
+                      - name
+                      - uid
+                      type: object
+                      x-kubernetes-validations:
+                      - message: a Cluster UID cannot change for an existing target
+                          name
+                        rule: self.uid == oldSelf.uid
+                    maxItems: 32
+                    minItems: 1
+                    type: array
+                    x-kubernetes-list-map-keys:
+                    - name
+                    x-kubernetes-list-type: map
+                  description:
+                    description: description is an optional human-readable description
+                      of the Application.
+                    maxLength: 280
+                    type: string
+                  environment:
+                    description: |-
+                      environment selects Clusters by their environment label. When targets is
+                      omitted the matching set is resolved dynamically on every reconcile. Set
+                      targets to pin a fixed snapshot instead.
+                    properties:
+                      name:
+                        description: name is the environment label value used to select
+                          target Clusters.
+                        maxLength: 63
+                        minLength: 1
+                        pattern: ^[A-Za-z0-9]([-A-Za-z0-9_.]*[A-Za-z0-9])?$
+                        type: string
+                      targets:
+                        description: |-
+                          targets optionally pins the Cluster identities for this Application. When
+                          omitted or empty, the controller resolves the matching Clusters dynamically.
+                        items:
+                          description: ApplicationEnvironmentTarget pins one Cluster
+                            identity in an environment.
+                          properties:
+                            name:
+                              description: name is the DNS subdomain name of the target
+                                Cluster.
+                              maxLength: 253
+                              minLength: 1
+                              pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
+                              type: string
+                            uid:
+                              description: uid identifies the exact target Cluster
+                                object.
+                              type: string
+                          required:
+                          - name
+                          - uid
+                          type: object
+                          x-kubernetes-validations:
+                          - message: uid must contain between 1 and 128 characters
+                            rule: size(self.uid) >= 1 && size(self.uid) <= 128
+                        maxItems: 32
+                        type: array
+                        x-kubernetes-list-map-keys:
+                        - name
+                        x-kubernetes-list-type: map
+                    required:
+                    - name
+                    type: object
+                  releaseNamespace:
+                    description: |-
+                      releaseNamespace selects an existing namespace on the target workload cluster.
+                      When omitted, the ApplicationDefinition's release.namespace is used.
+                      This value cannot be changed after the Application is created.
+                    maxLength: 63
+                    minLength: 1
+                    pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                    type: string
+                  values:
+                    description: |-
+                      values contains user-supplied overrides for paths exposed by the referenced definition.
+                      Chart defaults are not read here.
+                    type: object
+                    x-kubernetes-preserve-unknown-fields: true
+                required:
+                - applicationDefinitionRef
+                type: object
+                x-kubernetes-validations:
+                - message: releaseNamespace is immutable
+                  rule: (!has(self.releaseNamespace) && !has(oldSelf.releaseNamespace))
+                    || (has(self.releaseNamespace) && has(oldSelf.releaseNamespace)
+                    && self.releaseNamespace == oldSelf.releaseNamespace)
+                - message: exactly one of clusterRef, clusters, or environment must
+                    be set
+                  rule: '(has(self.clusterRef) ? 1 : 0) + (has(self.environment) ?
+                    1 : 0) + (has(self.clusters) ? 1 : 0) == 1'
+                - message: the Application target selector is immutable
+                  rule: (!has(self.clusterRef) && !has(oldSelf.clusterRef)) || (has(self.clusterRef)
+                    && has(oldSelf.clusterRef) && self.clusterRef == oldSelf.clusterRef)
+                - message: the Application target selector is immutable
+                  rule: (!has(self.environment) && !has(oldSelf.environment)) || (has(self.environment)
+                    && has(oldSelf.environment) && self.environment == oldSelf.environment)
+              applicationName:
+                description: applicationName is the requested Application name.
+                maxLength: 53
+                minLength: 1
+                type: string
+              applicationNamespace:
+                description: applicationNamespace is the target Application namespace.
+                minLength: 1
+                type: string
+              idempotencyKey:
+                description: idempotencyKey identifies repeated submissions of the
+                  same request.
+                minLength: 1
+                type: string
+              projectRef:
+                description: projectRef identifies the Project that owns the target
+                  repository.
+                properties:
+                  name:
+                    description: name is the Project name.
+                    minLength: 1
+                    type: string
+                required:
+                - name
+                type: object
+              requestedBy:
+                description: requestedBy is the authenticated dashboard user.
+                minLength: 1
+                type: string
+            required:
+            - application
+            - applicationName
+            - applicationNamespace
+            - idempotencyKey
+            - projectRef
+            - requestedBy
+            type: object
+          status:
+            description: status reports the request lifecycle.
+            properties:
+              branch:
+                description: branch is the Git branch created for this request.
+                type: string
+              changeRequestURL:
+                description: changeRequestURL is the pull request URL opened by the
+                  bridge.
+                type: string
+              commitSHA:
+                description: commitSHA is the commit written to the request branch.
+                type: string
+              message:
+                description: message is a human-readable status message.
+                type: string
+              phase:
+                description: phase is the current request phase.
+                type: string
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.22.0
   name: applications.platform.releaseyard.io
 spec:
   group: platform.releaseyard.io
@@ -1572,6 +1843,21 @@ spec:
           spec:
             description: spec defines the desired state of Project
             properties:
+              delivery:
+                default:
+                  mode: direct
+                description: delivery controls how Applications for this Project may
+                  be created.
+                properties:
+                  mode:
+                    default: direct
+                    description: mode is direct, gitops, or both.
+                    enum:
+                    - direct
+                    - gitops
+                    - both
+                    type: string
+                type: object
               description:
                 description: description is attached to the provisioned repository.
                 maxLength: 280
@@ -2409,6 +2695,77 @@ metadata:
   labels:
     app.kubernetes.io/managed-by: kustomize
     app.kubernetes.io/name: idp
+  name: idp-applicationrequest-admin-role
+rules:
+- apiGroups:
+  - platform.releaseyard.io
+  resources:
+  - applicationrequests
+  verbs:
+  - '*'
+- apiGroups:
+  - platform.releaseyard.io
+  resources:
+  - applicationrequests/status
+  verbs:
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: idp
+  name: idp-applicationrequest-editor-role
+rules:
+- apiGroups:
+  - platform.releaseyard.io
+  resources:
+  - applicationrequests
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - platform.releaseyard.io
+  resources:
+  - applicationrequests/status
+  verbs:
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: idp
+  name: idp-applicationrequest-viewer-role
+rules:
+- apiGroups:
+  - platform.releaseyard.io
+  resources:
+  - applicationrequests
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - platform.releaseyard.io
+  resources:
+  - applicationrequests/status
+  verbs:
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: idp
   name: idp-cloudtarget-admin-role
 rules:
 - apiGroups:
@@ -2558,6 +2915,17 @@ rules:
   - create
   - patch
 - apiGroups:
+  - argoproj.io
+  resources:
+  - applications
+  verbs:
+  - create
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
   - ec2.aws.m.upbound.io
   resources:
   - instances
@@ -2573,6 +2941,7 @@ rules:
   - platform.releaseyard.io
   resources:
   - applicationdefinitions
+  - applicationrequests
   - cloudtargets
   - clusters
   - projects
@@ -2585,6 +2954,7 @@ rules:
   - platform.releaseyard.io
   resources:
   - applicationdefinitions/status
+  - applicationrequests/status
   - applications/status
   - clusters/status
   - projects/status

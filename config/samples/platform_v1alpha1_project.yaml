@@ -12,3 +12,5 @@ spec:
       name: acme
       namespace: idp-system
   description: Repository del progetto esempio
+  delivery:
+    mode: both

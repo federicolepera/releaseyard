@@ -24,6 +24,9 @@ import (
 // ProjectConditionRepositoryReady indicates that the Git repository exists and is recorded in status.
 const ProjectConditionRepositoryReady = "RepositoryReady"
 
+// ProjectConditionGitOpsApplicationReady indicates that the Project's Argo CD Application exists.
+const ProjectConditionGitOpsApplicationReady = "GitOpsApplicationReady"
+
 // EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
@@ -37,6 +40,29 @@ type ProjectSpec struct {
 	// +optional
 	// +kubebuilder:validation:MaxLength=280
 	Description string `json:"description,omitempty"`
+
+	// delivery controls how Applications for this Project may be created.
+	// +optional
+	// +kubebuilder:default={mode:"direct"}
+	Delivery ProjectDeliverySpec `json:"delivery,omitempty"`
+}
+
+// DeliveryMode selects how Applications may be created for a Project.
+type DeliveryMode string
+
+const (
+	DeliveryModeDirect DeliveryMode = "direct"
+	DeliveryModeGitOps DeliveryMode = "gitops"
+	DeliveryModeBoth   DeliveryMode = "both"
+)
+
+// ProjectDeliverySpec configures Application creation for a Project.
+type ProjectDeliverySpec struct {
+	// mode is direct, gitops, or both.
+	// +optional
+	// +kubebuilder:validation:Enum=direct;gitops;both
+	// +kubebuilder:default=direct
+	Mode DeliveryMode `json:"mode,omitempty"`
 }
 
 // ProjectRepositorySpec describes the repository to provision for a Project.

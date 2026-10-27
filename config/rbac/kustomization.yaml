@@ -24,6 +24,9 @@ resources:
 # default, aiding admins in cluster management. Those roles are
 # not used by the idp itself. You can comment the following lines
 # if you do not want those helpers be installed with your Project.
+- applicationrequest_admin_role.yaml
+- applicationrequest_editor_role.yaml
+- applicationrequest_viewer_role.yaml
 - resource_admin_role.yaml
 - resource_editor_role.yaml
 - resource_viewer_role.yaml
