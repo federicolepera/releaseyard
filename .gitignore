@@ -28,6 +28,9 @@ go.work
 
 # Kubeconfig might contain secrets
 *.kubeconfig
+
+# Local provider token used for manual testing
+/token.txt
 # Local Keycloak database credentials
 /keycloack/db-secret.yaml
 /keycloack/client-secret
