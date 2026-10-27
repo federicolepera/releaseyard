@@ -181,10 +181,9 @@ Create the management cluster (`releaseyard-a`) and two workload clusters
 bash hack/setup-kind-workloads.sh
 ```
 
-This repository does not provision a chart repository. Configure
-`manager.allowedChartHosts` and `ApplicationDefinition.spec.chart.repository` for
-your HTTP(S) Helm repository. The demo chart is published to GHCR as an OCI
-artifact; OCI fetching is a separate integration.
+This repository does not provision a chart repository. The demo chart is
+published as a public OCI artifact under
+`oci://ghcr.io/federicolepera/helm-charts/releaseyard-demo`.
 
 Build and load the controller and dashboard images:
 
@@ -201,7 +200,8 @@ Install the controller with the chart:
 helm upgrade --install idp dist/chart \
   -n idp-system --create-namespace \
   --set manager.image.repository=releaseyard-controller \
-  --set manager.image.tag=dev
+  --set manager.image.tag=dev \
+  --set manager.allowedChartHosts=ghcr.io
 ```
 
 Deploy the dashboard with the local kustomization:
@@ -219,8 +219,7 @@ kubectl --context kind-releaseyard-a -n idp-system create secret generic release
   --from-file=kubeconfig=.local/kubeconfigs/releaseyard-managed-b.kubeconfig
 ```
 
-Apply the samples after replacing `https://charts.example.com` in the
-`ApplicationDefinition` with a reachable HTTP(S) Helm repository:
+Apply the samples. The sample definition uses the public GHCR OCI chart:
 
 ```bash
 kubectl --context kind-releaseyard-a apply -f config/samples/platform_v1alpha1_cluster.yaml
