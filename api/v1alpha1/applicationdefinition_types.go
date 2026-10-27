@@ -27,10 +27,10 @@ import (
 
 // ApplicationDefinitionChart identifies a pinned Helm chart.
 type ApplicationDefinitionChart struct {
-	// repository is the base URL of an HTTP(S) Helm repository.
+	// repository is the base URL of an HTTP(S) or OCI Helm repository.
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinLength=8
-	// +kubebuilder:validation:Pattern="^https?://.+$"
+	// +kubebuilder:validation:Pattern="^(https?|oci)://.+$"
 	Repository string `json:"repository"`
 
 	// name is the chart name.

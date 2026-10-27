@@ -136,7 +136,7 @@ type ApplicationEnvironmentTarget struct {
 
 // ApplicationChartIdentity records the chart coordinate and verified archive digest.
 type ApplicationChartIdentity struct {
-	// repository is the configured HTTP(S) Helm repository URL.
+	// repository is the configured HTTP(S) or OCI Helm repository URL.
 	// +kubebuilder:validation:Required
 	Repository string `json:"repository"`
 	// name is the chart name.
