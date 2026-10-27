@@ -41,6 +41,33 @@ examples are in [`config/samples/`](../config/samples/) and
 
 Exactly one of `clusterRef`, `clusters`, or `environment` must be set.
 
+## Project
+
+| Field | Required | Notes |
+|-------|----------|-------|
+| `spec.repository.connectionRef.name` | yes | Namespaced `GitConnection`. Immutable. |
+| `spec.repository.connectionRef.namespace` | no | Defaults to the manager credentials namespace. Immutable with the reference. |
+| `spec.repository.name` | no | GitHub repository name. Defaults to the Project name. Immutable. |
+| `spec.description` | no | Applied to the repository; max 280 characters. |
+
+`Project` is cluster-scoped. `status.repository` contains the web URL, HTTPS clone URL,
+SSH URL, default branch and provider ID. Project creation also seeds a minimal Kustomize
+structure (`README.md`, `kustomization.yaml`, `apps/kustomization.yaml`).
+
+## GitConnection
+
+| Field | Required | Notes |
+|-------|----------|-------|
+| `spec.provider` | yes | Currently `github`. Immutable. |
+| `spec.tokenSecretRef.name` | yes | Secret with key `token` in the same namespace. Immutable. |
+| `spec.github.organization` | yes when provider is `github` | User or organization that owns created repositories. Immutable. |
+
+`GitConnection` is namespaced. The token Secret must be in the same namespace as the
+connection. If `spec.repository.connectionRef.namespace` differs from the manager
+credentials namespace, the manager ServiceAccount needs `get` on the token Secret in that
+namespace. GitHub is the only provider implemented today; `Project` references a generic
+`GitConnection` so additional providers can be added without changing `Project`.
+
 ## CloudTarget
 
 | Field | Required | Notes |
@@ -156,6 +183,8 @@ after installation.
 kubectl apply -f config/samples/platform_v1alpha1_cluster.yaml
 kubectl apply -f config/samples/platform_v1alpha1_applicationdefinition.yaml
 kubectl apply -f config/samples/platform_v1alpha1_application.yaml
+kubectl apply -f config/samples/platform_v1alpha1_gitconnection.yaml
+kubectl apply -f config/samples/platform_v1alpha1_project.yaml
 ```
 
 For cloud resources, see [Cloud resources](cloud-resources.md).
