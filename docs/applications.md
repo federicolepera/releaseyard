@@ -18,7 +18,7 @@ metadata:
 spec:
   description: Demo application
   chart:
-    repository: http://chartmuseum.chartmuseum.svc.cluster.local:8080
+    repository: https://charts.example.com
     name: releaseyard-demo
     version: 0.2.0
   release:

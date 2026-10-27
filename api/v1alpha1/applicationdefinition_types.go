@@ -27,7 +27,7 @@ import (
 
 // ApplicationDefinitionChart identifies a pinned Helm chart.
 type ApplicationDefinitionChart struct {
-	// repository is the base URL of a ChartMuseum-compatible HTTP(S) Helm repository.
+	// repository is the base URL of an HTTP(S) Helm repository.
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinLength=8
 	// +kubebuilder:validation:Pattern="^https?://.+$"

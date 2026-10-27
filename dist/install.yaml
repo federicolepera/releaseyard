@@ -60,8 +60,7 @@ spec:
                     pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
                     type: string
                   repository:
-                    description: repository is the base URL of a ChartMuseum-compatible
-                      HTTP(S) Helm repository.
+                    description: repository is the base URL of an HTTP(S) Helm repository.
                     minLength: 8
                     pattern: ^https?://.+$
                     type: string
@@ -745,8 +744,8 @@ spec:
                         description: name is the chart name.
                         type: string
                       repository:
-                        description: repository is the configured ChartMuseum-compatible
-                          repository URL.
+                        description: repository is the configured HTTP(S) Helm repository
+                          URL.
                         type: string
                       version:
                         description: version is the pinned chart version.
@@ -827,8 +826,8 @@ spec:
                       description: name is the chart name.
                       type: string
                     repository:
-                      description: repository is the configured ChartMuseum-compatible
-                        repository URL.
+                      description: repository is the configured HTTP(S) Helm repository
+                        URL.
                       type: string
                     version:
                       description: version is the pinned chart version.
@@ -956,7 +955,7 @@ spec:
                               description: name is the chart name.
                               type: string
                             repository:
-                              description: repository is the configured ChartMuseum-compatible
+                              description: repository is the configured HTTP(S) Helm
                                 repository URL.
                               type: string
                             version:

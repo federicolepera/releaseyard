@@ -32,7 +32,7 @@ import (
 var opaqueArchive = []byte("not a tarball: arbitrary opaque chart artifact bytes")
 
 func TestPullReturnsArchiveDigestWithoutInspectingBytes(t *testing.T) {
-	fixture := newChartMuseum(t, opaqueArchive, "")
+	fixture := newChartRepo(t, opaqueArchive, "")
 	puller := pullerForServer(t, fixture)
 	digest, err := puller.Pull(context.Background(), chartForServer(fixture))
 	if err != nil {
@@ -48,7 +48,7 @@ func TestPullReturnsArchiveDigestWithoutInspectingBytes(t *testing.T) {
 }
 
 func TestPullVerifiedReturnsExactVerifiedArchive(t *testing.T) {
-	fixture := newChartMuseum(t, opaqueArchive, "")
+	fixture := newChartRepo(t, opaqueArchive, "")
 	archive, digest, err := pullerForServer(t, fixture).PullVerified(context.Background(), chartForServer(fixture))
 	if err != nil {
 		t.Fatalf("PullVerified() error = %v", err)
@@ -76,7 +76,7 @@ func TestPullVerifiedReturnsNoArchiveForUnverifiedContent(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			fixture := newChartMuseum(t, tc.archive, tc.digest)
+			fixture := newChartRepo(t, tc.archive, tc.digest)
 			archive, digest, err := pullerForServer(t, fixture).PullVerified(context.Background(), chartForServer(fixture))
 			if err == nil {
 				t.Fatal("PullVerified() error = nil, want digest verification failure")
@@ -91,7 +91,7 @@ func TestPullVerifiedReturnsNoArchiveForUnverifiedContent(t *testing.T) {
 func TestPullResolvesRelativeArchiveURLWithRepositoryBasePath(t *testing.T) {
 	for _, repository := range []string{"PATH", "PATH/"} {
 		t.Run(repository, func(t *testing.T) {
-			fixture := newChartMuseum(t, opaqueArchive, "")
+			fixture := newChartRepo(t, opaqueArchive, "")
 			fixture.basePath = "/charts/repo"
 			fixture.index = indexDocument("charts/releaseyard-demo-0.1.0.tgz", digestFor(opaqueArchive))
 			chart := requestedChart(fixture.server.URL + fixture.basePath)
@@ -118,7 +118,7 @@ func TestPullRejectsMissingChartOrVersionAndInvalidIndex(t *testing.T) {
 		{"invalid yaml", "entries: [broken"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			fixture := newChartMuseum(t, opaqueArchive, "")
+			fixture := newChartRepo(t, opaqueArchive, "")
 			fixture.index = tc.index
 			if _, err := pullerForServer(t, fixture).Pull(context.Background(), chartForServer(fixture)); err == nil {
 				t.Fatal("Pull() error = nil, want failure")
@@ -137,7 +137,7 @@ func TestPullRejectsBadDigestAndTamperedArchive(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			fixture := newChartMuseum(t, tc.archive, tc.digest)
+			fixture := newChartRepo(t, tc.archive, tc.digest)
 			if _, err := pullerForServer(t, fixture).Pull(context.Background(), chartForServer(fixture)); err == nil {
 				t.Fatal("Pull() error = nil, want digest verification failure")
 			}
@@ -149,7 +149,7 @@ func TestPullRejectsBadDigestAndTamperedArchive(t *testing.T) {
 }
 
 func TestPullRejectsMissingDigestBeforeArchiveRequest(t *testing.T) {
-	fixture := newChartMuseum(t, opaqueArchive, "")
+	fixture := newChartRepo(t, opaqueArchive, "")
 	fixture.index = indexDocument("charts/releaseyard-demo-0.1.0.tgz", "")
 	if _, err := pullerForServer(t, fixture).Pull(context.Background(), chartForServer(fixture)); err == nil {
 		t.Fatal("Pull() error = nil, want missing digest rejection")
@@ -161,14 +161,14 @@ func TestPullRejectsMissingDigestBeforeArchiveRequest(t *testing.T) {
 
 func TestPullRejectsOversizedIndexAndArchive(t *testing.T) {
 	t.Run("index", func(t *testing.T) {
-		fixture := newChartMuseum(t, opaqueArchive, "")
+		fixture := newChartRepo(t, opaqueArchive, "")
 		fixture.index = "#" + strings.Repeat("x", int(maxIndexBytes))
 		if _, err := pullerForServer(t, fixture).Pull(context.Background(), chartForServer(fixture)); err == nil {
 			t.Fatal("Pull() error = nil, want index size rejection")
 		}
 	})
 	t.Run("archive", func(t *testing.T) {
-		fixture := newChartMuseum(t, make([]byte, maxArchiveBytes+1), "")
+		fixture := newChartRepo(t, make([]byte, maxArchiveBytes+1), "")
 		if _, err := pullerForServer(t, fixture).Pull(context.Background(), chartForServer(fixture)); err == nil {
 			t.Fatal("Pull() error = nil, want archive size rejection")
 		}
@@ -183,14 +183,14 @@ func TestPullRejectsOffHostArchiveURLAndRedirect(t *testing.T) {
 	}))
 	defer other.Close()
 	t.Run("off-host URL", func(t *testing.T) {
-		fixture := newChartMuseum(t, opaqueArchive, "")
+		fixture := newChartRepo(t, opaqueArchive, "")
 		fixture.index = indexDocument(other.URL+"/chart.tgz", "")
 		if _, err := pullerForServer(t, fixture).Pull(context.Background(), chartForServer(fixture)); err == nil {
 			t.Fatal("Pull() error = nil, want off-host rejection")
 		}
 	})
 	t.Run("redirect", func(t *testing.T) {
-		fixture := newChartMuseum(t, opaqueArchive, "")
+		fixture := newChartRepo(t, opaqueArchive, "")
 		fixture.redirectArchive = other.URL + "/stolen"
 		if _, err := pullerForServer(t, fixture).Pull(context.Background(), chartForServer(fixture)); err == nil {
 			t.Fatal("Pull() error = nil, want redirect rejection")
@@ -227,7 +227,7 @@ func TestPullRejectsInvalidRepositoryURLs(t *testing.T) {
 }
 
 func TestPullHonorsCanceledContext(t *testing.T) {
-	fixture := newChartMuseum(t, opaqueArchive, "")
+	fixture := newChartRepo(t, opaqueArchive, "")
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	if _, err := pullerForServer(t, fixture).Pull(ctx, chartForServer(fixture)); err == nil {
@@ -235,7 +235,7 @@ func TestPullHonorsCanceledContext(t *testing.T) {
 	}
 }
 
-type chartMuseumFixture struct {
+type chartRepoFixture struct {
 	server          *httptest.Server
 	index           string
 	archive         []byte
@@ -247,12 +247,12 @@ type chartMuseumFixture struct {
 	archiveRequests int
 }
 
-func newChartMuseum(t *testing.T, archive []byte, indexDigest string) *chartMuseumFixture {
+func newChartRepo(t *testing.T, archive []byte, indexDigest string) *chartRepoFixture {
 	t.Helper()
 	if indexDigest == "" {
 		indexDigest = digestFor(archive)
 	}
-	fixture := &chartMuseumFixture{archive: archive, archiveDigest: indexDigest}
+	fixture := &chartRepoFixture{archive: archive, archiveDigest: indexDigest}
 	fixture.index = indexDocument("charts/releaseyard-demo-0.1.0.tgz", indexDigest)
 	fixture.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fixture.authorization = r.Header.Get("Authorization")
@@ -281,7 +281,7 @@ func indexDocument(archiveURL, digest string) string {
 	return fmt.Sprintf("apiVersion: v1\nentries:\n  releaseyard-demo:\n  - name: releaseyard-demo\n    version: 0.1.0\n    urls:\n    - %q\n    digest: %q\n", archiveURL, digest)
 }
 
-func pullerForServer(t *testing.T, fixture *chartMuseumFixture) *Puller {
+func pullerForServer(t *testing.T, fixture *chartRepoFixture) *Puller {
 	t.Helper()
 	puller, err := NewPuller([]string{fixture.server.Listener.Addr().String()})
 	if err != nil {
@@ -294,7 +294,7 @@ func requestedChart(repository string) platformv1alpha1.ApplicationDefinitionCha
 	return platformv1alpha1.ApplicationDefinitionChart{Repository: repository, Name: "releaseyard-demo", Version: "0.1.0"}
 }
 
-func chartForServer(fixture *chartMuseumFixture) platformv1alpha1.ApplicationDefinitionChart {
+func chartForServer(fixture *chartRepoFixture) platformv1alpha1.ApplicationDefinitionChart {
 	return requestedChart(fixture.server.URL)
 }
 

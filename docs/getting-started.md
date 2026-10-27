@@ -9,12 +9,12 @@
 - Helm 3
 - Python 3
 
-The local demo uses three Kind clusters and a local ChartMuseum. It is intended
-for development, not production.
+The local demo uses three Kind clusters. It is intended for development, not
+production. This repository no longer provisions a chart repository.
 
 ## Local Kind demo
 
-### 1. Create the clusters and chart repository
+### 1. Create the clusters
 
 ```bash
 bash hack/setup-kind-workloads.sh
@@ -23,8 +23,7 @@ bash hack/setup-kind-workloads.sh
 This creates or reuses:
 
 - `releaseyard-a` — management cluster;
-- `releaseyard-managed-a` and `releaseyard-managed-b` — workload clusters;
-- ChartMuseum on the management cluster, with the `releaseyard-demo` chart.
+- `releaseyard-managed-a` and `releaseyard-managed-b` — workload clusters.
 
 Workload kubeconfigs are written to `.local/kubeconfigs/` with mode `0600`.
 
@@ -43,12 +42,14 @@ kind load docker-image releaseyard-dashboard:dev --name releaseyard-a
 helm upgrade --install idp dist/chart \
   -n idp-system --create-namespace \
   --set manager.image.repository=releaseyard-controller \
-  --set manager.image.tag=dev \
-  --set manager.allowedChartHosts=chartmuseum.chartmuseum.svc.cluster.local:8080
+  --set manager.image.tag=dev
 ```
 
-`allowedChartHosts` is the host allowlist used by the chart fetcher. In the Kind
-demo the controller reaches ChartMuseum through its in-cluster Service.
+`allowedChartHosts` is the host allowlist used by the chart fetcher. Set it to
+the authority of your HTTP(S) Helm repository, for example
+`--set manager.allowedChartHosts=charts.example.com`.
+The demo chart is published as an OCI artifact to GHCR; OCI fetching is not yet
+implemented.
 
 ### 4. Deploy the dashboard
 
@@ -72,6 +73,10 @@ The Secret must live in the controller's credentials namespace (`idp-system` by
 default) and contain the kubeconfig under the `kubeconfig` key.
 
 ### 6. Apply the samples
+
+Replace `https://charts.example.com` in the `ApplicationDefinition` with a
+reachable HTTP(S) Helm repository, and configure `manager.allowedChartHosts` for
+its host, before applying:
 
 ```bash
 kubectl --context kind-releaseyard-a apply -f config/samples/platform_v1alpha1_cluster.yaml
@@ -103,7 +108,7 @@ A minimal controller install:
 helm upgrade --install idp dist/chart -n idp-system --create-namespace \
   --set manager.image.repository=<registry>/releaseyard-controller \
   --set manager.image.tag=<tag> \
-  --set manager.allowedChartHosts=<chart-host>
+  --set manager.allowedChartHosts=<http-chart-host>
 ```
 
 Enable the dashboard:

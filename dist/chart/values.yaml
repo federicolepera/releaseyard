@@ -27,10 +27,9 @@ manager:
   args:
     - --leader-elect
 
-  ## Comma-separated chart repository hosts the manager may fetch from.
-  ## When empty the binary default (127.0.0.1:18080) is used. For an in-cluster
-  ## ChartMuseum, set this to its Service authority, for example
-  ## chartmuseum.chartmuseum.svc.cluster.local:8080.
+  ## Comma-separated HTTP(S) Helm repository hosts the manager may fetch from.
+  ## When empty the binary default (127.0.0.1:18080) is used. Set this to your
+  ## repository authority, for example charts.example.com.
   ##
   allowedChartHosts: ""
 

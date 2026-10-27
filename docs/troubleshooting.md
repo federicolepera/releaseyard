@@ -56,8 +56,8 @@ The panel requires the local administrator or OIDC RBAC that allows `create` on
 ### Chart fetch fails
 
 Check `manager.allowedChartHosts` and that the controller can reach the chart
-repository. The host must match exactly. The default is
-`127.0.0.1:18080`, which is not the in-cluster ChartMuseum Service.
+repository. The host must match exactly. The binary default is
+`127.0.0.1:18080`; set it to your HTTP(S) Helm repository authority.
 
 ```bash
 kubectl -n idp-system logs deploy/idp-controller-manager -c manager

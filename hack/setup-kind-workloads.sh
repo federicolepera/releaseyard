@@ -215,6 +215,4 @@ ensure_cluster "$WORKLOAD_B_NAME"
 write_kubeconfig "$WORKLOAD_A_NAME"
 write_kubeconfig "$WORKLOAD_B_NAME"
 
-bash "$SCRIPT_DIR/setup-chartmuseum.sh"
-
 printf 'Management and workload clusters are ready. Review the two workload kubeconfig paths before creating management-cluster Secrets.\n'

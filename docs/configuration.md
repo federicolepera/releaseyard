@@ -9,7 +9,7 @@ examples are in [`config/samples/`](../config/samples/) and
 | Field | Required | Notes |
 |-------|----------|-------|
 | `spec.description` | no | Shown in the catalog. Max 280 characters. |
-| `spec.chart.repository` | yes | HTTP(S) ChartMuseum-compatible repository. Host must be allowed. |
+| `spec.chart.repository` | yes | HTTP(S) Helm repository. Host must be allowed. |
 | `spec.chart.name` | yes | Chart name. |
 | `spec.chart.version` | yes | Pinned semantic version; no floating tags. |
 | `spec.release.namespace` | yes | Existing namespace on the target cluster. Immutable. |

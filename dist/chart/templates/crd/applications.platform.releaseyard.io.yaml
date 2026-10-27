@@ -1,11 +1,8 @@
-{{- if .Values.crd.enabled }}
+---
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    {{- if .Values.crd.keep }}
-    "helm.sh/resource-policy": keep
-    {{- end }}
     controller-gen.kubebuilder.io/version: v0.22.0
   name: applications.platform.releaseyard.io
 spec:
@@ -220,8 +217,8 @@ spec:
                         description: name is the chart name.
                         type: string
                       repository:
-                        description: repository is the configured ChartMuseum-compatible
-                          repository URL.
+                        description: repository is the configured HTTP(S) Helm repository
+                          URL.
                         type: string
                       version:
                         description: version is the pinned chart version.
@@ -302,8 +299,8 @@ spec:
                       description: name is the chart name.
                       type: string
                     repository:
-                      description: repository is the configured ChartMuseum-compatible
-                        repository URL.
+                      description: repository is the configured HTTP(S) Helm repository
+                        URL.
                       type: string
                     version:
                       description: version is the pinned chart version.
@@ -431,7 +428,7 @@ spec:
                               description: name is the chart name.
                               type: string
                             repository:
-                              description: repository is the configured ChartMuseum-compatible
+                              description: repository is the configured HTTP(S) Helm
                                 repository URL.
                               type: string
                             version:
@@ -859,4 +856,3 @@ spec:
     storage: true
     subresources:
       status: {}
-{{- end }}

@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// Package chartfetch retrieves and verifies opaque ChartMuseum chart archives.
+// Package chartfetch retrieves and verifies opaque HTTP Helm chart archives.
 package chartfetch
 
 import (
@@ -50,7 +50,7 @@ var (
 	errTooLarge   = errors.New("chart response exceeds size limit")
 )
 
-// Puller fetches ChartMuseum indexes and chart archives from explicitly allowed hosts.
+// Puller fetches HTTP Helm indexes and chart archives from explicitly allowed hosts.
 type Puller struct {
 	allowedHosts map[string]struct{}
 	client       *http.Client

@@ -174,12 +174,17 @@ Requirements: Docker, `kubectl`, Kind, Go, Helm, and Python 3.
 
 ### Local Kind demo
 
-Create the management cluster (`releaseyard-a`), two workload clusters
-(`releaseyard-managed-a/b`), install ChartMuseum, and publish the demo chart:
+Create the management cluster (`releaseyard-a`) and two workload clusters
+(`releaseyard-managed-a/b`):
 
 ```bash
 bash hack/setup-kind-workloads.sh
 ```
+
+This repository does not provision a chart repository. Configure
+`manager.allowedChartHosts` and `ApplicationDefinition.spec.chart.repository` for
+your HTTP(S) Helm repository. The demo chart is published to GHCR as an OCI
+artifact; OCI fetching is a separate integration.
 
 Build and load the controller and dashboard images:
 
@@ -196,8 +201,7 @@ Install the controller with the chart:
 helm upgrade --install idp dist/chart \
   -n idp-system --create-namespace \
   --set manager.image.repository=releaseyard-controller \
-  --set manager.image.tag=dev \
-  --set manager.allowedChartHosts=chartmuseum.chartmuseum.svc.cluster.local:8080
+  --set manager.image.tag=dev
 ```
 
 Deploy the dashboard with the local kustomization:
@@ -215,7 +219,8 @@ kubectl --context kind-releaseyard-a -n idp-system create secret generic release
   --from-file=kubeconfig=.local/kubeconfigs/releaseyard-managed-b.kubeconfig
 ```
 
-Apply the samples:
+Apply the samples after replacing `https://charts.example.com` in the
+`ApplicationDefinition` with a reachable HTTP(S) Helm repository:
 
 ```bash
 kubectl --context kind-releaseyard-a apply -f config/samples/platform_v1alpha1_cluster.yaml
