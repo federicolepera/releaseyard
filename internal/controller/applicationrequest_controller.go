@@ -113,8 +113,17 @@ func (r *ApplicationRequestReconciler) reconcileRequest(ctx context.Context, req
 	if !project.DeletionTimestamp.IsZero() {
 		return r.reject(ctx, request, "Project is being deleted")
 	}
+	if project.Spec.Namespace == "" || request.Namespace != project.Spec.Namespace {
+		return r.reject(ctx, request, "Request namespace does not match the Project namespace")
+	}
+	if request.Spec.ApplicationNamespace != project.Spec.Namespace {
+		return r.reject(ctx, request, "Application namespace does not match the Project namespace")
+	}
 	if project.Spec.Delivery.Mode == platformv1alpha1.DeliveryModeDirect {
 		return r.reject(ctx, request, "Project delivery mode is direct")
+	}
+	if message := projectCatalogDenial(&project, request.Spec.Application); message != "" {
+		return r.reject(ctx, request, message)
 	}
 	if project.Status.Repository == nil {
 		return r.retry(ctx, request, "Project repository is not ready")
@@ -380,4 +389,26 @@ func (r *ApplicationRequestReconciler) SetupWithManager(mgr ctrl.Manager) error 
 		For(&platformv1alpha1.ApplicationRequest{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Named("applicationrequest").
 		Complete(r)
+}
+
+func projectCatalogDenial(project *platformv1alpha1.Project, application platformv1alpha1.ApplicationSpec) string {
+	if !project.Spec.Catalog.AllowsApplicationDefinition(application.ApplicationDefinitionRef.Name) {
+		return "Application definition is not in the Project catalog"
+	}
+	if application.ClusterRef != nil && !project.Spec.Catalog.AllowsCluster(application.ClusterRef.Name) {
+		return "Target cluster is not in the Project catalog"
+	}
+	for _, target := range application.Clusters {
+		if !project.Spec.Catalog.AllowsCluster(target.Name) {
+			return "Target cluster is not in the Project catalog"
+		}
+	}
+	if application.Environment != nil {
+		for _, target := range application.Environment.Targets {
+			if !project.Spec.Catalog.AllowsCluster(target.Name) {
+				return "Environment target is not in the Project catalog"
+			}
+		}
+	}
+	return ""
 }

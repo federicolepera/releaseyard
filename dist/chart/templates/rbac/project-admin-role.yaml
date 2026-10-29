@@ -1,0 +1,50 @@
+{{- if .Values.rbac.helpers.enabled }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/name: {{ include "idp.name" . }}
+    helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  name: {{ include "idp.resourceName" (dict "suffix" "project-admin" "context" $) }}
+rules:
+  - apiGroups:
+      - platform.releaseyard.io
+    resources:
+      - applications
+      - applicationrequests
+      - resources
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - rbac.authorization.k8s.io
+    resources:
+      - rolebindings
+    verbs:
+      - get
+      - list
+      - create
+      - update
+      - patch
+      - delete
+  - apiGroups:
+      - rbac.authorization.k8s.io
+    resources:
+      - clusterroles
+    resourceNames:
+      - {{ include "idp.resourceName" (dict "suffix" "project-viewer" "context" $) }}
+      - {{ include "idp.resourceName" (dict "suffix" "project-developer" "context" $) }}
+      - {{ include "idp.resourceName" (dict "suffix" "project-requester" "context" $) }}
+    verbs:
+      - bind
+  - apiGroups:
+      - ""
+    resources:
+      - events
+    verbs:
+      - get
+      - list
+{{- end }}

@@ -96,6 +96,29 @@ rules:
     verbs:
       - get
       - list
+  # The local administrator creates direct Applications in Project namespaces.
+  - apiGroups:
+      - platform.releaseyard.io
+    resources:
+      - applications
+      - resources
+    verbs:
+      - get
+      - list
+      - create
+      - update
+      - patch
+      - delete
+  # The local administrator creates GitOps requests in the selected Project
+  # namespace. OIDC users use impersonation and their own namespace RBAC.
+  - apiGroups:
+      - platform.releaseyard.io
+    resources:
+      - applicationrequests
+    verbs:
+      - get
+      - list
+      - create
   - apiGroups:
       - platform.releaseyard.io
     resources:
@@ -111,8 +134,8 @@ rules:
       - customresourcedefinitions
     verbs:
       - get
-  # The dashboard manages definition-access ClusterRoles and bindings on behalf
-  # of the local administrator (Administration panel).
+  # The dashboard manages access ClusterRoles and bindings on behalf of the
+  # local administrator (Administration panel).
   - apiGroups:
       - rbac.authorization.k8s.io
     resources:
@@ -153,6 +176,18 @@ rules:
       - clusterroles
     resourceNames:
       - {{ include "idp.resourceName" (dict "suffix" "application-editor-role" "context" $) }}
+    verbs:
+      - bind
+  - apiGroups:
+      - rbac.authorization.k8s.io
+    resources:
+      - clusterroles
+    resourceNames:
+      - {{ include "idp.resourceName" (dict "suffix" "project-viewer" "context" $) }}
+      - {{ include "idp.resourceName" (dict "suffix" "project-developer" "context" $) }}
+      - {{ include "idp.resourceName" (dict "suffix" "project-requester" "context" $) }}
+      - {{ include "idp.resourceName" (dict "suffix" "project-admin" "context" $) }}
+      - {{ include "idp.resourceName" (dict "suffix" "platform-admin" "context" $) }}
     verbs:
       - bind
   # The dashboard reads Events to render an object's Activity. Events live in the

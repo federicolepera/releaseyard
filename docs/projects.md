@@ -1,9 +1,10 @@
 # Project e GitConnection
 
 `Project` è il boundary di un progetto: crea un repository Git privato e lo inizializza
-con una struttura Kustomize minima. Nelle prossime iterazioni aggiungerà namespace,
-RBAC e sincronizzazione GitOps. `Project` è cluster-scoped; `GitConnection` è namespaced
-e contiene la configurazione del provider Git.
+con una struttura Kustomize minima. Il Project dichiara anche la namespace che
+contiene le sue Application, ApplicationRequest, Resource e RBAC. `Project` è
+cluster-scoped; `GitConnection` è namespaced e contiene la configurazione del
+provider Git.
 
 L'unico provider implementato è **GitHub**. L'API di `Project` è già provider-neutral:
 `spec.repository.connectionRef` punta a una `GitConnection`, e in futuro si potranno
@@ -78,6 +79,7 @@ kind: Project
 metadata:
   name: project-sample
 spec:
+  namespace: releaseyard-team-project-sample
   repository:
     name: project-sample
     connectionRef:
@@ -86,8 +88,22 @@ spec:
   description: Repository del progetto esempio
   delivery:
     mode: both
+  catalog:
+    applicationDefinitions:
+      - applicationdefinition-sample
+    clusters:
+      - releaseyard-managed-a
+    cloudTargets:
+      - localstack
+    resourceDefinitions:
+      - aws-bucket
 ```
 
+- `spec.namespace` è la namespace del Project. È obbligatoria, immutabile e deve
+  essere unica tra tutti i Project. Il controller la crea se non esiste, oppure
+  adotta una namespace già presente solo se è già marcata come gestita da
+  ReleaseYard. Se la namespace appartiene a un altro Project, il Project resta in
+  `NamespaceConflict`.
 - `spec.repository.name` è il nome del repository GitHub. Se vuoto, usa il nome
   del `Project`. È immutabile.
 - `spec.repository.connectionRef.namespace` è opzionale. Se vuoto, usa il namespace
@@ -95,10 +111,18 @@ spec:
 - `spec.description` è opzionale e viene applicata al repository.
 - `spec.delivery.mode` è `direct`, `gitops` o `both` e default `direct`. `both` abilita
   la scelta Direct/GitOps nel form di creazione Application.
+- `spec.catalog` è l'allow-list degli elementi che i membri del Project vedono
+  nella dashboard. Una lista vuota significa nessun elemento disponibile. Il
+  catalogo è curato dal platform admin; i ruoli Project non lo modificano.
+- La dashboard filtra definitions e cluster tramite `Project.spec.catalog`.
+  L'enforcement lato admission/controller del catalogo sarà aggiunto con il
+  webhook: fino ad allora il catalogo è una barriera di self-service, non una
+  barriera di sicurezza per chiamate dirette al Kubernetes API.
 
 ## 4. Verifica
 
 ```sh
+kubectl wait --for=condition=NamespaceReady project/project-sample --timeout=2m
 kubectl wait --for=condition=RepositoryReady project/project-sample --timeout=5m
 kubectl describe project project-sample
 kubectl get project project-sample -o yaml
@@ -108,6 +132,9 @@ Lo stato contiene:
 
 - `status.repository`: ID, owner, nome, URL web, `cloneURL`, `sshURL`, default branch;
 - `status.provisioning`: checkpoint usato per non ripetere una creazione ambigua;
+- `NamespaceReady=True`: namespace creata o adottata e marcata con
+  `platform.releaseyard.io/project`, `platform.releaseyard.io/delivery` e
+  `app.kubernetes.io/managed-by=releaseyard`;
 - `RepositoryReady=True`: repository creato, inizializzato e verificato.
 
 La `cloneURL` e la `sshURL` sono quelle da usare per Flux o per il bridge PR.
@@ -131,7 +158,7 @@ La `cloneURL` e la `sshURL` sono quelle da usare per Flux o per il bridge PR.
 
 Con `spec.delivery.mode: both` (o `gitops`) la dashboard permette di scegliere
 GitOps. In quel caso non crea direttamente l'Application: crea una
-`ApplicationRequest` durevole nello namespace della dashboard. Il bridge:
+`ApplicationRequest` durevole nello namespace del Project. Il bridge:
 
 1. legge `Project` e `GitConnection`;
 2. legge `apps/kustomization.yaml` dal branch default del Project;
@@ -146,12 +173,12 @@ apiVersion: platform.releaseyard.io/v1alpha1
 kind: ApplicationRequest
 metadata:
   name: project-sample
-  namespace: idp-system
+  namespace: releaseyard-team-project-sample
 spec:
   projectRef:
     name: project-sample
   applicationName: project-sample
-  applicationNamespace: releaseyard-team-platform
+  applicationNamespace: releaseyard-team-project-sample
   requestedBy: admin
   idempotencyKey: ...
   application:
@@ -184,20 +211,20 @@ spec:
     path: apps
   destination:
     server: https://kubernetes.default.svc
-    namespace: releaseyard-team-platform
+    namespace: releaseyard-team-project-sample
 ```
 
-La sync policy viene lasciata **manuale** di default: il campo
-`spec.syncPolicy.automated` non viene impostato. Quando sei sicuro, lo abiliti
-da Argo CD e il controller lo preserva nei reconcile successivi.
+La destination è `Project.spec.namespace`. La sync policy viene lasciata
+**manuale** di default: il campo `spec.syncPolicy.automated` non viene impostato.
+Quando sei sicuro, lo abiliti da Argo CD e il controller lo preserva nei reconcile
+successivi.
 
-Namespace e destination sono configurabili con:
+Il namespace di Argo CD è configurabile con:
 
 ```yaml
 manager:
   argocd:
     namespace: argocd
-    destinationNamespace: releaseyard-team-platform
 ```
 
 Se esiste già una Application Argo con lo stesso nome ma non è gestita da
@@ -206,13 +233,15 @@ adotta.
 
 ## Cosa non è ancora incluso
 
-Questa iterazione non crea namespace o RBAC, non osserva il merge della PR, non
-sincronizza automaticamente il merge e non elimina il repository o la Application
-Argo alla cancellazione del Project. Sono le prossime slice:
+Le Application direct e GitOps vengono create nella namespace del Project; una
+ValidatingAdmissionPolicy rifiuta Application e ApplicationRequest fuori da una
+namespace Project. Questa iterazione non usa ancora un Argo `AppProject` per
+Project, non osserva il merge della PR, non sincronizza automaticamente il merge
+e non elimina il repository o la Application Argo alla cancellazione del Project.
+Sono le prossime slice:
 
-1. namespace e RBAC del progetto;
-2. sync automatico del Project usando Argo CD o Flux;
-3. update/delete GitOps: oggi il bridge copre solo la creazione;
-4. namespace e RBAC della dashboard per i team.
+1. Argo AppProject per Project;
+2. update/delete GitOps: oggi il bridge copre solo la creazione;
+3. webhook di enforcement del catalogo.
 
 La modalità `rbac.namespaced=true` non è supportata dal controller `Project`.

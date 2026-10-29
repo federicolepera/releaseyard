@@ -1,12 +1,12 @@
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding
 metadata:
-  name: application-access-binding
+  name: application-project-binding
   labels:
     app.kubernetes.io/name: idp
     app.kubernetes.io/component: admission
     app.kubernetes.io/managed-by: kustomize
 spec:
-  policyName: application-access-policy
+  policyName: application-project-policy
   validationActions:
     - Deny

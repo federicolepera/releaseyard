@@ -6,6 +6,7 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
   name: project-sample
 spec:
+  namespace: releaseyard-team-project-sample
   repository:
     name: project-sample
     connectionRef:
@@ -14,3 +15,13 @@ spec:
   description: Repository del progetto esempio
   delivery:
     mode: both
+  catalog:
+    applicationDefinitions:
+      - applicationdefinition-sample
+    clusters:
+      - releaseyard-managed-a
+      - releaseyard-managed-b
+    cloudTargets:
+      - localstack
+    resourceDefinitions:
+      - aws-bucket

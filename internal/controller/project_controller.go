@@ -31,6 +31,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/validation"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -39,18 +40,20 @@ import (
 )
 
 const (
-	projectRetryInterval          = 30 * time.Second
-	projectRejectedRetryInterval  = 5 * time.Minute
-	projectForbiddenRetryInterval = 30 * time.Minute
-	projectMarkerPrefix           = "[releaseyard-project-uid:"
-	projectReasonConflict         = "Conflict"
-	argocdApplicationManagedBy    = "releaseyard"
-	argocdApplicationManagedLabel = "platform.releaseyard.io/managed-by"
-	argocdProjectLabel            = "platform.releaseyard.io/project"
-	argocdProjectUIDAnnotation    = "platform.releaseyard.io/project-uid"
-	argocdApplicationPath         = "apps"
-	argocdDestinationServer       = "https://kubernetes.default.svc"
-	argocdNamespaceField          = "namespace"
+	projectRetryInterval           = 30 * time.Second
+	projectRejectedRetryInterval   = 5 * time.Minute
+	projectForbiddenRetryInterval  = 30 * time.Minute
+	projectMarkerPrefix            = "[releaseyard-project-uid:"
+	projectReasonConflict          = "Conflict"
+	argocdApplicationManagedBy     = "releaseyard"
+	argocdApplicationManagedLabel  = "platform.releaseyard.io/managed-by"
+	argocdProjectLabel             = "platform.releaseyard.io/project"
+	argocdProjectUIDAnnotation     = "platform.releaseyard.io/project-uid"
+	argocdApplicationPath          = "apps"
+	argocdDestinationServer        = "https://kubernetes.default.svc"
+	argocdNamespaceField           = "namespace"
+	projectNamespaceManagedByLabel = "app.kubernetes.io/managed-by"
+	projectNamespaceDeliveryLabel  = "platform.releaseyard.io/delivery"
 )
 
 var errRequeue = errors.New("requeue")
@@ -72,6 +75,7 @@ type ProjectReconciler struct {
 	ArgoCDDestinationNamespace string
 }
 
+// +kubebuilder:rbac:groups="",resources=namespaces,verbs=get;list;watch;create;update;patch
 // +kubebuilder:rbac:groups=platform.releaseyard.io,resources=projects,verbs=get;list;watch
 // +kubebuilder:rbac:groups=platform.releaseyard.io,resources=projects/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=platform.releaseyard.io,resources=gitconnections,verbs=get
@@ -95,6 +99,14 @@ func (r *ProjectReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	}
 	if project.UID == "" {
 		return ctrl.Result{}, setCondition(metav1.ConditionFalse, "InvalidProject", "Project UID is not assigned")
+	}
+	namespaceReady, namespaceResult, err := r.reconcileProjectNamespace(ctx, &project)
+	if err != nil || !namespaceReady {
+		return namespaceResult, err
+	}
+	project, err = r.freshProject(ctx, project.Name)
+	if err != nil {
+		return ctrl.Result{}, err
 	}
 	if strings.Contains(project.Spec.Description, projectMarkerPrefix) {
 		return ctrl.Result{}, setCondition(metav1.ConditionFalse, "InvalidDescription", "Description contains a reserved project marker")
@@ -143,6 +155,115 @@ func (r *ProjectReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	}
 	gh := factory(token)
 	return r.reconcileConnection(ctx, &project, &connection, repoName, marker, description, gh)
+}
+
+func (r *ProjectReconciler) reconcileProjectNamespace(ctx context.Context, project *platformv1alpha1.Project) (bool, ctrl.Result, error) {
+	if project.Spec.Namespace == "" {
+		err := r.setNamespaceCondition(ctx, project.Name, metav1.ConditionFalse, "InvalidNamespace", "Project namespace is required")
+		return false, ctrl.Result{RequeueAfter: projectRetryInterval}, err
+	}
+	if errs := validation.IsDNS1123Label(project.Spec.Namespace); len(errs) > 0 {
+		err := r.setNamespaceCondition(ctx, project.Name, metav1.ConditionFalse, "InvalidNamespace", "Project namespace is not a valid DNS-1123 label")
+		return false, ctrl.Result{RequeueAfter: projectRetryInterval}, err
+	}
+
+	reader := r.APIReader
+	if reader == nil {
+		reader = r.Client
+	}
+	var projects platformv1alpha1.ProjectList
+	if err := reader.List(ctx, &projects); err != nil {
+		conditionErr := r.setNamespaceCondition(ctx, project.Name, metav1.ConditionUnknown, "NamespaceUnavailable", "Projects could not be checked for namespace conflicts")
+		return false, ctrl.Result{RequeueAfter: projectRetryInterval}, conditionErr
+	}
+	for i := range projects.Items {
+		other := &projects.Items[i]
+		if other.Name == project.Name || other.Spec.Namespace != project.Spec.Namespace {
+			continue
+		}
+		conditionErr := r.setNamespaceCondition(ctx, project.Name, metav1.ConditionFalse, "NamespaceConflict", fmt.Sprintf("Namespace %q is already assigned to Project %q", project.Spec.Namespace, other.Name))
+		return false, ctrl.Result{RequeueAfter: projectRetryInterval}, conditionErr
+	}
+
+	namespace := &corev1.Namespace{}
+	key := types.NamespacedName{Name: project.Spec.Namespace}
+	if err := reader.Get(ctx, key, namespace); err != nil {
+		if !apierrors.IsNotFound(err) {
+			conditionErr := r.setNamespaceCondition(ctx, project.Name, metav1.ConditionUnknown, "NamespaceUnavailable", "Project namespace could not be checked")
+			return false, ctrl.Result{RequeueAfter: projectRetryInterval}, conditionErr
+		}
+		desired := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
+			Name:   project.Spec.Namespace,
+			Labels: projectNamespaceLabels(project),
+		}}
+		if err := r.Create(ctx, desired); err != nil {
+			if apierrors.IsAlreadyExists(err) {
+				return r.reconcileProjectNamespace(ctx, project)
+			}
+			conditionErr := r.setNamespaceCondition(ctx, project.Name, metav1.ConditionFalse, "NamespaceUnavailable", "Project namespace could not be created")
+			return false, ctrl.Result{RequeueAfter: projectRetryInterval}, conditionErr
+		}
+		conditionErr := r.setNamespaceCondition(ctx, project.Name, metav1.ConditionTrue, "NamespaceReady", fmt.Sprintf("Namespace %q is ready", project.Spec.Namespace))
+		return conditionErr == nil, ctrl.Result{}, conditionErr
+	}
+
+	owner := namespace.Labels[argocdProjectLabel]
+	managedBy := namespace.Labels[projectNamespaceManagedByLabel]
+	if owner != "" && owner != project.Name {
+		conditionErr := r.setNamespaceCondition(ctx, project.Name, metav1.ConditionFalse, "NamespaceConflict", fmt.Sprintf("Namespace %q is owned by Project %q", project.Spec.Namespace, owner))
+		return false, ctrl.Result{RequeueAfter: projectRetryInterval}, conditionErr
+	}
+	if managedBy != "" && managedBy != argocdApplicationManagedBy {
+		conditionErr := r.setNamespaceCondition(ctx, project.Name, metav1.ConditionFalse, "NamespaceUnavailable", fmt.Sprintf("Namespace %q is managed by %q, not ReleaseYard", project.Spec.Namespace, managedBy))
+		return false, ctrl.Result{RequeueAfter: projectRetryInterval}, conditionErr
+	}
+	if owner == "" && managedBy == "" {
+		conditionErr := r.setNamespaceCondition(ctx, project.Name, metav1.ConditionFalse, "NamespaceUnavailable", fmt.Sprintf("Namespace %q already exists and is not managed by ReleaseYard", project.Spec.Namespace))
+		return false, ctrl.Result{RequeueAfter: projectRetryInterval}, conditionErr
+	}
+
+	desiredLabels := projectNamespaceLabels(project)
+	changed := false
+	if namespace.Labels == nil {
+		namespace.Labels = map[string]string{}
+	}
+	for key, value := range desiredLabels {
+		if namespace.Labels[key] != value {
+			namespace.Labels[key] = value
+			changed = true
+		}
+	}
+	if changed {
+		if err := r.Update(ctx, namespace); err != nil {
+			conditionErr := r.setNamespaceCondition(ctx, project.Name, metav1.ConditionFalse, "NamespaceUnavailable", "Project namespace labels could not be updated")
+			return false, ctrl.Result{RequeueAfter: projectRetryInterval}, conditionErr
+		}
+	}
+	conditionErr := r.setNamespaceCondition(ctx, project.Name, metav1.ConditionTrue, "NamespaceReady", fmt.Sprintf("Namespace %q is ready", project.Spec.Namespace))
+	return conditionErr == nil, ctrl.Result{}, conditionErr
+}
+
+func projectNamespaceLabels(project *platformv1alpha1.Project) map[string]string {
+	mode := project.Spec.Delivery.Mode
+	if mode == "" {
+		mode = platformv1alpha1.DeliveryModeDirect
+	}
+	return map[string]string{
+		argocdProjectLabel:             project.Name,
+		projectNamespaceManagedByLabel: argocdApplicationManagedBy,
+		projectNamespaceDeliveryLabel:  string(mode),
+	}
+}
+
+func (r *ProjectReconciler) setNamespaceCondition(ctx context.Context, name string, status metav1.ConditionStatus, reason, message string) error {
+	project, err := r.freshProject(ctx, name)
+	if err != nil {
+		return err
+	}
+	if !meta.SetStatusCondition(&project.Status.Conditions, metav1.Condition{Type: platformv1alpha1.ProjectConditionNamespaceReady, Status: status, ObservedGeneration: project.Generation, LastTransitionTime: metav1.Now(), Reason: reason, Message: message}) {
+		return nil
+	}
+	return r.Client.Status().Update(ctx, &project)
 }
 
 func (r *ProjectReconciler) reconcileConnection(ctx context.Context, project *platformv1alpha1.Project, connection *platformv1alpha1.GitConnection, repoName, marker, description string, gh projectGit) (ctrl.Result, error) {
@@ -230,7 +351,7 @@ func (r *ProjectReconciler) ensureRepository(ctx context.Context, project *platf
 	if err != nil {
 		return ctrl.Result{}, err
 	}
-	if !latest.DeletionTimestamp.IsZero() || latest.UID != project.UID || latest.Spec != project.Spec || latest.Status.Provisioning == nil || latest.Status.Provisioning.ConnectionUID != checkpoint.ConnectionUID || latest.Status.Provisioning.Attempted {
+	if !latest.DeletionTimestamp.IsZero() || latest.UID != project.UID || !reflect.DeepEqual(latest.Spec, project.Spec) || latest.Status.Provisioning == nil || latest.Status.Provisioning.ConnectionUID != checkpoint.ConnectionUID || latest.Status.Provisioning.Attempted {
 		return ctrl.Result{RequeueAfter: projectRetryInterval}, nil
 	}
 	latest.Status.Provisioning.Attempted = true
@@ -383,7 +504,10 @@ func (r *ProjectReconciler) ensureGitOpsApplication(ctx context.Context, project
 	if namespace == "" {
 		namespace = "argocd"
 	}
-	destinationNamespace := r.ArgoCDDestinationNamespace
+	destinationNamespace := project.Spec.Namespace
+	if destinationNamespace == "" {
+		destinationNamespace = r.ArgoCDDestinationNamespace
+	}
 	if destinationNamespace == "" {
 		destinationNamespace = "releaseyard-team-platform"
 	}

@@ -17,9 +17,14 @@ limitations under the License.
 package v1alpha1
 
 import (
+	"slices"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 )
+
+// ProjectConditionNamespaceReady indicates that the Project's namespace exists and is owned by the Project.
+const ProjectConditionNamespaceReady = "NamespaceReady"
 
 // ProjectConditionRepositoryReady indicates that the Git repository exists and is recorded in status.
 const ProjectConditionRepositoryReady = "RepositoryReady"
@@ -32,6 +37,15 @@ const ProjectConditionGitOpsApplicationReady = "GitOpsApplicationReady"
 
 // ProjectSpec defines the desired state of Project
 type ProjectSpec struct {
+	// namespace is the Kubernetes namespace that owns this Project's Applications,
+	// ApplicationRequests, Resources and RBAC. It must be unique across Projects.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=63
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
+	// +kubebuilder:validation:XValidation:rule="self == oldSelf",message="namespace is immutable"
+	Namespace string `json:"namespace"`
+
 	// repository defines the repository to create and its connection.
 	// +kubebuilder:validation:Required
 	Repository ProjectRepositorySpec `json:"repository"`
@@ -45,6 +59,54 @@ type ProjectSpec struct {
 	// +optional
 	// +kubebuilder:default={mode:"direct"}
 	Delivery ProjectDeliverySpec `json:"delivery,omitempty"`
+
+	// catalog lists the platform catalog entries available to members of this
+	// Project. An empty list means no catalog entries are available.
+	// +optional
+	Catalog ProjectCatalogSpec `json:"catalog,omitempty"`
+}
+
+// ProjectCatalogSpec is the allow-list of catalog objects available to a Project.
+type ProjectCatalogSpec struct {
+	// applicationDefinitions are the ApplicationDefinition names available to the Project.
+	// +optional
+	// +kubebuilder:validation:MaxItems=256
+	// +listType=set
+	ApplicationDefinitions []string `json:"applicationDefinitions,omitempty"`
+
+	// clusters are the Cluster names available to the Project.
+	// +optional
+	// +kubebuilder:validation:MaxItems=256
+	// +listType=set
+	Clusters []string `json:"clusters,omitempty"`
+
+	// cloudTargets are the CloudTarget names available to the Project.
+	// +optional
+	// +kubebuilder:validation:MaxItems=256
+	// +listType=set
+	CloudTargets []string `json:"cloudTargets,omitempty"`
+
+	// resourceDefinitions are the ResourceDefinition names available to the Project.
+	// +optional
+	// +kubebuilder:validation:MaxItems=256
+	// +listType=set
+	ResourceDefinitions []string `json:"resourceDefinitions,omitempty"`
+}
+
+func (c ProjectCatalogSpec) AllowsApplicationDefinition(name string) bool {
+	return slices.Contains(c.ApplicationDefinitions, name)
+}
+
+func (c ProjectCatalogSpec) AllowsCluster(name string) bool {
+	return slices.Contains(c.Clusters, name)
+}
+
+func (c ProjectCatalogSpec) AllowsCloudTarget(name string) bool {
+	return slices.Contains(c.CloudTargets, name)
+}
+
+func (c ProjectCatalogSpec) AllowsResourceDefinition(name string) bool {
+	return slices.Contains(c.ResourceDefinitions, name)
 }
 
 // DeliveryMode selects how Applications may be created for a Project.
@@ -109,8 +171,9 @@ type ProjectStatus struct {
 	Provisioning *ProjectProvisioningStatus `json:"provisioning,omitempty"`
 
 	// conditions represent the current state of the Project resource. The
-	// RepositoryReady condition indicates whether the GitHub repository has been
-	// provisioned and verified.
+	// NamespaceReady condition indicates whether the Project namespace exists and
+	// is owned by the Project. The RepositoryReady condition indicates whether the
+	// GitHub repository has been provisioned and verified.
 	// Each condition has a unique type and reflects the status of a specific aspect of the resource.
 	//
 	// Standard condition types include:

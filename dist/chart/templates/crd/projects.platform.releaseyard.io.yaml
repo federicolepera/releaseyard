@@ -40,6 +40,43 @@ spec:
           spec:
             description: spec defines the desired state of Project
             properties:
+              catalog:
+                description: |-
+                  catalog lists the platform catalog entries available to members of this
+                  Project. An empty list means no catalog entries are available.
+                properties:
+                  applicationDefinitions:
+                    description: applicationDefinitions are the ApplicationDefinition
+                      names available to the Project.
+                    items:
+                      type: string
+                    maxItems: 256
+                    type: array
+                    x-kubernetes-list-type: set
+                  cloudTargets:
+                    description: cloudTargets are the CloudTarget names available
+                      to the Project.
+                    items:
+                      type: string
+                    maxItems: 256
+                    type: array
+                    x-kubernetes-list-type: set
+                  clusters:
+                    description: clusters are the Cluster names available to the Project.
+                    items:
+                      type: string
+                    maxItems: 256
+                    type: array
+                    x-kubernetes-list-type: set
+                  resourceDefinitions:
+                    description: resourceDefinitions are the ResourceDefinition names
+                      available to the Project.
+                    items:
+                      type: string
+                    maxItems: 256
+                    type: array
+                    x-kubernetes-list-type: set
+                type: object
               delivery:
                 default:
                   mode: direct
@@ -59,6 +96,17 @@ spec:
                 description: description is attached to the provisioned repository.
                 maxLength: 280
                 type: string
+              namespace:
+                description: |-
+                  namespace is the Kubernetes namespace that owns this Project's Applications,
+                  ApplicationRequests, Resources and RBAC. It must be unique across Projects.
+                maxLength: 63
+                minLength: 1
+                pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                type: string
+                x-kubernetes-validations:
+                - message: namespace is immutable
+                  rule: self == oldSelf
               repository:
                 description: repository defines the repository to create and its connection.
                 properties:
@@ -99,6 +147,7 @@ spec:
                 - connectionRef
                 type: object
             required:
+            - namespace
             - repository
             type: object
           status:
@@ -107,8 +156,9 @@ spec:
               conditions:
                 description: |-
                   conditions represent the current state of the Project resource. The
-                  RepositoryReady condition indicates whether the GitHub repository has been
-                  provisioned and verified.
+                  NamespaceReady condition indicates whether the Project namespace exists and
+                  is owned by the Project. The RepositoryReady condition indicates whether the
+                  GitHub repository has been provisioned and verified.
                   Each condition has a unique type and reflects the status of a specific aspect of the resource.
 
                   Standard condition types include:

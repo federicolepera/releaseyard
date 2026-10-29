@@ -8,9 +8,9 @@ metadata:
     app.kubernetes.io/component: admission
     helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}
     app.kubernetes.io/instance: {{ .Release.Name }}
-  name: {{ include "idp.resourceName" (dict "suffix" "application-access-binding" "context" $) }}
+  name: {{ include "idp.resourceName" (dict "suffix" "application-project-binding" "context" $) }}
 spec:
-  policyName: {{ include "idp.resourceName" (dict "suffix" "application-access-policy" "context" $) }}
+  policyName: {{ include "idp.resourceName" (dict "suffix" "application-project-policy" "context" $) }}
   validationActions:
     - Deny
 {{- end }}

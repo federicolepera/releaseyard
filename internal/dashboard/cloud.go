@@ -27,6 +27,29 @@ func (s *server) listCloudTargets(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "Could not load cloud targets")
 		return
 	}
+	project, status, message := s.projectFromQuery(r)
+	if status != 0 {
+		writeError(w, status, message)
+		return
+	}
+	if project != nil {
+		kept := items.Items[:0]
+		for i := range items.Items {
+			if project.Spec.Catalog.AllowsCloudTarget(items.Items[i].Name) {
+				kept = append(kept, items.Items[i])
+			}
+		}
+		items.Items = kept
+	} else if _, ok := writeClientFromRequest(r); ok {
+		allowed := s.allowedCatalogNames(r)
+		kept := items.Items[:0]
+		for i := range items.Items {
+			if allowed.cloudTargets[items.Items[i].Name] {
+				kept = append(kept, items.Items[i])
+			}
+		}
+		items.Items = kept
+	}
 	if items.Items == nil {
 		items.Items = []platformv1alpha1.CloudTarget{}
 	}
@@ -38,6 +61,29 @@ func (s *server) listResourceDefinitions(w http.ResponseWriter, r *http.Request)
 	if err := s.client.List(r.Context(), items); err != nil {
 		writeError(w, http.StatusInternalServerError, "Could not load resource definitions")
 		return
+	}
+	project, status, message := s.projectFromQuery(r)
+	if status != 0 {
+		writeError(w, status, message)
+		return
+	}
+	if project != nil {
+		kept := items.Items[:0]
+		for i := range items.Items {
+			if project.Spec.Catalog.AllowsResourceDefinition(items.Items[i].Name) {
+				kept = append(kept, items.Items[i])
+			}
+		}
+		items.Items = kept
+	} else if _, ok := writeClientFromRequest(r); ok {
+		allowed := s.allowedCatalogNames(r)
+		kept := items.Items[:0]
+		for i := range items.Items {
+			if allowed.resourceDefinitions[items.Items[i].Name] {
+				kept = append(kept, items.Items[i])
+			}
+		}
+		items.Items = kept
 	}
 	if items.Items == nil {
 		items.Items = []platformv1alpha1.ResourceDefinition{}
@@ -232,7 +278,7 @@ func (s *server) cloudNamespace(r *http.Request, requested, targetNamespace stri
 		return "", false
 	}
 	attributes := authorizationv1.ResourceAttributes{
-		Namespace: targetNamespace, Group: platformAPIGroup, Resource: resourceResources, Verb: "create",
+		Namespace: targetNamespace, Group: platformAPIGroup, Resource: resourceResources, Verb: verbCreate,
 	}
 	if selfSubjectAccessAllowed(r.Context(), impersonated, attributes) {
 		return targetNamespace, true
@@ -388,4 +434,47 @@ func collectValueLeaves(prefix string, value any, out map[string]struct{}) error
 
 func isJSONNull(raw json.RawMessage) bool {
 	return string(bytes.TrimSpace(raw)) == "null"
+}
+
+type allowedCatalogNames struct {
+	applicationDefinitions map[string]bool
+	clusters               map[string]bool
+	cloudTargets           map[string]bool
+	resourceDefinitions    map[string]bool
+}
+
+func (s *server) allowedCatalogNames(r *http.Request) allowedCatalogNames {
+	allowed := allowedCatalogNames{
+		applicationDefinitions: map[string]bool{},
+		clusters:               map[string]bool{},
+		cloudTargets:           map[string]bool{},
+		resourceDefinitions:    map[string]bool{},
+	}
+	namespaces := map[string]bool{}
+	for _, namespace := range s.appNamespaces(r) {
+		namespaces[namespace] = true
+	}
+	projects := &platformv1alpha1.ProjectList{}
+	if err := s.client.List(r.Context(), projects); err != nil {
+		return allowed
+	}
+	for i := range projects.Items {
+		project := &projects.Items[i]
+		if !namespaces[project.Spec.Namespace] {
+			continue
+		}
+		for _, name := range project.Spec.Catalog.ApplicationDefinitions {
+			allowed.applicationDefinitions[name] = true
+		}
+		for _, name := range project.Spec.Catalog.Clusters {
+			allowed.clusters[name] = true
+		}
+		for _, name := range project.Spec.Catalog.CloudTargets {
+			allowed.cloudTargets[name] = true
+		}
+		for _, name := range project.Spec.Catalog.ResourceDefinitions {
+			allowed.resourceDefinitions[name] = true
+		}
+	}
+	return allowed
 }

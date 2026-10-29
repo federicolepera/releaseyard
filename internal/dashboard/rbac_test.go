@@ -50,7 +50,7 @@ func TestWriteUsesImpersonatedClient(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	auth := newAuthHandler(k8s, testNamespace, publicURL, "", "", factory, "", "", nil)
+	auth := newAuthHandler(k8s, testNamespace, publicURL, "", "", factory, "", "", "", "", nil)
 	discoveredRuntime, err := discoverOIDCRuntime(context.Background(), issuer, redirect, testOIDCClientID, "secret")
 	if err != nil {
 		t.Fatalf("discover runtime: %v", err)
@@ -151,7 +151,7 @@ func TestOIDCAdminGateFollowsClusterRBAC(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			auth := newAuthHandler(k8s, testNamespace, publicURL, "", "", factory, "", "", nil)
+			auth := newAuthHandler(k8s, testNamespace, publicURL, "", "", factory, "", "", "", "", nil)
 			rt, err := discoverOIDCRuntime(context.Background(), issuer, redirect, testOIDCClientID, "secret")
 			if err != nil {
 				t.Fatalf("discover runtime: %v", err)
@@ -222,7 +222,7 @@ func TestOIDCAuthorizationCaching(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	auth := newAuthHandler(k8s, testNamespace, publicURL, "", "", factory, "", "", nil)
+	auth := newAuthHandler(k8s, testNamespace, publicURL, "", "", factory, "", "", "", "", nil)
 	rt, err := discoverOIDCRuntime(context.Background(), issuer, redirect, testOIDCClientID, "secret")
 	if err != nil {
 		t.Fatalf("discover runtime: %v", err)

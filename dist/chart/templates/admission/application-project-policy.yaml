@@ -8,7 +8,7 @@ metadata:
     app.kubernetes.io/component: admission
     helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}
     app.kubernetes.io/instance: {{ .Release.Name }}
-  name: {{ include "idp.resourceName" (dict "suffix" "application-placement-policy" "context" $) }}
+  name: {{ include "idp.resourceName" (dict "suffix" "application-project-policy" "context" $) }}
 spec:
   failurePolicy: {{ .Values.admission.failurePolicy | default "Fail" }}
   matchConstraints:
@@ -18,17 +18,17 @@ spec:
         apiVersions:
           - v1alpha1
         operations:
-          - UPDATE
+          - CREATE
         resources:
           - applications
+          - applicationrequests
         scope: Namespaced
-  matchConditions:
-    - name: clusters-changed
-      expression: >-
-        has(object.spec.clusters) && (!has(oldObject.spec.clusters) || object.spec.clusters != oldObject.spec.clusters)
   validations:
     - expression: >-
-        object.spec.clusters.all(target, (has(oldObject.spec.clusters) && oldObject.spec.clusters.exists(old, old.name == target.name && old.uid == target.uid)) || authorizer.group('platform.releaseyard.io').resource('clusters').name(target.name).check('get').allowed())
-      message: Every added Cluster must be readable by the requesting user.
+        namespaceObject != null &&
+        has(namespaceObject.metadata.labels) &&
+        'platform.releaseyard.io/project' in namespaceObject.metadata.labels &&
+        namespaceObject.metadata.labels['platform.releaseyard.io/project'] != ''
+      message: Applications and ApplicationRequests can only be created in a Project namespace.
       reason: Forbidden
 {{- end }}

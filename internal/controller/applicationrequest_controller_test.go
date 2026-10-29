@@ -107,13 +107,15 @@ func (m *applicationRequestGitMock) CreatePullRequest(_ context.Context, _, _ st
 	return githubrepo.PullRequest{Number: 7, HTMLURL: "https://github.com/acme/demo/pull/7"}, nil
 }
 
+const applicationRequestTestNamespace = "releaseyard-team-platform"
+
 func applicationRequestFixture() *platformv1alpha1.ApplicationRequest {
 	return &platformv1alpha1.ApplicationRequest{
-		ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "idp-system", UID: "12345678-aaaa-bbbb-cccc-123456789abc", Generation: 1},
+		ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: applicationRequestTestNamespace, UID: "12345678-aaaa-bbbb-cccc-123456789abc", Generation: 1},
 		Spec: platformv1alpha1.ApplicationRequestSpec{
 			ProjectRef:           platformv1alpha1.ProjectRequestReference{Name: "project-sample"},
 			ApplicationName:      "test",
-			ApplicationNamespace: "releaseyard-team-platform",
+			ApplicationNamespace: applicationRequestTestNamespace,
 			RequestedBy:          "flepera@sinthera.com",
 			IdempotencyKey:       "idempotency",
 			Application: platformv1alpha1.ApplicationSpec{
@@ -128,10 +130,15 @@ func readyProjectFixture() *platformv1alpha1.Project {
 	return &platformv1alpha1.Project{
 		ObjectMeta: metav1.ObjectMeta{Name: "project-sample"},
 		Spec: platformv1alpha1.ProjectSpec{
+			Namespace: applicationRequestTestNamespace,
 			Repository: platformv1alpha1.ProjectRepositorySpec{
 				ConnectionRef: platformv1alpha1.GitConnectionReference{Name: "acme"},
 			},
 			Delivery: platformv1alpha1.ProjectDeliverySpec{Mode: platformv1alpha1.DeliveryModeBoth},
+			Catalog: platformv1alpha1.ProjectCatalogSpec{
+				ApplicationDefinitions: []string{"applicationdefinition-sample"},
+				Clusters:               []string{"releaseyard-managed-a"},
+			},
 		},
 		Status: platformv1alpha1.ProjectStatus{
 			Repository: &platformv1alpha1.ProjectRepositoryStatus{ID: 1, Owner: "acme", Name: "project-sample", DefaultBranch: "main"},
@@ -169,7 +176,7 @@ func setupApplicationRequestController(t *testing.T, request *platformv1alpha1.A
 
 func reconcileApplicationRequest(t *testing.T, r *ApplicationRequestReconciler) error {
 	t.Helper()
-	_, err := r.Reconcile(context.Background(), reconcile.Request{NamespacedName: types.NamespacedName{Namespace: "idp-system", Name: "test"}})
+	_, err := r.Reconcile(context.Background(), reconcile.Request{NamespacedName: types.NamespacedName{Namespace: applicationRequestTestNamespace, Name: "test"}})
 	return err
 }
 
@@ -209,7 +216,7 @@ func TestApplicationRequestCreatesBranchCommitAndPullRequest(t *testing.T) {
 		t.Fatalf("pull request input=%#v", gh.createdPR)
 	}
 	var got platformv1alpha1.ApplicationRequest
-	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "idp-system", Name: "test"}, &got); err != nil {
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: applicationRequestTestNamespace, Name: "test"}, &got); err != nil {
 		t.Fatal(err)
 	}
 	if got.Status.Phase != platformv1alpha1.ApplicationRequestChangeRequestOpen || got.Status.Branch != "releaseyard/test-12345678" || got.Status.CommitSHA != "commit-sha" || got.Status.ChangeRequestURL != "https://github.com/acme/demo/pull/7" {
@@ -231,7 +238,7 @@ func TestApplicationRequestReusesExistingPullRequest(t *testing.T) {
 		t.Fatalf("existing PR triggered a new change: %#v", gh)
 	}
 	var got platformv1alpha1.ApplicationRequest
-	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "idp-system", Name: "test"}, &got); err != nil {
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: applicationRequestTestNamespace, Name: "test"}, &got); err != nil {
 		t.Fatal(err)
 	}
 	if got.Status.Phase != platformv1alpha1.ApplicationRequestChangeRequestOpen || got.Status.CommitSHA != "existing-commit" || got.Status.ChangeRequestURL != "https://github.com/acme/demo/pull/9" {
@@ -250,7 +257,7 @@ func TestApplicationRequestOpensPullRequestForExistingBranch(t *testing.T) {
 		t.Fatalf("existing branch should only open a PR: %#v", gh)
 	}
 	var got platformv1alpha1.ApplicationRequest
-	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "idp-system", Name: "test"}, &got); err != nil {
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: applicationRequestTestNamespace, Name: "test"}, &got); err != nil {
 		t.Fatal(err)
 	}
 	if got.Status.Phase != platformv1alpha1.ApplicationRequestChangeRequestOpen || got.Status.CommitSHA != "existing-branch-sha" || got.Status.Branch != "releaseyard/test-12345678" {
@@ -273,7 +280,7 @@ func TestApplicationRequestRejectsExistingApplication(t *testing.T) {
 		t.Fatal("existing Application triggered a Git change")
 	}
 	var got platformv1alpha1.ApplicationRequest
-	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "idp-system", Name: "test"}, &got); err != nil {
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: applicationRequestTestNamespace, Name: "test"}, &got); err != nil {
 		t.Fatal(err)
 	}
 	if got.Status.Phase != platformv1alpha1.ApplicationRequestRejected || !strings.Contains(got.Status.Message, "already exists") {
@@ -295,10 +302,74 @@ func TestApplicationRequestRejectsMissingProject(t *testing.T) {
 		t.Fatal(err)
 	}
 	var got platformv1alpha1.ApplicationRequest
-	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "idp-system", Name: "test"}, &got); err != nil {
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: applicationRequestTestNamespace, Name: "test"}, &got); err != nil {
 		t.Fatal(err)
 	}
 	if got.Status.Phase != platformv1alpha1.ApplicationRequestRejected {
+		t.Fatalf("status=%#v", got.Status)
+	}
+}
+
+func TestApplicationRequestRejectsDefinitionOutsideCatalog(t *testing.T) {
+	request := applicationRequestFixture()
+	request.Spec.Application.ApplicationDefinitionRef.Name = "not-allowed"
+	r, c := setupApplicationRequestController(t, request, &applicationRequestGitMock{})
+	if err := reconcileApplicationRequest(t, r); err != nil {
+		t.Fatal(err)
+	}
+	var got platformv1alpha1.ApplicationRequest
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: applicationRequestTestNamespace, Name: "test"}, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Status.Phase != platformv1alpha1.ApplicationRequestRejected || !strings.Contains(got.Status.Message, "Project catalog") {
+		t.Fatalf("status=%#v", got.Status)
+	}
+}
+
+func TestApplicationRequestRejectsClusterOutsideCatalog(t *testing.T) {
+	request := applicationRequestFixture()
+	request.Spec.Application.ClusterRef.Name = "not-allowed"
+	r, c := setupApplicationRequestController(t, request, &applicationRequestGitMock{})
+	if err := reconcileApplicationRequest(t, r); err != nil {
+		t.Fatal(err)
+	}
+	var got platformv1alpha1.ApplicationRequest
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: applicationRequestTestNamespace, Name: "test"}, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Status.Phase != platformv1alpha1.ApplicationRequestRejected || !strings.Contains(got.Status.Message, "Project catalog") {
+		t.Fatalf("status=%#v", got.Status)
+	}
+}
+
+func TestApplicationRequestRejectsRequestNamespaceMismatch(t *testing.T) {
+	request := applicationRequestFixture()
+	request.Namespace = "idp-system"
+	r, c := setupApplicationRequestController(t, request, &applicationRequestGitMock{})
+	if _, err := r.Reconcile(context.Background(), reconcile.Request{NamespacedName: types.NamespacedName{Namespace: "idp-system", Name: "test"}}); err != nil {
+		t.Fatal(err)
+	}
+	var got platformv1alpha1.ApplicationRequest
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "idp-system", Name: "test"}, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Status.Phase != platformv1alpha1.ApplicationRequestRejected || !strings.Contains(got.Status.Message, "Request namespace") {
+		t.Fatalf("status=%#v", got.Status)
+	}
+}
+
+func TestApplicationRequestRejectsApplicationNamespaceMismatch(t *testing.T) {
+	request := applicationRequestFixture()
+	request.Spec.ApplicationNamespace = "other"
+	r, c := setupApplicationRequestController(t, request, &applicationRequestGitMock{})
+	if err := reconcileApplicationRequest(t, r); err != nil {
+		t.Fatal(err)
+	}
+	var got platformv1alpha1.ApplicationRequest
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: applicationRequestTestNamespace, Name: "test"}, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Status.Phase != platformv1alpha1.ApplicationRequestRejected || !strings.Contains(got.Status.Message, "Application namespace") {
 		t.Fatalf("status=%#v", got.Status)
 	}
 }

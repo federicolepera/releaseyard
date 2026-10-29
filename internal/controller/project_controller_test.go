@@ -78,6 +78,7 @@ func projectFixture() *platformv1alpha1.Project {
 	return &platformv1alpha1.Project{
 		ObjectMeta: metav1.ObjectMeta{Name: "demo", UID: "project-uid", Generation: 1},
 		Spec: platformv1alpha1.ProjectSpec{
+			Namespace:   "releaseyard-team-demo",
 			Repository:  platformv1alpha1.ProjectRepositorySpec{ConnectionRef: platformv1alpha1.GitConnectionReference{Name: "github"}},
 			Description: "a project",
 		},
@@ -148,7 +149,7 @@ func TestProjectCreatesManualArgoCDApplication(t *testing.T) {
 		"spec.source.targetRevision": "main",
 		"spec.source.path":           "apps",
 		"spec.destination.server":    "https://kubernetes.default.svc",
-		"spec.destination.namespace": "releaseyard-team-platform",
+		"spec.destination.namespace": "releaseyard-team-demo",
 	} {
 		got, _, _ := unstructured.NestedString(app.Object, strings.Split(path, ".")...)
 		if got != want {
@@ -205,6 +206,112 @@ func TestProjectPreservesManualArgoCDSyncPolicy(t *testing.T) {
 	syncPolicy, found, _ := unstructured.NestedMap(app.Object, "spec", "syncPolicy")
 	if !found || syncPolicy["automated"] == nil {
 		t.Fatalf("automated sync policy was lost: %#v", app.Object)
+	}
+}
+
+func TestProjectCreatesAndLabelsNamespace(t *testing.T) {
+	project := projectFixture()
+	gh := &projectGitMock{repo: readyRepo()}
+	r, c := setupProjectController(t, project, "connection-uid", true, gh)
+	if err := reconcileProject(t, r); err != nil {
+		t.Fatal(err)
+	}
+	var namespace corev1.Namespace
+	if err := c.Get(context.Background(), types.NamespacedName{Name: project.Spec.Namespace}, &namespace); err != nil {
+		t.Fatal(err)
+	}
+	for key, want := range map[string]string{
+		"platform.releaseyard.io/project":  "demo",
+		"platform.releaseyard.io/delivery": "direct",
+		"app.kubernetes.io/managed-by":     "releaseyard",
+	} {
+		if got := namespace.Labels[key]; got != want {
+			t.Fatalf("namespace label %s = %q, want %q", key, got, want)
+		}
+	}
+	var got platformv1alpha1.Project
+	if err := c.Get(context.Background(), types.NamespacedName{Name: "demo"}, &got); err != nil {
+		t.Fatal(err)
+	}
+	if condition := findProjectConditionType(got.Status.Conditions, platformv1alpha1.ProjectConditionNamespaceReady); condition == nil || condition.Status != metav1.ConditionTrue {
+		t.Fatalf("NamespaceReady condition missing: %#v", got.Status.Conditions)
+	}
+}
+
+func TestProjectRejectsDuplicateNamespace(t *testing.T) {
+	project := projectFixture()
+	gh := &projectGitMock{repo: readyRepo()}
+	r, c := setupProjectController(t, project, "connection-uid", true, gh)
+	other := projectFixture()
+	other.Name = "other"
+	other.UID = "other-uid"
+	if err := c.Create(context.Background(), other); err != nil {
+		t.Fatal(err)
+	}
+	if err := reconcileProject(t, r); err != nil {
+		t.Fatal(err)
+	}
+	if gh.creates != 0 || gh.seeds != 0 {
+		t.Fatalf("namespace conflict triggered repository work: create=%d seed=%d", gh.creates, gh.seeds)
+	}
+	var got platformv1alpha1.Project
+	if err := c.Get(context.Background(), types.NamespacedName{Name: "demo"}, &got); err != nil {
+		t.Fatal(err)
+	}
+	if condition := findProjectConditionType(got.Status.Conditions, platformv1alpha1.ProjectConditionNamespaceReady); condition == nil || condition.Reason != "NamespaceConflict" {
+		t.Fatalf("expected NamespaceConflict, got %#v", condition)
+	}
+}
+
+func TestProjectRejectsExistingUnmanagedNamespace(t *testing.T) {
+	project := projectFixture()
+	gh := &projectGitMock{repo: readyRepo()}
+	r, c := setupProjectController(t, project, "connection-uid", true, gh)
+	namespace := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: project.Spec.Namespace}}
+	if err := c.Create(context.Background(), namespace); err != nil {
+		t.Fatal(err)
+	}
+	if err := reconcileProject(t, r); err != nil {
+		t.Fatal(err)
+	}
+	if gh.creates != 0 || gh.seeds != 0 {
+		t.Fatalf("unmanaged namespace triggered repository work: create=%d seed=%d", gh.creates, gh.seeds)
+	}
+	var got platformv1alpha1.Project
+	if err := c.Get(context.Background(), types.NamespacedName{Name: "demo"}, &got); err != nil {
+		t.Fatal(err)
+	}
+	if condition := findProjectConditionType(got.Status.Conditions, platformv1alpha1.ProjectConditionNamespaceReady); condition == nil || condition.Reason != "NamespaceUnavailable" {
+		t.Fatalf("expected NamespaceUnavailable, got %#v", condition)
+	}
+}
+
+func TestProjectAdoptsReleaseYardNamespace(t *testing.T) {
+	project := projectFixture()
+	gh := &projectGitMock{repo: readyRepo()}
+	r, c := setupProjectController(t, project, "connection-uid", true, gh)
+	namespace := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{
+		Name: project.Spec.Namespace,
+		Labels: map[string]string{
+			"platform.releaseyard.io/project": "demo",
+			"app.kubernetes.io/managed-by":    "releaseyard",
+		},
+	}}
+	if err := c.Create(context.Background(), namespace); err != nil {
+		t.Fatal(err)
+	}
+	if err := reconcileProject(t, r); err != nil {
+		t.Fatal(err)
+	}
+	if gh.creates != 0 || gh.seeds != 1 {
+		t.Fatalf("existing managed namespace should be adopted: create=%d seed=%d", gh.creates, gh.seeds)
+	}
+	var got corev1.Namespace
+	if err := c.Get(context.Background(), types.NamespacedName{Name: project.Spec.Namespace}, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Labels["platform.releaseyard.io/delivery"] != "direct" {
+		t.Fatalf("existing namespace labels were not completed: %#v", got.Labels)
 	}
 }
 

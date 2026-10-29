@@ -99,7 +99,7 @@ func main() {
 	flag.StringVar(&argoCDNamespace, "argocd-namespace", "argocd",
 		"Namespace containing automatically managed Argo CD Applications")
 	flag.StringVar(&argoCDDestinationNamespace, "argocd-destination-namespace", "releaseyard-team-platform",
-		"Destination namespace for Argo CD Applications created for GitOps Projects")
+		"Legacy fallback destination namespace for Argo CD Applications when Project.spec.namespace is empty")
 	opts := zap.Options{
 		Development: true,
 	}

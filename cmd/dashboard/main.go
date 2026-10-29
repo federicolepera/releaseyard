@@ -76,6 +76,8 @@ func main() {
 		IdentityProviderSecretName: os.Getenv("IDENTITY_PROVIDER_SECRET_NAME"),
 		TeamNamespacePrefix:        envOr("TEAM_NAMESPACE_PREFIX", "releaseyard-team-"),
 		ApplicationEditorRole:      envOr("APPLICATION_EDITOR_ROLE", "releaseyard-application-editor-role"),
+		ProjectRolePrefix:          envOr("PROJECT_ROLE_PREFIX", "releaseyard-project-"),
+		PlatformAdminRole:          envOr("PLATFORM_ADMIN_ROLE", "releaseyard-platform-admin"),
 		ClientFactory:              clientFactory,
 		SessionStore:               sessionStore,
 		AuditLogger:                auditLogger,

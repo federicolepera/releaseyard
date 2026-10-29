@@ -50,11 +50,10 @@ Deployment so detection runs again.
 ### Administration
 
 - **Identity provider** — configure or remove OIDC.
-- **Access definitions** — grant a group `get` on selected
-  `ApplicationDefinition`s.
-- **Cluster access** — grant a group `get` on selected `Cluster`s.
-- **Access applications** — create a team namespace and bind the group to the
-  Application editor role.
+- **Project access** — bind a group or user to viewer/developer/requester/
+  project-admin in a Project namespace.
+- **Platform admins** — bind a group or user to `releaseyard-platform-admin`
+  with a ClusterRoleBinding.
 
 These pages create Kubernetes RBAC objects. There is no separate dashboard ACL.
 
@@ -122,8 +121,14 @@ releaseyard-team-<sanitized-group>
 ```
 
 A namespace is selectable only if the impersonated user may list Applications
-there. The local administrator uses the management namespace (`idp-system`) and
-is not impersonated.
+there. Project namespaces are added when the user may list Applications in them.
+The local administrator can read the management namespace and every Project
+namespace and is not impersonated.
+
+Project access is managed from **Administration → Project access**. Platform
+admins can manage every Project; a Project admin can manage only Projects where
+their RBAC allows RoleBinding creation. The page never accepts an arbitrary
+namespace: it always resolves `Project.spec.namespace`.
 
 ## Static assets
 

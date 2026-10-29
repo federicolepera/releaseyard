@@ -109,9 +109,9 @@ The dashboard is the front door for platform admins and teams:
   definitions, and create or delete `Resource` requests.
 - **Application detail**: Overview, Resources, Configuration, Observability, and
   Activity tabs, including live resource YAML, Pod logs, and CPU/memory.
-- **Administration**: Identity provider, Access definitions, Cluster access, and
-  Access applications. The panel materializes Kubernetes RBAC; it does not keep
-  a separate permission model.
+- **Administration**: Identity provider, Project access, and Platform admins.
+  The panel materializes Kubernetes RBAC; it does not keep a separate permission
+  model.
 
 A fresh installation starts with **local administrator authentication only**.
 OIDC can be configured later from the Administration page, without a restart.
@@ -306,7 +306,9 @@ Examples are in [`config/samples/`](config/samples/). Full details are in
   management cluster's Kubernetes RBAC is the source of truth. Any user may read
   the catalog; writes require the corresponding RBAC permission.
 - **Administration** — available to the local administrator and to OIDC groups
-  listed in `dashboard.adminGroups` (requires `rbac.helpers.enabled=true`).
+  assigned from **Administration → Platform admins** (requires
+  `rbac.helpers.enabled=true`). A fresh install has no OIDC platform admin; the
+  local administrator assigns the first one.
 - **Helper roles** — the chart can install admin/editor/viewer roles for
   Applications, Application Definitions, and Clusters when
   `rbac.helpers.enabled=true`.

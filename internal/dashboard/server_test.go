@@ -26,6 +26,7 @@ import (
 
 const (
 	testNamespace        = "idp-system"
+	testProjectNamespace = "releaseyard-team-payments"
 	testApplicationsPath = "/api/applications"
 	testClustersPath     = "/api/clusters"
 	testClusterName      = "production"
@@ -50,6 +51,20 @@ func testHandler(t *testing.T, objects ...client.Object) (http.Handler, client.C
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(objects...).Build()
 	return NewHandler(c, testNamespace), c
+}
+
+func appProject() *platformv1alpha1.Project {
+	return &platformv1alpha1.Project{
+		ObjectMeta: metav1.ObjectMeta{Name: "payments"},
+		Spec: platformv1alpha1.ProjectSpec{
+			Namespace: testProjectNamespace,
+			Delivery:  platformv1alpha1.ProjectDeliverySpec{Mode: platformv1alpha1.DeliveryModeBoth},
+			Catalog: platformv1alpha1.ProjectCatalogSpec{
+				ApplicationDefinitions: []string{testDefinitionName},
+				Clusters:               []string{testClusterName, "alpha", "beta"},
+			},
+		},
+	}
 }
 
 func validDefinition(name string, current bool) *platformv1alpha1.ApplicationDefinition {
@@ -363,13 +378,13 @@ func patchClusterEnvironment(handler http.Handler, body string) *httptest.Respon
 func TestCreateApplication(t *testing.T) {
 	definition := validDefinition(testDefinitionName, true)
 	cluster := &platformv1alpha1.Cluster{ObjectMeta: metav1.ObjectMeta{Name: testClusterName}}
-	h, c := testHandler(t, definition, cluster)
-	w := postJSON(h, `{"name":"my-app","description":"Customer portal","definitionName":"sample","clusterName":"production","values":{"replica":{"count":3},"feature":{"enabled":true}}}`)
+	h, c := testHandler(t, definition, cluster, appProject())
+	w := postJSON(h, `{"name":"my-app","description":"Customer portal","definitionName":"sample","clusterName":"production","projectName":"payments","values":{"replica":{"count":3},"feature":{"enabled":true}}}`)
 	if w.Code != http.StatusCreated {
 		t.Fatalf("POST status=%d body=%s", w.Code, w.Body)
 	}
 	app := &platformv1alpha1.Application{}
-	if err := c.Get(context.Background(), client.ObjectKey{Namespace: testNamespace, Name: "my-app"}, app); err != nil {
+	if err := c.Get(context.Background(), client.ObjectKey{Namespace: testProjectNamespace, Name: "my-app"}, app); err != nil {
 		t.Fatal(err)
 	}
 	if app.Spec.Values == nil || string(app.Spec.Values.Raw) != `{"replica":{"count":3},"feature":{"enabled":true}}` {
@@ -400,15 +415,43 @@ func TestListProjects(t *testing.T) {
 	}
 }
 
+func TestLocalAdminListsApplicationsFromProjectNamespaces(t *testing.T) {
+	project := &platformv1alpha1.Project{
+		ObjectMeta: metav1.ObjectMeta{Name: "payments"},
+		Spec:       platformv1alpha1.ProjectSpec{Namespace: testProjectNamespace},
+	}
+	app := &platformv1alpha1.Application{ObjectMeta: metav1.ObjectMeta{Name: "payments-api", Namespace: testProjectNamespace}}
+	h, _ := testHandler(t, project, app)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodGet, testApplicationsPath, nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET applications status=%d body=%s", w.Code, w.Body)
+	}
+	var list platformv1alpha1.ApplicationList
+	if err := json.Unmarshal(w.Body.Bytes(), &list); err != nil || len(list.Items) != 1 || list.Items[0].Name != "payments-api" {
+		t.Fatalf("unexpected applications: %#v err=%v", list, err)
+	}
+}
+
 func TestCreateApplicationGitOpsRequest(t *testing.T) {
 	definition := validDefinition(testDefinitionName, true)
 	cluster := &platformv1alpha1.Cluster{ObjectMeta: metav1.ObjectMeta{Name: testClusterName}}
 	project := &platformv1alpha1.Project{
 		ObjectMeta: metav1.ObjectMeta{Name: "payments"},
-		Spec:       platformv1alpha1.ProjectSpec{Delivery: platformv1alpha1.ProjectDeliverySpec{Mode: platformv1alpha1.DeliveryModeBoth}},
+		Spec: platformv1alpha1.ProjectSpec{
+			Namespace: testProjectNamespace,
+			Delivery:  platformv1alpha1.ProjectDeliverySpec{Mode: platformv1alpha1.DeliveryModeBoth},
+			Catalog: platformv1alpha1.ProjectCatalogSpec{
+				ApplicationDefinitions: []string{testDefinitionName},
+				Clusters:               []string{testClusterName},
+			},
+		},
 		Status: platformv1alpha1.ProjectStatus{
 			Repository: &platformv1alpha1.ProjectRepositoryStatus{ID: 1, Owner: "acme", Name: "payments"},
-			Conditions: []metav1.Condition{{Type: platformv1alpha1.ProjectConditionRepositoryReady, Status: metav1.ConditionTrue, ObservedGeneration: 1}},
+			Conditions: []metav1.Condition{
+				{Type: platformv1alpha1.ProjectConditionNamespaceReady, Status: metav1.ConditionTrue, ObservedGeneration: 1},
+				{Type: platformv1alpha1.ProjectConditionRepositoryReady, Status: metav1.ConditionTrue, ObservedGeneration: 1},
+			},
 		},
 	}
 	h, c := testHandler(t, definition, cluster, project)
@@ -417,10 +460,10 @@ func TestCreateApplicationGitOpsRequest(t *testing.T) {
 		t.Fatalf("POST status=%d body=%s", w.Code, w.Body)
 	}
 	var request platformv1alpha1.ApplicationRequest
-	if err := c.Get(context.Background(), client.ObjectKey{Namespace: testNamespace, Name: "gitops-app"}, &request); err != nil {
+	if err := c.Get(context.Background(), client.ObjectKey{Namespace: testProjectNamespace, Name: "gitops-app"}, &request); err != nil {
 		t.Fatal(err)
 	}
-	if request.Spec.ProjectRef.Name != "payments" || request.Spec.ApplicationName != "gitops-app" || request.Spec.ApplicationNamespace != testNamespace || request.Spec.RequestedBy != "" {
+	if request.Spec.ProjectRef.Name != "payments" || request.Spec.ApplicationName != "gitops-app" || request.Spec.ApplicationNamespace != testProjectNamespace || request.Spec.RequestedBy != "" {
 		t.Fatalf("unexpected request: %#v", request.Spec)
 	}
 	if request.Spec.Application.ClusterRef == nil || request.Spec.Application.ClusterRef.Name != testClusterName {
@@ -430,7 +473,7 @@ func TestCreateApplicationGitOpsRequest(t *testing.T) {
 		t.Fatalf("new request status=%q, want empty until the bridge reconciles it", request.Status.Phase)
 	}
 	var app platformv1alpha1.Application
-	if err := c.Get(context.Background(), client.ObjectKey{Namespace: testNamespace, Name: "gitops-app"}, &app); err == nil {
+	if err := c.Get(context.Background(), client.ObjectKey{Namespace: testProjectNamespace, Name: "gitops-app"}, &app); err == nil {
 		t.Fatal("GitOps request also created an Application")
 	}
 }
@@ -447,9 +490,10 @@ func TestCreateApplicationDeliveryValidation(t *testing.T) {
 		want    int
 	}{
 		{name: "gitops needs project", body: `{"name":"app","definitionName":"sample","clusterName":"production","delivery":"gitops","values":{"replica":{"count":1}}}`, want: http.StatusUnprocessableEntity},
-		{name: "direct project rejects gitops", project: &platformv1alpha1.Project{ObjectMeta: metav1.ObjectMeta{Name: "p"}, Spec: platformv1alpha1.ProjectSpec{Delivery: platformv1alpha1.ProjectDeliverySpec{Mode: platformv1alpha1.DeliveryModeDirect}}, Status: platformv1alpha1.ProjectStatus{Conditions: ready}}, body: `{"name":"app","definitionName":"sample","clusterName":"production","projectName":"p","delivery":"gitops","values":{"replica":{"count":1}}}`, want: http.StatusUnprocessableEntity},
-		{name: "gitops project rejects direct", project: &platformv1alpha1.Project{ObjectMeta: metav1.ObjectMeta{Name: "p"}, Spec: platformv1alpha1.ProjectSpec{Delivery: platformv1alpha1.ProjectDeliverySpec{Mode: platformv1alpha1.DeliveryModeGitOps}}, Status: platformv1alpha1.ProjectStatus{Conditions: ready}}, body: `{"name":"app","definitionName":"sample","clusterName":"production","projectName":"p","delivery":"direct","values":{"replica":{"count":1}}}`, want: http.StatusUnprocessableEntity},
-		{name: "gitops needs ready repo", project: &platformv1alpha1.Project{ObjectMeta: metav1.ObjectMeta{Name: "p"}, Spec: platformv1alpha1.ProjectSpec{Delivery: platformv1alpha1.ProjectDeliverySpec{Mode: platformv1alpha1.DeliveryModeGitOps}}, Status: platformv1alpha1.ProjectStatus{Conditions: notReady}}, body: `{"name":"app","definitionName":"sample","clusterName":"production","projectName":"p","delivery":"gitops","values":{"replica":{"count":1}}}`, want: http.StatusUnprocessableEntity},
+		{name: "direct project rejects gitops", project: &platformv1alpha1.Project{ObjectMeta: metav1.ObjectMeta{Name: "p"}, Spec: platformv1alpha1.ProjectSpec{Namespace: "releaseyard-team-p", Delivery: platformv1alpha1.ProjectDeliverySpec{Mode: platformv1alpha1.DeliveryModeDirect}}, Status: platformv1alpha1.ProjectStatus{Conditions: ready}}, body: `{"name":"app","definitionName":"sample","clusterName":"production","projectName":"p","delivery":"gitops","values":{"replica":{"count":1}}}`, want: http.StatusUnprocessableEntity},
+		{name: "gitops project rejects direct", project: &platformv1alpha1.Project{ObjectMeta: metav1.ObjectMeta{Name: "p"}, Spec: platformv1alpha1.ProjectSpec{Namespace: "releaseyard-team-p", Delivery: platformv1alpha1.ProjectDeliverySpec{Mode: platformv1alpha1.DeliveryModeGitOps}}, Status: platformv1alpha1.ProjectStatus{Conditions: ready}}, body: `{"name":"app","definitionName":"sample","clusterName":"production","projectName":"p","delivery":"direct","values":{"replica":{"count":1}}}`, want: http.StatusUnprocessableEntity},
+		{name: "gitops needs namespace", project: &platformv1alpha1.Project{ObjectMeta: metav1.ObjectMeta{Name: "p"}, Spec: platformv1alpha1.ProjectSpec{Delivery: platformv1alpha1.ProjectDeliverySpec{Mode: platformv1alpha1.DeliveryModeGitOps}}, Status: platformv1alpha1.ProjectStatus{Repository: &platformv1alpha1.ProjectRepositoryStatus{ID: 1}, Conditions: ready}}, body: `{"name":"app","definitionName":"sample","clusterName":"production","projectName":"p","delivery":"gitops","values":{"replica":{"count":1}}}`, want: http.StatusUnprocessableEntity},
+		{name: "gitops needs ready repo", project: &platformv1alpha1.Project{ObjectMeta: metav1.ObjectMeta{Name: "p"}, Spec: platformv1alpha1.ProjectSpec{Namespace: "releaseyard-team-p", Delivery: platformv1alpha1.ProjectDeliverySpec{Mode: platformv1alpha1.DeliveryModeGitOps}}, Status: platformv1alpha1.ProjectStatus{Conditions: notReady}}, body: `{"name":"app","definitionName":"sample","clusterName":"production","projectName":"p","delivery":"gitops","values":{"replica":{"count":1}}}`, want: http.StatusUnprocessableEntity},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -472,14 +516,14 @@ func TestCreateApplicationForEnvironment(t *testing.T) {
 	}
 
 	t.Run("stores a dynamic environment selector", func(t *testing.T) {
-		h, c := testHandler(t, definition, makeCluster("alpha", "uid-a"), makeCluster("beta", "uid-b"))
-		body := `{"name":"env-app","definitionName":"sample","environmentName":"prod","values":{"replica":{"count":3}}}`
+		h, c := testHandler(t, definition, makeCluster("alpha", "uid-a"), makeCluster("beta", "uid-b"), appProject())
+		body := `{"name":"env-app","definitionName":"sample","environmentName":"prod","projectName":"payments","values":{"replica":{"count":3}}}`
 		w := postJSON(h, body)
 		if w.Code != http.StatusCreated {
 			t.Fatalf("POST status=%d body=%s", w.Code, w.Body)
 		}
 		stored := &platformv1alpha1.Application{}
-		if err := c.Get(context.Background(), client.ObjectKey{Namespace: testNamespace, Name: "env-app"}, stored); err != nil {
+		if err := c.Get(context.Background(), client.ObjectKey{Namespace: testProjectNamespace, Name: "env-app"}, stored); err != nil {
 			t.Fatal(err)
 		}
 		if stored.Spec.ClusterRef != nil || stored.Spec.Environment == nil || stored.Spec.Environment.Name != "prod" || len(stored.Spec.Environment.Targets) != 0 {
@@ -488,13 +532,13 @@ func TestCreateApplicationForEnvironment(t *testing.T) {
 	})
 
 	t.Run("ignores a preview digest instead of pinning targets", func(t *testing.T) {
-		h, c := testHandler(t, definition, makeCluster("alpha", "uid-a"))
-		body := `{"name":"preview-app","definitionName":"sample","environmentName":"prod","previewDigest":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","values":{"replica":{"count":1}}}`
+		h, c := testHandler(t, definition, makeCluster("alpha", "uid-a"), appProject())
+		body := `{"name":"preview-app","definitionName":"sample","environmentName":"prod","previewDigest":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","projectName":"payments","values":{"replica":{"count":1}}}`
 		if w := postJSON(h, body); w.Code != http.StatusCreated {
 			t.Fatalf("POST status=%d body=%s", w.Code, w.Body)
 		}
 		stored := &platformv1alpha1.Application{}
-		if err := c.Get(context.Background(), client.ObjectKey{Namespace: testNamespace, Name: "preview-app"}, stored); err != nil {
+		if err := c.Get(context.Background(), client.ObjectKey{Namespace: testProjectNamespace, Name: "preview-app"}, stored); err != nil {
 			t.Fatal(err)
 		}
 		if stored.Spec.Environment == nil || len(stored.Spec.Environment.Targets) != 0 {
@@ -503,12 +547,12 @@ func TestCreateApplicationForEnvironment(t *testing.T) {
 	})
 
 	t.Run("request modes", func(t *testing.T) {
-		h, _ := testHandler(t, definition, makeCluster("alpha", "uid-a"))
+		h, _ := testHandler(t, definition, makeCluster("alpha", "uid-a"), appProject())
 		for _, body := range []string{
-			`{"name":"bad-app","definitionName":"sample"}`,
-			`{"name":"bad-app","definitionName":"sample","clusterName":"alpha","environmentName":"prod"}`,
-			`{"name":"bad-app","definitionName":"sample","environmentName":"bad value"}`,
-			`{"name":"bad-app","definitionName":"sample","environmentName":"prod","targets":[]}`,
+			`{"name":"bad-app","definitionName":"sample","projectName":"payments"}`,
+			`{"name":"bad-app","definitionName":"sample","clusterName":"alpha","environmentName":"prod","projectName":"payments"}`,
+			`{"name":"bad-app","definitionName":"sample","environmentName":"bad value","projectName":"payments"}`,
+			`{"name":"bad-app","definitionName":"sample","environmentName":"prod","targets":[],"projectName":"payments"}`,
 		} {
 			if w := postJSON(h, body); w.Code != http.StatusBadRequest {
 				t.Fatalf("POST body=%s status=%d, want 400", body, w.Code)
@@ -524,14 +568,14 @@ func TestCreateApplicationForExplicitClusters(t *testing.T) {
 	}
 
 	t.Run("stores the selected cluster identities", func(t *testing.T) {
-		h, c := testHandler(t, definition, makeCluster("alpha", "uid-a"), makeCluster("beta", "uid-b"))
-		body := `{"name":"selected-app","definitionName":"sample","clusters":[{"name":"beta","uid":"uid-b"},{"name":"alpha","uid":"uid-a"}],"values":{"replica":{"count":3}}}`
+		h, c := testHandler(t, definition, makeCluster("alpha", "uid-a"), makeCluster("beta", "uid-b"), appProject())
+		body := `{"name":"selected-app","definitionName":"sample","clusters":[{"name":"beta","uid":"uid-b"},{"name":"alpha","uid":"uid-a"}],"projectName":"payments","values":{"replica":{"count":3}}}`
 		w := postJSON(h, body)
 		if w.Code != http.StatusCreated {
 			t.Fatalf("POST status=%d body=%s", w.Code, w.Body)
 		}
 		stored := &platformv1alpha1.Application{}
-		if err := c.Get(context.Background(), client.ObjectKey{Namespace: testNamespace, Name: "selected-app"}, stored); err != nil {
+		if err := c.Get(context.Background(), client.ObjectKey{Namespace: testProjectNamespace, Name: "selected-app"}, stored); err != nil {
 			t.Fatal(err)
 		}
 		if stored.Spec.ClusterRef != nil || stored.Spec.Environment != nil {
@@ -543,16 +587,16 @@ func TestCreateApplicationForExplicitClusters(t *testing.T) {
 	})
 
 	t.Run("request validation", func(t *testing.T) {
-		h, _ := testHandler(t, definition, makeCluster("alpha", "uid-a"), makeCluster("beta", "uid-b"))
+		h, _ := testHandler(t, definition, makeCluster("alpha", "uid-a"), makeCluster("beta", "uid-b"), appProject())
 		for _, tc := range []struct {
 			body string
 			want int
 		}{
-			{body: `{"name":"bad-app","definitionName":"sample","clusters":[]}`, want: http.StatusBadRequest},
-			{body: `{"name":"bad-app","definitionName":"sample","clusterName":"alpha","clusters":[{"name":"beta","uid":"uid-b"}]}`, want: http.StatusBadRequest},
-			{body: `{"name":"bad-app","definitionName":"sample","clusters":[{"name":"alpha","uid":"uid-a"},{"name":"alpha","uid":"uid-b"}]}`, want: http.StatusBadRequest},
-			{body: `{"name":"bad-app","definitionName":"sample","clusters":[{"name":"alpha","uid":"stale"}]}`, want: http.StatusConflict},
-			{body: `{"name":"bad-app","definitionName":"sample","clusters":[{"name":"missing","uid":"uid-x"}]}`, want: http.StatusNotFound},
+			{body: `{"name":"bad-app","definitionName":"sample","projectName":"payments","clusters":[]}`, want: http.StatusBadRequest},
+			{body: `{"name":"bad-app","definitionName":"sample","projectName":"payments","clusterName":"alpha","clusters":[{"name":"beta","uid":"uid-b"}]}`, want: http.StatusBadRequest},
+			{body: `{"name":"bad-app","definitionName":"sample","projectName":"payments","clusters":[{"name":"alpha","uid":"uid-a"},{"name":"alpha","uid":"uid-b"}]}`, want: http.StatusBadRequest},
+			{body: `{"name":"bad-app","definitionName":"sample","projectName":"payments","clusters":[{"name":"alpha","uid":"stale"}]}`, want: http.StatusConflict},
+			{body: `{"name":"bad-app","definitionName":"sample","projectName":"payments","clusters":[{"name":"missing","uid":"uid-x"}]}`, want: http.StatusNotFound},
 		} {
 			if w := postJSON(h, tc.body); w.Code != tc.want {
 				t.Fatalf("POST body=%s status=%d, want %d: %s", tc.body, w.Code, tc.want, w.Body)
@@ -868,8 +912,8 @@ func TestCreateReleaseNamespaceOverride(t *testing.T) {
 	cluster := &platformv1alpha1.Cluster{ObjectMeta: metav1.ObjectMeta{Name: testClusterName}}
 	t.Run("override disabled", func(t *testing.T) {
 		definition := validDefinition(testDefinitionName, true)
-		h, c := testHandler(t, definition, cluster)
-		w := postJSON(h, `{"name":"reject-app","definitionName":"sample","clusterName":"production","releaseNamespace":"other","values":{"replica":{"count":3}}}`)
+		h, c := testHandler(t, definition, cluster, appProject())
+		w := postJSON(h, `{"name":"reject-app","definitionName":"sample","clusterName":"production","releaseNamespace":"other","projectName":"payments","values":{"replica":{"count":3}}}`)
 		if w.Code != http.StatusUnprocessableEntity {
 			t.Fatalf("status=%d, want 422 body=%s", w.Code, w.Body)
 		}
@@ -878,13 +922,13 @@ func TestCreateReleaseNamespaceOverride(t *testing.T) {
 	t.Run("override enabled and listed", func(t *testing.T) {
 		definition := validDefinition(testDefinitionName, true)
 		definition.Spec.Release.AllowNamespaceOverride = true
-		h, c := testHandler(t, definition, cluster)
-		w := postJSON(h, `{"name":"override-app","definitionName":"sample","clusterName":"production","releaseNamespace":"custom-ns","values":{"replica":{"count":3}}}`)
+		h, c := testHandler(t, definition, cluster, appProject())
+		w := postJSON(h, `{"name":"override-app","definitionName":"sample","clusterName":"production","releaseNamespace":"custom-ns","projectName":"payments","values":{"replica":{"count":3}}}`)
 		if w.Code != http.StatusCreated {
 			t.Fatalf("status=%d body=%s", w.Code, w.Body)
 		}
 		app := &platformv1alpha1.Application{}
-		if err := c.Get(context.Background(), client.ObjectKey{Namespace: testNamespace, Name: "override-app"}, app); err != nil {
+		if err := c.Get(context.Background(), client.ObjectKey{Namespace: testProjectNamespace, Name: "override-app"}, app); err != nil {
 			t.Fatal(err)
 		}
 		if app.Spec.ReleaseNamespace == nil || *app.Spec.ReleaseNamespace != "custom-ns" {
@@ -900,10 +944,10 @@ func TestCreateReleaseNamespaceOverride(t *testing.T) {
 		t.Run("invalid "+value, func(t *testing.T) {
 			definition := validDefinition(testDefinitionName, true)
 			definition.Spec.Release.AllowNamespaceOverride = true
-			h, c := testHandler(t, definition, cluster)
+			h, c := testHandler(t, definition, cluster, appProject())
 			body, err := json.Marshal(map[string]any{
 				"name": "invalid-app", "definitionName": testDefinitionName,
-				"clusterName": testClusterName, "releaseNamespace": value,
+				"clusterName": testClusterName, "releaseNamespace": value, "projectName": "payments",
 				"values": map[string]any{"replica": map[string]any{"count": 3}},
 			})
 			if err != nil {
@@ -920,9 +964,11 @@ func TestCreateReleaseNamespaceOverride(t *testing.T) {
 
 func assertApplicationAbsent(t *testing.T, c client.Client, name string) {
 	t.Helper()
-	app := &platformv1alpha1.Application{}
-	if err := c.Get(context.Background(), client.ObjectKey{Namespace: testNamespace, Name: name}, app); err == nil {
-		t.Fatalf("Application %q unexpectedly exists", name)
+	for _, namespace := range []string{testNamespace, testProjectNamespace} {
+		app := &platformv1alpha1.Application{}
+		if err := c.Get(context.Background(), client.ObjectKey{Namespace: namespace, Name: name}, app); err == nil {
+			t.Fatalf("Application %q unexpectedly exists in %s", name, namespace)
+		}
 	}
 }
 
@@ -935,13 +981,13 @@ func TestCreateValidationAndConflicts(t *testing.T) {
 		setup  []client.Object
 		status int
 	}{
-		{name: "required", body: `{"name":"new-app","definitionName":"sample","clusterName":"production","values":{"feature":{"enabled":true}}}`, status: http.StatusUnprocessableEntity},
-		{name: "unknown path", body: `{"name":"new-app","definitionName":"sample","clusterName":"production","values":{"other":true}}`, status: http.StatusUnprocessableEntity},
-		{name: "wrong type", body: `{"name":"new-app","definitionName":"sample","clusterName":"production","values":{"replica":{"count":"3"}}}`, status: http.StatusUnprocessableEntity},
-		{name: "missing definition", body: `{"name":"new-app","definitionName":"missing","clusterName":"production","values":{"replica":{"count":3}}}`, setup: []client.Object{cluster}, status: http.StatusNotFound},
-		{name: "unvalidated definition", body: `{"name":"new-app","definitionName":"sample","clusterName":"production","values":{"replica":{"count":3}}}`, setup: []client.Object{validDefinition(testDefinitionName, false), cluster}, status: http.StatusUnprocessableEntity},
-		{name: "missing cluster", body: `{"name":"new-app","definitionName":"sample","clusterName":"missing","values":{"replica":{"count":3}}}`, setup: []client.Object{definition}, status: http.StatusNotFound},
-		{name: "duplicate", body: `{"name":"existing","definitionName":"sample","clusterName":"production","values":{"replica":{"count":3}}}`, setup: []client.Object{definition, cluster, &platformv1alpha1.Application{ObjectMeta: metav1.ObjectMeta{Name: "existing", Namespace: testNamespace}}}, status: http.StatusConflict},
+		{name: "required", body: `{"name":"new-app","definitionName":"sample","clusterName":"production","projectName":"payments","values":{"feature":{"enabled":true}}}`, setup: []client.Object{definition, cluster, appProject()}, status: http.StatusUnprocessableEntity},
+		{name: "unknown path", body: `{"name":"new-app","definitionName":"sample","clusterName":"production","projectName":"payments","values":{"other":true}}`, setup: []client.Object{definition, cluster, appProject()}, status: http.StatusUnprocessableEntity},
+		{name: "wrong type", body: `{"name":"new-app","definitionName":"sample","clusterName":"production","projectName":"payments","values":{"replica":{"count":"3"}}}`, setup: []client.Object{definition, cluster, appProject()}, status: http.StatusUnprocessableEntity},
+		{name: "missing definition", body: `{"name":"new-app","definitionName":"missing","clusterName":"production","projectName":"payments","values":{"replica":{"count":3}}}`, setup: []client.Object{cluster, appProject()}, status: http.StatusNotFound},
+		{name: "unvalidated definition", body: `{"name":"new-app","definitionName":"sample","clusterName":"production","projectName":"payments","values":{"replica":{"count":3}}}`, setup: []client.Object{validDefinition(testDefinitionName, false), cluster, appProject()}, status: http.StatusUnprocessableEntity},
+		{name: "missing cluster", body: `{"name":"new-app","definitionName":"sample","clusterName":"missing","projectName":"payments","values":{"replica":{"count":3}}}`, setup: []client.Object{definition, appProject()}, status: http.StatusNotFound},
+		{name: "duplicate", body: `{"name":"existing","definitionName":"sample","clusterName":"production","projectName":"payments","values":{"replica":{"count":3}}}`, setup: []client.Object{definition, cluster, appProject(), &platformv1alpha1.Application{ObjectMeta: metav1.ObjectMeta{Name: "existing", Namespace: testProjectNamespace}}}, status: http.StatusConflict},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1166,5 +1212,51 @@ func TestTeamApplicationUsesImpersonatedClient(t *testing.T) {
 	}
 	if err := impersonated.Get(context.Background(), client.ObjectKey{Namespace: teamNamespace, Name: "test-2"}, &platformv1alpha1.Application{}); err == nil {
 		t.Fatal("application still present after delete")
+	}
+}
+
+func TestCatalogFiltersByProject(t *testing.T) {
+	allowedDefinition := validDefinition("allowed", true)
+	otherDefinition := validDefinition("other", true)
+	allowedCluster := &platformv1alpha1.Cluster{ObjectMeta: metav1.ObjectMeta{Name: "managed-a"}}
+	otherCluster := &platformv1alpha1.Cluster{ObjectMeta: metav1.ObjectMeta{Name: "managed-b"}}
+	allowedTarget := &platformv1alpha1.CloudTarget{ObjectMeta: metav1.ObjectMeta{Name: "localstack"}}
+	otherTarget := &platformv1alpha1.CloudTarget{ObjectMeta: metav1.ObjectMeta{Name: "aws-prod"}}
+	allowedResource := &platformv1alpha1.ResourceDefinition{ObjectMeta: metav1.ObjectMeta{Name: "bucket"}}
+	otherResource := &platformv1alpha1.ResourceDefinition{ObjectMeta: metav1.ObjectMeta{Name: "vm"}}
+	project := &platformv1alpha1.Project{
+		ObjectMeta: metav1.ObjectMeta{Name: "payments"},
+		Spec: platformv1alpha1.ProjectSpec{
+			Namespace: "releaseyard-team-payments",
+			Catalog: platformv1alpha1.ProjectCatalogSpec{
+				ApplicationDefinitions: []string{"allowed"},
+				Clusters:               []string{"managed-a"},
+				CloudTargets:           []string{"localstack"},
+				ResourceDefinitions:    []string{"bucket"},
+			},
+		},
+	}
+	h, _ := testHandler(t, allowedDefinition, otherDefinition, allowedCluster, otherCluster, allowedTarget, otherTarget, allowedResource, otherResource, project)
+	cases := []struct {
+		path string
+		want int
+	}{
+		{"/api/applicationdefinitions?project=payments", 1},
+		{"/api/clusters?project=payments", 1},
+		{"/api/cloudtargets?project=payments", 1},
+		{"/api/resourcedefinitions?project=payments", 1},
+	}
+	for _, tc := range cases {
+		response := httptest.NewRecorder()
+		h.ServeHTTP(response, httptest.NewRequest(http.MethodGet, tc.path, nil))
+		if response.Code != http.StatusOK {
+			t.Fatalf("GET %s status=%d body=%s", tc.path, response.Code, response.Body)
+		}
+		var list struct {
+			Items []json.RawMessage `json:"items"`
+		}
+		if err := json.Unmarshal(response.Body.Bytes(), &list); err != nil || len(list.Items) != tc.want {
+			t.Fatalf("GET %s items=%d want=%d err=%v", tc.path, len(list.Items), tc.want, err)
+		}
 	}
 }

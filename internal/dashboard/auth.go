@@ -46,9 +46,14 @@ type OIDCConfig struct {
 	// TeamNamespacePrefix derives per-team namespaces from identity-provider
 	// groups for multi-team Application placement.
 	TeamNamespacePrefix string
-	// ApplicationEditorRole is the ClusterRole bound to a team group inside its
-	// namespace by the "Access applications" administration panel.
+	// ApplicationEditorRole is the legacy ClusterRole bound to a team group
+	// inside its namespace by the "Access applications" administration panel.
 	ApplicationEditorRole string
+	// ProjectRolePrefix is prefixed to Project role names (viewer, developer,
+	// requester, admin) when the dashboard assigns Project membership.
+	ProjectRolePrefix string
+	// PlatformAdminRole is the ClusterRole assigned to platform administrators.
+	PlatformAdminRole string
 	// SessionStore persists sessions and login transactions. When nil an
 	// in-memory store is used.
 	SessionStore SessionStore
@@ -68,9 +73,14 @@ type LocalAuthConfig struct {
 	// TeamNamespacePrefix derives per-team namespaces from identity-provider
 	// groups for multi-team Application placement.
 	TeamNamespacePrefix string
-	// ApplicationEditorRole is the ClusterRole bound to a team group inside its
-	// namespace by the "Access applications" administration panel.
+	// ApplicationEditorRole is the legacy ClusterRole bound to a team group
+	// inside its namespace by the "Access applications" administration panel.
 	ApplicationEditorRole string
+	// ProjectRolePrefix is prefixed to Project role names (viewer, developer,
+	// requester, admin) when the dashboard assigns Project membership.
+	ProjectRolePrefix string
+	// PlatformAdminRole is the ClusterRole assigned to platform administrators.
+	PlatformAdminRole string
 	// ClientFactory builds a Kubernetes client that impersonates the logged-in
 	// user, so that authorization is enforced by the management cluster's RBAC.
 	ClientFactory ImpersonatingClientFactory
@@ -119,8 +129,11 @@ type authHandler struct {
 	namespace              string
 	teamNamespacePrefix    string
 	applicationEditorRole  string
+	projectRolePrefix      string
+	platformAdminRole      string
 	identityProviderSecret string
 	oidc                   atomic.Pointer[oidcRuntime]
+	lastVerified           atomic.Int64
 	clientFactory          ImpersonatingClientFactory
 	cloudProvisioning      bool
 	store                  SessionStore
@@ -161,7 +174,7 @@ func NewOIDCHandler(k8s client.Client, namespace string, config OIDCConfig) (htt
 	publicURL := *redirectURL
 	publicURL.Path = ""
 	publicURL.RawPath = ""
-	auth := newAuthHandler(k8s, namespace, &publicURL, "", "", nil, config.TeamNamespacePrefix, config.ApplicationEditorRole, config.SessionStore)
+	auth := newAuthHandler(k8s, namespace, &publicURL, "", "", nil, config.TeamNamespacePrefix, config.ApplicationEditorRole, config.ProjectRolePrefix, config.PlatformAdminRole, config.SessionStore)
 	auth.auditLog = config.AuditLogger
 	auth.oidc.Store(rt)
 	return securityHeaders(auth.middleware(NewHandler(k8s, namespace))), nil
@@ -176,7 +189,7 @@ func NewLocalHandler(k8s client.Client, namespace string, config LocalAuthConfig
 	if err != nil {
 		return nil, err
 	}
-	auth := newAuthHandler(k8s, namespace, publicURL, config.HashPath, resolveIdentityProviderSecretName(config.IdentityProviderSecretName), config.ClientFactory, config.TeamNamespacePrefix, config.ApplicationEditorRole, config.SessionStore)
+	auth := newAuthHandler(k8s, namespace, publicURL, config.HashPath, resolveIdentityProviderSecretName(config.IdentityProviderSecretName), config.ClientFactory, config.TeamNamespacePrefix, config.ApplicationEditorRole, config.ProjectRolePrefix, config.PlatformAdminRole, config.SessionStore)
 	auth.auditLog = config.AuditLogger
 	auth.cloudProvisioning = crossplaneInstalled(context.Background(), k8s)
 	auth.reloadIdentityProvider(context.Background())
@@ -184,7 +197,7 @@ func NewLocalHandler(k8s client.Client, namespace string, config LocalAuthConfig
 	return securityHeaders(auth.middleware(NewHandler(k8s, namespace))), nil
 }
 
-func newAuthHandler(k8s client.Client, namespace string, publicURL *url.URL, localHashPath, identityProviderSecret string, clientFactory ImpersonatingClientFactory, teamNamespacePrefix, applicationEditorRole string, store SessionStore) *authHandler {
+func newAuthHandler(k8s client.Client, namespace string, publicURL *url.URL, localHashPath, identityProviderSecret string, clientFactory ImpersonatingClientFactory, teamNamespacePrefix, applicationEditorRole, projectRolePrefix, platformAdminRole string, store SessionStore) *authHandler {
 	if store == nil {
 		store = newMemorySessionStore()
 	}
@@ -196,6 +209,8 @@ func newAuthHandler(k8s client.Client, namespace string, publicURL *url.URL, loc
 		namespace:              namespace,
 		teamNamespacePrefix:    teamNamespacePrefix,
 		applicationEditorRole:  applicationEditorRole,
+		projectRolePrefix:      projectRolePrefix,
+		platformAdminRole:      platformAdminRole,
 		identityProviderSecret: identityProviderSecret,
 		clientFactory:          clientFactory,
 		now:                    time.Now,
@@ -464,32 +479,34 @@ func (a *authHandler) middleware(next http.Handler) http.Handler {
 				}
 				teamOptions = append(teamOptions, map[string]string{"name": name, "namespace": namespace})
 			}
-			writeJSON(w, http.StatusOK, map[string]any{"csrfToken": session.csrfToken, "username": session.username, "isAdmin": capabilities.isAdmin, "isLocalAdmin": session.authMethod == authMethodLocal, "canAdminister": capabilities.canAdminister, "canCreateApps": capabilities.canCreateApps, "canDeleteApps": capabilities.canDeleteApps, "canUpdateApps": capabilities.canUpdateApps, "canCreateResources": capabilities.canCreateResources, "canDeleteResources": capabilities.canDeleteResources, "cloudProvisioning": a.cloudProvisioning, "teams": teamOptions})
+			writeJSON(w, http.StatusOK, map[string]any{"csrfToken": session.csrfToken, "username": session.username, "isAdmin": capabilities.isAdmin, "isLocalAdmin": session.authMethod == authMethodLocal, "canAdminister": capabilities.canAdminister, "canManageProjectAccess": capabilities.canManageProjectAccess, "canCreateApps": capabilities.canCreateApps, "canDeleteApps": capabilities.canDeleteApps, "canUpdateApps": capabilities.canUpdateApps, "canCreateResources": capabilities.canCreateResources, "canDeleteResources": capabilities.canDeleteResources, "cloudProvisioning": a.cloudProvisioning, "teams": teamOptions})
 			return
 		}
 		if isAdministrationPage(r.URL.Path) || isAdministrationAPIPath(r.URL.Path) {
+			projectAccess := r.URL.Path == "/access-applications.html" || r.URL.Path == "/api/administration/project-access"
 			// The administration area is available to the initial local
 			// administrator and to OIDC users whose management-cluster RBAC
-			// already allows the actions the panel performs.
-			if !capabilities.canAdminister {
+			// already allows the actions the panel performs. Project access is
+			// also available to Project admins with RoleBinding rights.
+			if !capabilities.canAdminister && (!projectAccess || !capabilities.canManageProjectAccess) {
 				writeError(w, http.StatusForbidden, "Administrator access is required")
 				return
 			}
+		}
+		if r.URL.Path == "/api/administration/identity-provider/test" && r.Method == http.MethodPost {
+			a.testIdentityProvider(w, r)
+			return
 		}
 		if r.URL.Path == "/api/administration/identity-provider" {
 			a.handleIdentityProviderAdmin(w, r)
 			return
 		}
-		if r.URL.Path == "/api/administration/definition-access" {
-			a.handleDefinitionAccessAdmin(w, r)
+		if r.URL.Path == "/api/administration/project-access" {
+			a.handleProjectAccessAdmin(w, r)
 			return
 		}
-		if r.URL.Path == "/api/administration/cluster-access" {
-			a.handleClusterAccessAdmin(w, r)
-			return
-		}
-		if r.URL.Path == "/api/administration/application-access" {
-			a.handleApplicationAccessAdmin(w, r)
+		if r.URL.Path == "/api/administration/platform-access" {
+			a.handlePlatformAccessAdmin(w, r)
 			return
 		}
 
@@ -534,7 +551,7 @@ func isAdministrationAPIPath(path string) bool {
 
 func isAdministrationPage(path string) bool {
 	switch path {
-	case "/identity-provider.html", "/access-definitions.html", "/cluster-access.html", "/access-applications.html":
+	case "/identity-provider.html", "/access-applications.html", "/platform-admins.html":
 		return true
 	}
 	return false
