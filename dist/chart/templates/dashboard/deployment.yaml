@@ -82,6 +82,10 @@ spec:
               value: {{ .Values.dashboard.teamNamespacePrefix | quote }}
             - name: APPLICATION_EDITOR_ROLE
               value: {{ include "idp.resourceName" (dict "suffix" "application-editor-role" "context" .) | quote }}
+            - name: PROJECT_ROLE_PREFIX
+              value: {{ printf "%s-" (include "idp.resourceName" (dict "suffix" "project" "context" .)) | quote }}
+            - name: PLATFORM_ADMIN_ROLE
+              value: {{ include "idp.resourceName" (dict "suffix" "platform-admin" "context" .) | quote }}
             - name: SESSION_STORE
               value: {{ $sessionStoreType | quote }}
             {{- if eq $sessionStoreType "redis" }}

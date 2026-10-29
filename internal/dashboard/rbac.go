@@ -10,6 +10,8 @@ import (
 	authorizationv1 "k8s.io/api/authorization/v1"
 	"k8s.io/apimachinery/pkg/util/validation"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	platformv1alpha1 "github.com/federicolepera/idp/api/v1alpha1"
 )
 
 // ImpersonatingClientFactory builds a Kubernetes client that authenticates as
@@ -126,21 +128,21 @@ func sanitizeDNSLabel(value string) string {
 }
 
 type dashboardCapabilities struct {
-	isAdmin            bool
-	canAdminister      bool
-	canCreateApps      bool
-	canDeleteApps      bool
-	canUpdateApps      bool
-	canCreateResources bool
-	canDeleteResources bool
+	isAdmin                bool
+	canAdminister          bool
+	canManageProjectAccess bool
+	canCreateApps          bool
+	canDeleteApps          bool
+	canUpdateApps          bool
+	canCreateResources     bool
+	canDeleteResources     bool
 }
 
 // administerPermission is the representative action the Administration area
-// needs: managing the ClusterRoles and ClusterRoleBindings behind definition and
-// cluster access. Requiring it (via SelfSubjectAccessReview as the user) means an
+// needs: managing the ClusterRoles and ClusterRoleBindings behind catalog access. Requiring it (via SelfSubjectAccessReview as the user) means an
 // OIDC user is an administrator only when the management cluster's RBAC already
 // lets them do what the panel does, so the panel cannot escalate privileges.
-var administerPermission = authorizationv1.ResourceAttributes{Group: "rbac.authorization.k8s.io", Resource: "clusterrolebindings", Verb: "create"}
+var administerPermission = authorizationv1.ResourceAttributes{Group: "rbac.authorization.k8s.io", Resource: "clusterrolebindings", Verb: verbCreate}
 
 // impersonatingClient returns the cached impersonating client for the session.
 // Local sessions and configurations without a factory return nil, meaning the
@@ -167,13 +169,14 @@ func (a *authHandler) impersonatingClient(session dashboardSession) (client.Clie
 // answer always reflects the cluster's RBAC rather than any rule in this app.
 func fullCapabilities() dashboardCapabilities {
 	return dashboardCapabilities{
-		isAdmin:            true,
-		canAdminister:      true,
-		canCreateApps:      true,
-		canDeleteApps:      true,
-		canUpdateApps:      true,
-		canCreateResources: true,
-		canDeleteResources: true,
+		isAdmin:                true,
+		canAdminister:          true,
+		canManageProjectAccess: true,
+		canCreateApps:          true,
+		canDeleteApps:          true,
+		canUpdateApps:          true,
+		canCreateResources:     true,
+		canDeleteResources:     true,
 	}
 }
 
@@ -207,6 +210,10 @@ func (a *authHandler) capabilities(ctx context.Context, session dashboardSession
 	if err != nil {
 		return dashboardCapabilities{}, err
 	}
+	canManageProjectAccess, err := a.canManageAnyProjectAccess(ctx, impersonated)
+	if err != nil {
+		return dashboardCapabilities{}, err
+	}
 	canCreateApps, err := allowed(resourceApplications, "create")
 	if err != nil {
 		return dashboardCapabilities{}, err
@@ -228,13 +235,14 @@ func (a *authHandler) capabilities(ctx context.Context, session dashboardSession
 		return dashboardCapabilities{}, err
 	}
 	return dashboardCapabilities{
-		isAdmin:            isAdmin,
-		canAdminister:      canAdminister,
-		canCreateApps:      canCreateApps,
-		canDeleteApps:      canDeleteApps,
-		canUpdateApps:      canUpdateApps,
-		canCreateResources: canCreateResources,
-		canDeleteResources: canDeleteResources,
+		isAdmin:                isAdmin,
+		canAdminister:          canAdminister,
+		canManageProjectAccess: canManageProjectAccess,
+		canCreateApps:          canCreateApps,
+		canDeleteApps:          canDeleteApps,
+		canUpdateApps:          canUpdateApps,
+		canCreateResources:     canCreateResources,
+		canDeleteResources:     canDeleteResources,
 	}, nil
 }
 
@@ -321,4 +329,29 @@ func (a *authHandler) authorization(ctx context.Context, session dashboardSessio
 	}
 	entry := value.(cachedAuthorization)
 	return entry.teams, entry.capabilities
+}
+
+func (a *authHandler) canManageAnyProjectAccess(ctx context.Context, impersonated client.Client) (bool, error) {
+	if impersonated == nil {
+		return true, nil
+	}
+	projects := &platformv1alpha1.ProjectList{}
+	if err := a.k8s.List(ctx, projects); err != nil {
+		return false, err
+	}
+	for i := range projects.Items {
+		namespace := projects.Items[i].Spec.Namespace
+		if namespace == "" {
+			continue
+		}
+		attributes := authorizationv1.ResourceAttributes{Namespace: namespace, Group: "rbac.authorization.k8s.io", Resource: "rolebindings", Verb: verbCreate}
+		ok, err := selfSubjectAccessAllowedWithError(ctx, impersonated, attributes)
+		if err != nil {
+			return false, err
+		}
+		if ok {
+			return true, nil
+		}
+	}
+	return false, nil
 }

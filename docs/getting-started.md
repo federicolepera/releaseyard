@@ -9,12 +9,12 @@
 - Helm 3
 - Python 3
 
-The local demo uses three Kind clusters and a local ChartMuseum. It is intended
-for development, not production.
+The local demo uses three Kind clusters. It is intended for development, not
+production. This repository no longer provisions a chart repository.
 
 ## Local Kind demo
 
-### 1. Create the clusters and chart repository
+### 1. Create the clusters
 
 ```bash
 bash hack/setup-kind-workloads.sh
@@ -23,8 +23,7 @@ bash hack/setup-kind-workloads.sh
 This creates or reuses:
 
 - `releaseyard-a` — management cluster;
-- `releaseyard-managed-a` and `releaseyard-managed-b` — workload clusters;
-- ChartMuseum on the management cluster, with the `releaseyard-demo` chart.
+- `releaseyard-managed-a` and `releaseyard-managed-b` — workload clusters.
 
 Workload kubeconfigs are written to `.local/kubeconfigs/` with mode `0600`.
 
@@ -44,11 +43,12 @@ helm upgrade --install idp dist/chart \
   -n idp-system --create-namespace \
   --set manager.image.repository=releaseyard-controller \
   --set manager.image.tag=dev \
-  --set manager.allowedChartHosts=chartmuseum.chartmuseum.svc.cluster.local:8080
+  --set manager.allowedChartHosts=ghcr.io
 ```
 
-`allowedChartHosts` is the host allowlist used by the chart fetcher. In the Kind
-demo the controller reaches ChartMuseum through its in-cluster Service.
+`allowedChartHosts` is the host allowlist used by the chart fetcher. For the
+public demo chart, set it to `ghcr.io`. The sample definition uses
+`oci://ghcr.io/federicolepera/helm-charts`.
 
 ### 4. Deploy the dashboard
 
@@ -72,6 +72,8 @@ The Secret must live in the controller's credentials namespace (`idp-system` by
 default) and contain the kubeconfig under the `kubeconfig` key.
 
 ### 6. Apply the samples
+
+The sample definition uses the public GHCR OCI chart:
 
 ```bash
 kubectl --context kind-releaseyard-a apply -f config/samples/platform_v1alpha1_cluster.yaml

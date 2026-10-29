@@ -38,8 +38,29 @@ propagate user identity to workload clusters.
 | `CloudTarget` | Cluster | Provider, region, and Crossplane `ProviderConfig` reference. |
 | `ResourceDefinition` | Cluster | Managed-resource templates, mappings, and outputs. |
 | `Resource` | Namespaced | A cloud resource request rendered from a definition. |
+| `Project` | Cluster | Tenant boundary; provisions a private Git repository and one manual-sync Argo CD Application for GitOps delivery. |
+| `GitConnection` | Namespaced | Provider credentials; GitHub is the first provider. |
+| `ApplicationRequest` | Namespaced | Durable GitOps request; the bridge writes `apps/<app>/application.yaml` and opens a pull request. |
 
 The API group is `platform.releaseyard.io/v1alpha1`.
+
+## Project repository provisioning
+
+The Project controller reads the referenced `GitConnection` and its token Secret,
+then creates a private repository and seeds a minimal Kustomize structure
+(`README.md`, `kustomization.yaml`, `apps/kustomization.yaml`). It records the
+repository web URL, HTTPS and SSH clone URLs, and default branch in
+`Project.status`.
+
+Repository creation is fail-closed: a durable checkpoint is written before the
+provider POST, existing unrelated repositories are never adopted, and an
+ambiguous creation moves the Project to `RecoveryRequired` instead of retrying.
+A definite provider rejection is reported as `RepositoryRejected` and can be
+retried after correcting credentials or configuration. Project deletion does not
+delete the repository.
+
+This slice does not create namespaces, RBAC, pull requests, or Flux resources
+yet; those are layered on the same Project in later iterations.
 
 ## Application reconciliation
 

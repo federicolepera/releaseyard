@@ -38,26 +38,28 @@ identity provider.
 For a Keycloak exposed only on `keycloak.localhost`, use the development-only
 `dashboard.oidcLoopback` settings. Never enable them in production.
 
-### A user sees no teams
+### A user sees no Projects
 
-Team namespaces are derived from OIDC groups as
-`releaseyard-team-<sanitized-group>`. The user must be able to list Applications
-in that namespace. Check the group membership and the RoleBinding created by
-**Access applications**.
+Project visibility follows `Project.spec.namespace` and the user's RoleBindings
+in that namespace. Check the Project access membership created from
+**Administration → Project access**; a user with no role in the Project cannot
+see its catalog.
 
 ### Administration is unavailable
 
-The panel requires the local administrator or OIDC RBAC that allows `create` on
-`clusterrolebindings`. Add the group to `dashboard.adminGroups` with
-`rbac.helpers.enabled=true`.
+Most panels require the local administrator or the `releaseyard-platform-admin`
+role. On a fresh install, sign in as the local administrator and assign the
+first platform admin from **Administration → Platform admins**. Project access
+additionally allows Project admins with RoleBinding creation rights in at least
+one Project namespace.
 
 ## Applications
 
 ### Chart fetch fails
 
 Check `manager.allowedChartHosts` and that the controller can reach the chart
-repository. The host must match exactly. The default is
-`127.0.0.1:18080`, which is not the in-cluster ChartMuseum Service.
+repository. The host must match exactly. The binary default is
+`127.0.0.1:18080`; set it to your HTTP(S) or OCI repository authority.
 
 ```bash
 kubectl -n idp-system logs deploy/idp-controller-manager -c manager

@@ -1,0 +1,91 @@
+{{- if .Values.rbac.helpers.enabled }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/name: {{ include "idp.name" . }}
+    helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  name: {{ include "idp.resourceName" (dict "suffix" "platform-admin" "context" $) }}
+rules:
+  # Platform admins manage RBAC, namespaces and the platform catalog.
+  - apiGroups:
+      - rbac.authorization.k8s.io
+    resources:
+      - clusterroles
+      - clusterrolebindings
+      - rolebindings
+    verbs:
+      - get
+      - list
+      - create
+      - update
+      - patch
+      - delete
+  # Allow a platform admin to assign the platform-admin role from the dashboard.
+  - apiGroups:
+      - rbac.authorization.k8s.io
+    resources:
+      - clusterroles
+    resourceNames:
+      - {{ include "idp.resourceName" (dict "suffix" "platform-admin" "context" $) }}
+    verbs:
+      - bind
+  # Project access binds groups/users to the predefined Project roles.
+  - apiGroups:
+      - rbac.authorization.k8s.io
+    resources:
+      - clusterroles
+    resourceNames:
+      - {{ include "idp.resourceName" (dict "suffix" "project-viewer" "context" $) }}
+      - {{ include "idp.resourceName" (dict "suffix" "project-developer" "context" $) }}
+      - {{ include "idp.resourceName" (dict "suffix" "project-requester" "context" $) }}
+      - {{ include "idp.resourceName" (dict "suffix" "project-admin" "context" $) }}
+    verbs:
+      - bind
+  - apiGroups:
+      - ""
+    resources:
+      - namespaces
+    verbs:
+      - get
+      - list
+      - create
+  # Platform-wide visibility and management.
+  - apiGroups:
+      - platform.releaseyard.io
+    resources:
+      - applications
+      - applicationrequests
+      - resources
+      - clusters
+      - applicationdefinitions
+      - cloudtargets
+      - resourcedefinitions
+      - projects
+      - gitconnections
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - platform.releaseyard.io
+    resources:
+      - applications
+      - applicationrequests
+      - resources
+    verbs:
+      - create
+      - update
+      - patch
+      - delete
+  - apiGroups:
+      - ""
+    resources:
+      - events
+    verbs:
+      - get
+      - list
+
+{{- end }}

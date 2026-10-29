@@ -82,7 +82,24 @@ considered a team for the session only if the impersonated user may list
 Applications there. The dashboard does not map groups to roles in application
 code.
 
-The local administrator works in `idp-system`, not in a team namespace.
+The local administrator can read the management namespace and every Project
+namespace. OIDC sessions also see Project namespaces where their Kubernetes RBAC
+allows listing Applications.
+
+## Project roles
+
+Project access is assigned from the dashboard and stored as a `RoleBinding` in
+the Project namespace:
+
+| Role | Permissions |
+|---|---|
+| `releaseyard-project-viewer` | read Applications, ApplicationRequests and Resources |
+| `releaseyard-project-developer` | viewer plus Application/Resource writes for direct delivery |
+| `releaseyard-project-requester` | viewer plus ApplicationRequest creation for GitOps |
+| `releaseyard-project-admin` | viewer plus RoleBinding management for viewer/developer/requester |
+
+The project admin cannot grant `project-admin` or `platform-admin`. Catalog
+visibility is controlled separately by `Project.spec.catalog`.
 
 ## Impersonation
 
@@ -101,29 +118,30 @@ restrict it with `resourceNames` or constrained impersonation.
 
 ## Administration pages
 
-The Administration area is available to the local administrator and to OIDC
-users whose RBAC already permits the actions the panel performs. The dashboard
-checks `create` on `clusterrolebindings` as the impersonated user, so the panel
-cannot escalate beyond existing permissions.
+The Administration area is available to the local administrator, platform
+admins, and—for the Project access page only—Project admins whose RBAC allows
+RoleBinding creation. The dashboard checks actions as the impersonated user, so
+the panel cannot escalate beyond existing permissions.
 
-- **Access definitions** creates a ClusterRole with `get` on selected
-  `ApplicationDefinition`s (`resourceNames`) and binds it to a group.
-- **Cluster access** creates a ClusterRole with `get` on selected `Cluster`s and
-  binds it to a group.
-- **Access applications** creates the team namespace and a RoleBinding to the
-  Application editor ClusterRole.
+- **Project access** creates a RoleBinding in `Project.spec.namespace` for a
+  group or user and one of the Project roles.
+- **Platform admins** creates a ClusterRoleBinding to
+  `releaseyard-platform-admin` for a group or user.
 
-Revoking application access removes the RoleBinding. The namespace and its
-Applications remain.
+Revoking Project access removes only that RoleBinding. Revoking platform access
+removes the ClusterRoleBinding. A fresh install has no platform-admin binding:
+the local administrator assigns the first one from the dashboard.
 
 ## Helper roles
 
 With `rbac.helpers.enabled=true`, the chart installs admin/editor/viewer roles
-for Applications, Application Definitions, and Clusters. Bind them to OIDC
-groups with normal Kubernetes RoleBindings or ClusterRoleBindings.
+for Applications, Application Definitions, and Clusters, plus the Project
+viewer/developer/requester/admin roles and `releaseyard-platform-admin`.
 
-`dashboard.adminGroups` binds the shipped dashboard admin role to the listed
-OIDC groups. This requires `rbac.helpers.enabled=true`.
+A fresh install has no OIDC platform admin. The local administrator assigns
+`releaseyard-platform-admin` from **Administration → Platform admins**; those
+bindings are ClusterRoleBindings managed by the dashboard. This requires
+`rbac.helpers.enabled=true`.
 
 ## Application references
 
@@ -155,7 +173,7 @@ Events include:
 - `auth.logout`;
 - `api.write` for state-changing API requests;
 - `admin.identity_provider.*`, `admin.definition_access.*`,
-  `admin.cluster_access.*`, and `admin.application_access.*` for administration
+  `admin.project_access.*`, and `admin.platform_access.*` for administration
   changes.
 
 Each event includes `event`, `outcome`, `actor`, `groups`, `auth_method`,
@@ -168,10 +186,16 @@ logged. Protect and retain the log sink according to your security policy.
 
 ## Known gaps
 
+- Applications and ApplicationRequests can only be created in a namespace with
+  the `platform.releaseyard.io/project` label. The Project controller owns that
+  label; changing namespace labels is a platform-admin action.
+- Access definitions and Cluster access are no longer group-based pages.
+  ApplicationDefinition and Cluster entitlements belong to the Project catalog;
+  admission-level catalog enforcement is the next webhook slice.
 - Dynamic environment placement is authorized by the permission to create the
-  Application in its team namespace. The controller resolves the target Clusters
-  with its own credentials, so per-cluster read access is not checked at create
-  time. Add environment-level RBAC before exposing this to untrusted users.
+  Application in its Project namespace. The controller resolves the target
+  Clusters with its own credentials, so per-cluster read access is not checked at
+  create time. Add environment-level RBAC before exposing this to untrusted users.
 - The dashboard can patch the environment label on Clusters, but RBAC cannot
   restrict a patch to one metadata key. Use an admission policy if the dashboard
   is exposed beyond a trusted environment.

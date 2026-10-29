@@ -60,10 +60,10 @@ spec:
                     pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
                     type: string
                   repository:
-                    description: repository is the base URL of a ChartMuseum-compatible
-                      HTTP(S) Helm repository.
+                    description: repository is the base URL of an HTTP(S) or OCI Helm
+                      repository.
                     minLength: 8
-                    pattern: ^https?://.+$
+                    pattern: ^(https?|oci)://.+$
                     type: string
                   version:
                     description: version is a pinned semantic version. Floating tags
@@ -247,6 +247,277 @@ spec:
                   status.
                 format: int64
                 type: integer
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.22.0
+  name: applicationrequests.platform.releaseyard.io
+spec:
+  group: platform.releaseyard.io
+  names:
+    kind: ApplicationRequest
+    listKind: ApplicationRequestList
+    plural: applicationrequests
+    singular: applicationrequest
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .status.branch
+      name: Branch
+      type: string
+    - jsonPath: .status.changeRequestURL
+      name: PR
+      type: string
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: ApplicationRequest is a durable GitOps request waiting for the
+          bridge.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: spec defines the requested Application.
+            properties:
+              application:
+                description: application is the Application spec to write to the Project
+                  repository.
+                properties:
+                  applicationDefinitionRef:
+                    description: |-
+                      applicationDefinitionRef identifies a cluster-scoped ApplicationDefinition.
+                      Its name cannot be changed after creation.
+                    properties:
+                      name:
+                        description: name identifies the referenced resource.
+                        maxLength: 253
+                        minLength: 1
+                        pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
+                        type: string
+                    required:
+                    - name
+                    type: object
+                    x-kubernetes-validations:
+                    - message: applicationDefinitionRef is immutable
+                      rule: self.name == oldSelf.name
+                  clusterRef:
+                    description: |-
+                      clusterRef identifies the target cluster-scoped Cluster resource.
+                      Its name cannot be changed after creation.
+                    properties:
+                      name:
+                        description: name identifies the referenced resource.
+                        maxLength: 253
+                        minLength: 1
+                        pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
+                        type: string
+                    required:
+                    - name
+                    type: object
+                  clusters:
+                    description: |-
+                      clusters explicitly selects one or more target Clusters. The list can be
+                      updated after creation, but a target name must keep the same UID. It is not
+                      expanded automatically when new Clusters appear.
+                    items:
+                      description: ApplicationClusterTarget pins one explicitly selected
+                        target Cluster.
+                      properties:
+                        name:
+                          description: name is the DNS subdomain name of the target
+                            Cluster.
+                          maxLength: 253
+                          minLength: 1
+                          pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
+                          type: string
+                        uid:
+                          description: uid identifies the exact target Cluster object.
+                          maxLength: 128
+                          minLength: 1
+                          type: string
+                      required:
+                      - name
+                      - uid
+                      type: object
+                      x-kubernetes-validations:
+                      - message: a Cluster UID cannot change for an existing target
+                          name
+                        rule: self.uid == oldSelf.uid
+                    maxItems: 32
+                    minItems: 1
+                    type: array
+                    x-kubernetes-list-map-keys:
+                    - name
+                    x-kubernetes-list-type: map
+                  description:
+                    description: description is an optional human-readable description
+                      of the Application.
+                    maxLength: 280
+                    type: string
+                  environment:
+                    description: |-
+                      environment selects Clusters by their environment label. When targets is
+                      omitted the matching set is resolved dynamically on every reconcile. Set
+                      targets to pin a fixed snapshot instead.
+                    properties:
+                      name:
+                        description: name is the environment label value used to select
+                          target Clusters.
+                        maxLength: 63
+                        minLength: 1
+                        pattern: ^[A-Za-z0-9]([-A-Za-z0-9_.]*[A-Za-z0-9])?$
+                        type: string
+                      targets:
+                        description: |-
+                          targets optionally pins the Cluster identities for this Application. When
+                          omitted or empty, the controller resolves the matching Clusters dynamically.
+                        items:
+                          description: ApplicationEnvironmentTarget pins one Cluster
+                            identity in an environment.
+                          properties:
+                            name:
+                              description: name is the DNS subdomain name of the target
+                                Cluster.
+                              maxLength: 253
+                              minLength: 1
+                              pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
+                              type: string
+                            uid:
+                              description: uid identifies the exact target Cluster
+                                object.
+                              type: string
+                          required:
+                          - name
+                          - uid
+                          type: object
+                          x-kubernetes-validations:
+                          - message: uid must contain between 1 and 128 characters
+                            rule: size(self.uid) >= 1 && size(self.uid) <= 128
+                        maxItems: 32
+                        type: array
+                        x-kubernetes-list-map-keys:
+                        - name
+                        x-kubernetes-list-type: map
+                    required:
+                    - name
+                    type: object
+                  releaseNamespace:
+                    description: |-
+                      releaseNamespace selects an existing namespace on the target workload cluster.
+                      When omitted, the ApplicationDefinition's release.namespace is used.
+                      This value cannot be changed after the Application is created.
+                    maxLength: 63
+                    minLength: 1
+                    pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                    type: string
+                  values:
+                    description: |-
+                      values contains user-supplied overrides for paths exposed by the referenced definition.
+                      Chart defaults are not read here.
+                    type: object
+                    x-kubernetes-preserve-unknown-fields: true
+                required:
+                - applicationDefinitionRef
+                type: object
+                x-kubernetes-validations:
+                - message: releaseNamespace is immutable
+                  rule: (!has(self.releaseNamespace) && !has(oldSelf.releaseNamespace))
+                    || (has(self.releaseNamespace) && has(oldSelf.releaseNamespace)
+                    && self.releaseNamespace == oldSelf.releaseNamespace)
+                - message: exactly one of clusterRef, clusters, or environment must
+                    be set
+                  rule: '(has(self.clusterRef) ? 1 : 0) + (has(self.environment) ?
+                    1 : 0) + (has(self.clusters) ? 1 : 0) == 1'
+                - message: the Application target selector is immutable
+                  rule: (!has(self.clusterRef) && !has(oldSelf.clusterRef)) || (has(self.clusterRef)
+                    && has(oldSelf.clusterRef) && self.clusterRef == oldSelf.clusterRef)
+                - message: the Application target selector is immutable
+                  rule: (!has(self.environment) && !has(oldSelf.environment)) || (has(self.environment)
+                    && has(oldSelf.environment) && self.environment == oldSelf.environment)
+              applicationName:
+                description: applicationName is the requested Application name.
+                maxLength: 53
+                minLength: 1
+                type: string
+              applicationNamespace:
+                description: applicationNamespace is the target Application namespace.
+                minLength: 1
+                type: string
+              idempotencyKey:
+                description: idempotencyKey identifies repeated submissions of the
+                  same request.
+                minLength: 1
+                type: string
+              projectRef:
+                description: projectRef identifies the Project that owns the target
+                  repository.
+                properties:
+                  name:
+                    description: name is the Project name.
+                    minLength: 1
+                    type: string
+                required:
+                - name
+                type: object
+              requestedBy:
+                description: requestedBy is the authenticated dashboard user.
+                minLength: 1
+                type: string
+            required:
+            - application
+            - applicationName
+            - applicationNamespace
+            - idempotencyKey
+            - projectRef
+            - requestedBy
+            type: object
+          status:
+            description: status reports the request lifecycle.
+            properties:
+              branch:
+                description: branch is the Git branch created for this request.
+                type: string
+              changeRequestURL:
+                description: changeRequestURL is the pull request URL opened by the
+                  bridge.
+                type: string
+              commitSHA:
+                description: commitSHA is the commit written to the request branch.
+                type: string
+              message:
+                description: message is a human-readable status message.
+                type: string
+              phase:
+                description: phase is the current request phase.
+                type: string
             type: object
         required:
         - spec
@@ -474,7 +745,7 @@ spec:
                         description: name is the chart name.
                         type: string
                       repository:
-                        description: repository is the configured ChartMuseum-compatible
+                        description: repository is the configured HTTP(S) or OCI Helm
                           repository URL.
                         type: string
                       version:
@@ -556,7 +827,7 @@ spec:
                       description: name is the chart name.
                       type: string
                     repository:
-                      description: repository is the configured ChartMuseum-compatible
+                      description: repository is the configured HTTP(S) or OCI Helm
                         repository URL.
                       type: string
                     version:
@@ -685,8 +956,8 @@ spec:
                               description: name is the chart name.
                               type: string
                             repository:
-                              description: repository is the configured ChartMuseum-compatible
-                                repository URL.
+                              description: repository is the configured HTTP(S) or
+                                OCI Helm repository URL.
                               type: string
                             version:
                               description: version is the pinned chart version.
@@ -1441,6 +1712,404 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.22.0
+  name: gitconnections.platform.releaseyard.io
+spec:
+  group: platform.releaseyard.io
+  names:
+    kind: GitConnection
+    listKind: GitConnectionList
+    plural: gitconnections
+    shortNames:
+    - gitconn
+    singular: gitconnection
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: GitConnection is the Schema for the gitconnections API.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: spec defines the desired state of GitConnection
+            properties:
+              github:
+                description: github configures the GitHub provider. It is required
+                  when provider is github.
+                properties:
+                  organization:
+                    description: organization is the GitHub user or organization that
+                      owns created repositories.
+                    maxLength: 39
+                    minLength: 1
+                    pattern: ^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$
+                    type: string
+                required:
+                - organization
+                type: object
+                x-kubernetes-validations:
+                - message: github configuration is immutable
+                  rule: self == oldSelf
+              provider:
+                description: provider selects the Git provider implementation.
+                enum:
+                - github
+                type: string
+                x-kubernetes-validations:
+                - message: provider is immutable
+                  rule: self == oldSelf
+              tokenSecretRef:
+                description: tokenSecretRef names the Secret containing the provider
+                  token in key `token`.
+                properties:
+                  name:
+                    description: name is the name of the Secret containing key `token`.
+                    maxLength: 253
+                    minLength: 1
+                    pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
+                    type: string
+                required:
+                - name
+                type: object
+                x-kubernetes-validations:
+                - message: token secret reference is immutable
+                  rule: self == oldSelf
+            required:
+            - provider
+            - tokenSecretRef
+            type: object
+            x-kubernetes-validations:
+            - message: github configuration is required when provider is github
+              rule: self.provider != 'github' || has(self.github)
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.22.0
+  name: projects.platform.releaseyard.io
+spec:
+  group: platform.releaseyard.io
+  names:
+    kind: Project
+    listKind: ProjectList
+    plural: projects
+    singular: project
+  scope: Cluster
+  versions:
+  - name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: Project is the Schema for the projects API
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: spec defines the desired state of Project
+            properties:
+              catalog:
+                description: |-
+                  catalog lists the platform catalog entries available to members of this
+                  Project. An empty list means no catalog entries are available.
+                properties:
+                  applicationDefinitions:
+                    description: applicationDefinitions are the ApplicationDefinition
+                      names available to the Project.
+                    items:
+                      type: string
+                    maxItems: 256
+                    type: array
+                    x-kubernetes-list-type: set
+                  cloudTargets:
+                    description: cloudTargets are the CloudTarget names available
+                      to the Project.
+                    items:
+                      type: string
+                    maxItems: 256
+                    type: array
+                    x-kubernetes-list-type: set
+                  clusters:
+                    description: clusters are the Cluster names available to the Project.
+                    items:
+                      type: string
+                    maxItems: 256
+                    type: array
+                    x-kubernetes-list-type: set
+                  resourceDefinitions:
+                    description: resourceDefinitions are the ResourceDefinition names
+                      available to the Project.
+                    items:
+                      type: string
+                    maxItems: 256
+                    type: array
+                    x-kubernetes-list-type: set
+                type: object
+              delivery:
+                default:
+                  mode: direct
+                description: delivery controls how Applications for this Project may
+                  be created.
+                properties:
+                  mode:
+                    default: direct
+                    description: mode is direct, gitops, or both.
+                    enum:
+                    - direct
+                    - gitops
+                    - both
+                    type: string
+                type: object
+              description:
+                description: description is attached to the provisioned repository.
+                maxLength: 280
+                type: string
+              namespace:
+                description: |-
+                  namespace is the Kubernetes namespace that owns this Project's Applications,
+                  ApplicationRequests, Resources and RBAC. It must be unique across Projects.
+                maxLength: 63
+                minLength: 1
+                pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                type: string
+                x-kubernetes-validations:
+                - message: namespace is immutable
+                  rule: self == oldSelf
+              repository:
+                description: repository defines the repository to create and its connection.
+                properties:
+                  connectionRef:
+                    description: connectionRef identifies the GitConnection used to
+                      provision this project.
+                    properties:
+                      name:
+                        description: name is the name of the referenced GitConnection.
+                        maxLength: 253
+                        minLength: 1
+                        type: string
+                      namespace:
+                        description: |-
+                          namespace is the GitConnection namespace. It defaults to the manager
+                          credentials namespace when empty.
+                        maxLength: 63
+                        minLength: 1
+                        pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                        type: string
+                    required:
+                    - name
+                    type: object
+                    x-kubernetes-validations:
+                    - message: connection reference is immutable
+                      rule: self == oldSelf
+                  name:
+                    description: name is the repository name. It defaults to the Project
+                      name when empty.
+                    maxLength: 100
+                    minLength: 1
+                    pattern: ^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$
+                    type: string
+                    x-kubernetes-validations:
+                    - message: repository name is immutable
+                      rule: self == oldSelf
+                required:
+                - connectionRef
+                type: object
+            required:
+            - namespace
+            - repository
+            type: object
+          status:
+            description: status defines the observed state of Project
+            properties:
+              conditions:
+                description: |-
+                  conditions represent the current state of the Project resource. The
+                  NamespaceReady condition indicates whether the Project namespace exists and
+                  is owned by the Project. The RepositoryReady condition indicates whether the
+                  GitHub repository has been provisioned and verified.
+                  Each condition has a unique type and reflects the status of a specific aspect of the resource.
+
+                  Standard condition types include:
+                  - "Available": the resource is fully functional
+                  - "Progressing": the resource is being created or updated
+                  - "Degraded": the resource failed to reach or maintain its desired state
+
+                  The status of each condition is one of True, False, or Unknown.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              provisioning:
+                description: provisioning records the durable checkpoint used to make
+                  repository creation fail closed.
+                properties:
+                  attempted:
+                    description: attempted is true once a repository-creation POST
+                      may have been sent.
+                    type: boolean
+                  connectionUID:
+                    description: connectionUID is the UID of the GitConnection used
+                      for the attempt.
+                    type: string
+                  owner:
+                    description: owner is the target provider owner.
+                    type: string
+                  repo:
+                    description: repo is the target repository name.
+                    type: string
+                  repositoryID:
+                    description: repositoryID is the stable provider repository ID,
+                      once known.
+                    format: int64
+                    type: integer
+                  retryAfter:
+                    description: |-
+                      retryAfter prevents a status change from triggering an immediate retry
+                      after a definite provider rejection.
+                    format: date-time
+                    type: string
+                type: object
+              repository:
+                description: repository identifies the Git repository created for
+                  this Project.
+                properties:
+                  cloneURL:
+                    description: cloneURL is the HTTPS clone URL.
+                    type: string
+                  defaultBranch:
+                    description: defaultBranch is the repository default branch.
+                    type: string
+                  fullName:
+                    description: fullName is the owner/name repository identifier.
+                    type: string
+                  id:
+                    description: id is the stable provider repository ID.
+                    format: int64
+                    type: integer
+                  name:
+                    description: name is the repository name.
+                    type: string
+                  owner:
+                    description: owner is the provider account that owns the repository.
+                    type: string
+                  sshURL:
+                    description: sshURL is the SSH clone URL.
+                    type: string
+                  url:
+                    description: url is the canonical web URL.
+                    type: string
+                required:
+                - cloneURL
+                - defaultBranch
+                - id
+                - name
+                - owner
+                - sshURL
+                - url
+                type: object
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.22.0
   name: resourcedefinitions.platform.releaseyard.io
 spec:
   group: platform.releaseyard.io
@@ -2076,6 +2745,77 @@ metadata:
   labels:
     app.kubernetes.io/managed-by: kustomize
     app.kubernetes.io/name: idp
+  name: idp-applicationrequest-admin-role
+rules:
+- apiGroups:
+  - platform.releaseyard.io
+  resources:
+  - applicationrequests
+  verbs:
+  - '*'
+- apiGroups:
+  - platform.releaseyard.io
+  resources:
+  - applicationrequests/status
+  verbs:
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: idp
+  name: idp-applicationrequest-editor-role
+rules:
+- apiGroups:
+  - platform.releaseyard.io
+  resources:
+  - applicationrequests
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - platform.releaseyard.io
+  resources:
+  - applicationrequests/status
+  verbs:
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: idp
+  name: idp-applicationrequest-viewer-role
+rules:
+- apiGroups:
+  - platform.releaseyard.io
+  resources:
+  - applicationrequests
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - platform.releaseyard.io
+  resources:
+  - applicationrequests/status
+  verbs:
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/name: idp
   name: idp-cloudtarget-admin-role
 rules:
 - apiGroups:
@@ -2225,6 +2965,28 @@ rules:
   - create
   - patch
 - apiGroups:
+  - ""
+  resources:
+  - namespaces
+  verbs:
+  - create
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - argoproj.io
+  resources:
+  - applications
+  verbs:
+  - create
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
   - ec2.aws.m.upbound.io
   resources:
   - instances
@@ -2240,8 +3002,10 @@ rules:
   - platform.releaseyard.io
   resources:
   - applicationdefinitions
+  - applicationrequests
   - cloudtargets
   - clusters
+  - projects
   - resourcedefinitions
   verbs:
   - get
@@ -2251,8 +3015,10 @@ rules:
   - platform.releaseyard.io
   resources:
   - applicationdefinitions/status
+  - applicationrequests/status
   - applications/status
   - clusters/status
+  - projects/status
   - resources/status
   verbs:
   - get
@@ -2278,6 +3044,12 @@ rules:
   - resources/finalizers
   verbs:
   - update
+- apiGroups:
+  - platform.releaseyard.io
+  resources:
+  - gitconnections
+  verbs:
+  - get
 - apiGroups:
   - s3.aws.m.upbound.io
   resources:
@@ -2621,7 +3393,7 @@ metadata:
     app.kubernetes.io/component: admission
     app.kubernetes.io/managed-by: kustomize
     app.kubernetes.io/name: idp
-  name: idp-application-access-policy
+  name: idp-application-project-policy
 spec:
   failurePolicy: Fail
   matchConstraints:
@@ -2634,53 +3406,14 @@ spec:
       - CREATE
       resources:
       - applications
+      - applicationrequests
       scope: Namespaced
   validations:
-  - expression: authorizer.group('platform.releaseyard.io').resource('applicationdefinitions').name(object.spec.applicationDefinitionRef.name).check('get').allowed()
-    message: The referenced ApplicationDefinition must be readable by the requesting
-      user.
-    reason: Forbidden
-  - expression: '!has(object.spec.clusterRef) || authorizer.group(''platform.releaseyard.io'').resource(''clusters'').name(object.spec.clusterRef.name).check(''get'').allowed()'
-    message: The referenced Cluster must be readable by the requesting user.
-    reason: Forbidden
-  - expression: '!has(object.spec.clusters) || object.spec.clusters.all(target, authorizer.group(''platform.releaseyard.io'').resource(''clusters'').name(target.name).check(''get'').allowed())'
-    message: Every selected Cluster must be readable by the requesting user.
-    reason: Forbidden
-  - expression: '!has(object.spec.environment) || !has(object.spec.environment.targets)
-      || object.spec.environment.targets.all(target, authorizer.group(''platform.releaseyard.io'').resource(''clusters'').name(target.name).check(''get'').allowed())'
-    message: Every environment target Cluster must be readable by the requesting user.
-    reason: Forbidden
----
-apiVersion: admissionregistration.k8s.io/v1
-kind: ValidatingAdmissionPolicy
-metadata:
-  labels:
-    app.kubernetes.io/component: admission
-    app.kubernetes.io/managed-by: kustomize
-    app.kubernetes.io/name: idp
-  name: idp-application-placement-policy
-spec:
-  failurePolicy: Fail
-  matchConditions:
-  - expression: has(object.spec.clusters) && (!has(oldObject.spec.clusters) || object.spec.clusters
-      != oldObject.spec.clusters)
-    name: clusters-changed
-  matchConstraints:
-    resourceRules:
-    - apiGroups:
-      - platform.releaseyard.io
-      apiVersions:
-      - v1alpha1
-      operations:
-      - UPDATE
-      resources:
-      - applications
-      scope: Namespaced
-  validations:
-  - expression: object.spec.clusters.all(target, (has(oldObject.spec.clusters) &&
-      oldObject.spec.clusters.exists(old, old.name == target.name && old.uid == target.uid))
-      || authorizer.group('platform.releaseyard.io').resource('clusters').name(target.name).check('get').allowed())
-    message: Every added Cluster must be readable by the requesting user.
+  - expression: namespaceObject != null && has(namespaceObject.metadata.labels) &&
+      'platform.releaseyard.io/project' in namespaceObject.metadata.labels && namespaceObject.metadata.labels['platform.releaseyard.io/project']
+      != ''
+    message: Applications and ApplicationRequests can only be created in a Project
+      namespace.
     reason: Forbidden
 ---
 apiVersion: admissionregistration.k8s.io/v1
@@ -2690,21 +3423,8 @@ metadata:
     app.kubernetes.io/component: admission
     app.kubernetes.io/managed-by: kustomize
     app.kubernetes.io/name: idp
-  name: idp-application-access-binding
+  name: idp-application-project-binding
 spec:
-  policyName: idp-application-access-policy
-  validationActions:
-  - Deny
----
-apiVersion: admissionregistration.k8s.io/v1
-kind: ValidatingAdmissionPolicyBinding
-metadata:
-  labels:
-    app.kubernetes.io/component: admission
-    app.kubernetes.io/managed-by: kustomize
-    app.kubernetes.io/name: idp
-  name: idp-application-placement-binding
-spec:
-  policyName: idp-application-placement-policy
+  policyName: idp-application-project-policy
   validationActions:
   - Deny

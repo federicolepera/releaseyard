@@ -2,28 +2,16 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namePrefix: idp-
 resources:
-  - application-access-policy.yaml
-  - application-access-binding.yaml
-  - application-placement-policy.yaml
-  - application-placement-binding.yaml
+  - application-project-policy.yaml
+  - application-project-binding.yaml
 replacements:
   - source:
       kind: ValidatingAdmissionPolicy
-      name: application-access-policy
+      name: application-project-policy
       fieldPath: metadata.name
     targets:
       - select:
           kind: ValidatingAdmissionPolicyBinding
-          name: application-access-binding
-        fieldPaths:
-          - spec.policyName
-  - source:
-      kind: ValidatingAdmissionPolicy
-      name: application-placement-policy
-      fieldPath: metadata.name
-    targets:
-      - select:
-          kind: ValidatingAdmissionPolicyBinding
-          name: application-placement-binding
+          name: application-project-binding
         fieldPaths:
           - spec.policyName

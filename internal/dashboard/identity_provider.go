@@ -40,11 +40,14 @@ type identityProviderRequest struct {
 }
 
 type identityProviderStatus struct {
-	Enabled         bool   `json:"enabled"`
-	IssuerURL       string `json:"issuerURL,omitempty"`
-	ClientID        string `json:"clientID,omitempty"`
-	RedirectURL     string `json:"redirectURL"`
-	HasClientSecret bool   `json:"hasClientSecret"`
+	Enabled            bool   `json:"enabled"`
+	IssuerURL          string `json:"issuerURL,omitempty"`
+	ClientID           string `json:"clientID,omitempty"`
+	RedirectURL        string `json:"redirectURL"`
+	HasClientSecret    bool   `json:"hasClientSecret"`
+	LastVerified       string `json:"lastVerified,omitempty"`
+	DiscoveryReachable bool   `json:"discoveryReachable"`
+	LoginTestPassed    bool   `json:"loginTestPassed"`
 }
 
 func resolveIdentityProviderSecretName(name string) string {
@@ -153,6 +156,7 @@ func (a *authHandler) loadAndBuildIdentityProvider(ctx context.Context) (built, 
 		return false, true
 	}
 	a.oidc.Store(rt)
+	a.lastVerified.Store(time.Now().Unix())
 	return true, true
 }
 
@@ -210,19 +214,53 @@ func (a *authHandler) handleIdentityProviderAdmin(w http.ResponseWriter, r *http
 	}
 }
 
+func (a *authHandler) statusFromConfig(config identityProviderConfig, ok bool) identityProviderStatus {
+	status := identityProviderStatus{
+		Enabled:            ok,
+		RedirectURL:        a.callbackURL(),
+		DiscoveryReachable: ok && a.oidc.Load() != nil,
+		LoginTestPassed:    ok && a.oidc.Load() != nil,
+	}
+	if ok {
+		status.IssuerURL = config.IssuerURL
+		status.ClientID = config.ClientID
+		status.HasClientSecret = config.ClientSecret != ""
+	}
+	if verified := a.lastVerified.Load(); verified > 0 {
+		status.LastVerified = time.Unix(verified, 0).UTC().Format(time.RFC3339)
+	}
+	return status
+}
+
+func (a *authHandler) testIdentityProvider(w http.ResponseWriter, r *http.Request) {
+	config, ok, err := loadIdentityProvider(r.Context(), a.k8s, a.namespace, a.identityProviderSecret)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "Could not load identity provider configuration")
+		return
+	}
+	if !ok {
+		writeError(w, http.StatusUnprocessableEntity, "Identity provider is not configured")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+	runtime, err := buildOIDCRuntime(ctx, config, a.publicURL)
+	if err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+	a.oidc.Store(runtime)
+	a.lastVerified.Store(time.Now().Unix())
+	writeJSON(w, http.StatusOK, a.statusFromConfig(config, true))
+}
+
 func (a *authHandler) getIdentityProvider(w http.ResponseWriter, r *http.Request) {
 	config, ok, err := loadIdentityProvider(r.Context(), a.k8s, a.namespace, a.identityProviderSecret)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Could not load identity provider configuration")
 		return
 	}
-	status := identityProviderStatus{Enabled: ok, RedirectURL: a.callbackURL()}
-	if ok {
-		status.IssuerURL = config.IssuerURL
-		status.ClientID = config.ClientID
-		status.HasClientSecret = config.ClientSecret != ""
-	}
-	writeJSON(w, http.StatusOK, status)
+	writeJSON(w, http.StatusOK, a.statusFromConfig(config, ok))
 }
 
 func (a *authHandler) putIdentityProvider(w http.ResponseWriter, r *http.Request) {
@@ -287,13 +325,8 @@ func (a *authHandler) putIdentityProvider(w http.ResponseWriter, r *http.Request
 		return
 	}
 	a.oidc.Store(runtime)
-	writeJSON(w, http.StatusOK, identityProviderStatus{
-		Enabled:         true,
-		IssuerURL:       config.IssuerURL,
-		ClientID:        config.ClientID,
-		RedirectURL:     a.callbackURL(),
-		HasClientSecret: true,
-	})
+	a.lastVerified.Store(time.Now().Unix())
+	writeJSON(w, http.StatusOK, a.statusFromConfig(config, true))
 }
 
 func (a *authHandler) deleteIdentityProvider(w http.ResponseWriter, r *http.Request) {

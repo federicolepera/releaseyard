@@ -1,0 +1,34 @@
+{{- if .Values.admission.enabled }}
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  labels:
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+    app.kubernetes.io/name: {{ include "idp.name" . }}
+    app.kubernetes.io/component: admission
+    helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  name: {{ include "idp.resourceName" (dict "suffix" "application-project-policy" "context" $) }}
+spec:
+  failurePolicy: {{ .Values.admission.failurePolicy | default "Fail" }}
+  matchConstraints:
+    resourceRules:
+      - apiGroups:
+          - platform.releaseyard.io
+        apiVersions:
+          - v1alpha1
+        operations:
+          - CREATE
+        resources:
+          - applications
+          - applicationrequests
+        scope: Namespaced
+  validations:
+    - expression: >-
+        namespaceObject != null &&
+        has(namespaceObject.metadata.labels) &&
+        'platform.releaseyard.io/project' in namespaceObject.metadata.labels &&
+        namespaceObject.metadata.labels['platform.releaseyard.io/project'] != ''
+      message: Applications and ApplicationRequests can only be created in a Project namespace.
+      reason: Forbidden
+{{- end }}

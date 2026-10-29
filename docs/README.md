@@ -8,6 +8,7 @@ Start with the [README](../README.md) for the product overview and quickstart.
 | [Architecture](architecture.md) | Control plane, CRDs, reconciliation, safety model |
 | [Dashboard](dashboard.md) | Pages, detail tabs, team scope, sessions |
 | [Applications](applications.md) | Catalog contract, placement, values, release lifecycle |
+| [Projects](projects.md) | Project, GitConnection e repository Git con struttura iniziale |
 | [Cloud resources](cloud-resources.md) | Crossplane integration, targets, definitions, AWS examples |
 | [Access control](access-control.md) | Local admin, OIDC, impersonation, team namespaces, RBAC |
 | [Hardening](hardening.md) | Security and reliability backlog, priorities, acceptance criteria |

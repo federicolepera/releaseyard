@@ -75,9 +75,6 @@ var _ = Describe("ApplicationDefinition API", func() {
 		Entry("invalid chart repository", func(spec map[string]any) {
 			spec["chart"].(map[string]any)[apiTestRepositoryKey] = "not-a-repository"
 		}),
-		Entry("OCI chart repository", func(spec map[string]any) {
-			spec["chart"].(map[string]any)[apiTestRepositoryKey] = "oci://charts.example.test/platform"
-		}),
 		Entry("latest chart version", func(spec map[string]any) {
 			spec["chart"].(map[string]any)[apiTestVersionKey] = "latest"
 		}),
@@ -106,6 +103,12 @@ var _ = Describe("ApplicationDefinition API", func() {
 			spec["defaults"] = "not-an-object"
 		}),
 	)
+
+	It("accepts an OCI chart repository", func() {
+		definition := validApplicationDefinition(definitionName)
+		definition.Object["spec"].(map[string]any)["chart"].(map[string]any)[apiTestRepositoryKey] = "oci://ghcr.io/federicolepera/helm-charts"
+		Expect(k8sClient.Create(ctx, definition)).To(Succeed())
+	})
 
 	It("rejects changing release.namespace after creation", func() {
 		definition := validApplicationDefinition(definitionName)

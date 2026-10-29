@@ -28,9 +28,8 @@
               </details>
               <details class="nav-details" open>
                 <summary class="nav-summary"><svg viewBox="0 0 20 20" aria-hidden="true"><rect x="4" y="9" width="12" height="8" rx="1.6"/><path d="M7 9V7a3 3 0 0 1 6 0v2"/></svg><span>Authorization</span><svg class="nav-chevron" viewBox="0 0 20 20" aria-hidden="true"><path d="m6 8 4 4 4-4"/></svg></summary>
-                <a class="side-link side-sub" href="./access-definitions.html"><span>Access definitions</span></a>
-                <a class="side-link side-sub" href="./cluster-access.html"><span>Cluster access</span></a>
-                <a class="side-link side-sub" href="./access-applications.html"><span>Access applications</span></a>
+                <a class="side-link side-sub" href="./access-applications.html"><span>Project access</span></a>
+                <a class="side-link side-sub" href="./platform-admins.html"><span>Platform admins</span></a>
               </details>
             </div>
           </details>
@@ -49,58 +48,92 @@
         <h1 id="auth-signed-out-title">You’re signed out</h1>
         <p>Your dashboard session has ended. Sign in again to continue.</p>
       </section>
-      <main class="page">
-        <section class="admin-page-head">
+      <main class="page identity-provider-page">
+        <section class="admin-page-head idp-page-head">
           <span class="admin-head-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3l7 3v5c0 4.6-3 8-7 10-4-2-7-5.4-7-10V6z"/><path d="M9.2 12.2l2 2 3.6-3.8"/></svg></span>
           <div class="admin-head-text">
             <h1 id="page-title">Identity provider</h1>
             <p class="lede">Configure the OIDC provider used by the platform for authentication.</p>
           </div>
-          <span id="idp-state" class="badge">Local only</span>
+          <div class="idp-head-status">
+            <span class="idp-status-dot" aria-hidden="true"></span>
+            <div><strong id="idp-state">Local only</strong><span id="idp-last-verified-summary">No OIDC provider configured</span></div>
+          </div>
         </section>
 
-        <section class="admin-card" aria-labelledby="admin-identity-title">
-          <div class="admin-card-head">
-            <span class="admin-card-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 3v2.5M12 18.5V21M4.6 4.6l1.8 1.8M17.6 17.6l1.8 1.8M3 12h2.5M18.5 12H21M4.6 19.4l1.8-1.8M17.6 6.4l1.8-1.8"/></svg></span>
-            <div><h2 id="admin-identity-title">OIDC configuration</h2><p class="helper">Configure your OpenID Connect provider. The built-in local administrator is always available.</p></div>
-          </div>
-          <form id="identity-provider-form" class="idp-form" novalidate>
-            <div class="form-grid">
-              <label class="field" for="idp-issuer-url">Issuer URL <small>The provider's OIDC issuer, for example https://sso.example.com/realms/main</small>
-                <input id="idp-issuer-url" name="issuerURL" type="url" autocomplete="off" spellcheck="false" placeholder="https://...">
-              </label>
-              <label class="field" for="idp-client-id">Client ID <small>Client identifier registered in your identity provider.</small>
-                <input id="idp-client-id" name="clientID" autocomplete="off" spellcheck="false">
-              </label>
-              <label class="field" for="idp-client-secret">Client secret <small>Leave blank to keep the currently stored secret.</small>
-                <input id="idp-client-secret" name="clientSecret" type="password" autocomplete="new-password">
-              </label>
-              <label class="field" for="idp-redirect-url">Redirect URL <small>Register this exact URL in your identity provider.</small>
-                <input id="idp-redirect-url" name="redirectURL" readonly>
-              </label>
+        <div class="idp-layout">
+          <section class="pa-card idp-config-card" aria-labelledby="admin-identity-title">
+            <header class="pa-card-head">
+              <span class="pa-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 3v2.5M12 18.5V21M4.6 4.6l1.8 1.8M17.6 17.6l1.8 1.8M3 12h2.5M18.5 12H21M4.6 19.4l1.8-1.8M17.6 6.4l1.8-1.8"/></svg></span>
+              <div><h2 id="admin-identity-title">OIDC configuration</h2><p class="helper">Configure your OpenID Connect provider. The built-in local administrator is always available.</p></div>
+            </header>
+
+            <div id="idp-notice" class="idp-banner" role="status" aria-live="polite" hidden>
+              <span class="idp-banner-icon" aria-hidden="true">✓</span>
+              <div><strong id="idp-notice-title">OIDC metadata loaded successfully</strong><span id="idp-notice-text">The provider configuration was fetched and validated.</span></div>
+              <button id="idp-notice-close" class="idp-banner-close" type="button" aria-label="Dismiss">×</button>
             </div>
-            <p id="idp-notice" class="notice" role="status" aria-live="polite" hidden></p>
-            <div class="form-actions">
-              <span></span>
-              <div class="values-edit-buttons">
-                <button id="idp-remove" class="button button-secondary" type="button" hidden>Remove OIDC</button>
-                <button id="idp-save" class="button button-primary" type="submit">Save configuration</button>
+
+            <form id="identity-provider-form" class="idp-form" novalidate>
+              <div class="form-grid">
+                <label class="field" for="idp-issuer-url">Issuer URL <small>The provider's OIDC issuer, for example https://sso.example.com/realms/main</small>
+                  <input id="idp-issuer-url" name="issuerURL" type="url" autocomplete="off" spellcheck="false" placeholder="https://...">
+                </label>
+                <label class="field" for="idp-client-id">Client ID <small>Client identifier registered in your identity provider.</small>
+                  <input id="idp-client-id" name="clientID" autocomplete="off" spellcheck="false">
+                </label>
+                <div class="field idp-secret-field">
+                  <label for="idp-client-secret">Client secret <small>Stored securely and not shown. Replace only if needed.</small></label>
+                  <div class="idp-secret-row">
+                    <input id="idp-client-secret" name="clientSecret" type="password" autocomplete="new-password" placeholder="••••••••••••••••••••">
+                    <button id="idp-reveal-secret" class="idp-icon-button" type="button" aria-label="Show client secret" title="Show client secret"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M2.5 10s2.8-5 7.5-5 7.5 5 7.5 5-2.8 5-7.5 5-7.5-5-7.5-5Z"/><circle cx="10" cy="10" r="2.2"/></svg></button>
+                  </div>
+                  <div class="idp-secret-meta">
+                    <span id="idp-secret-configured" class="idp-inline-state"><span class="idp-dot-check">✓</span> Configured</span>
+                    <button id="idp-replace-secret" class="idp-text-button" type="button">↻ Replace secret</button>
+                  </div>
+                  <small class="idp-secret-note"><svg viewBox="0 0 20 20" aria-hidden="true"><rect x="4.5" y="9" width="11" height="8" rx="1.5"/><path d="M7 9V7a3 3 0 0 1 6 0v2"/></svg> The client secret is stored securely in the platform.</small>
+                </div>
+                <label class="field" for="idp-redirect-url">Redirect URL <small>Register this exact URL in your identity provider.</small>
+                  <input id="idp-redirect-url" name="redirectURL" readonly>
+                </label>
               </div>
-            </div>
-          </form>
-        </section>
 
-        <section class="admin-card" aria-labelledby="admin-quickinfo-title">
-          <div class="admin-card-head">
-            <span class="admin-card-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.5"/></svg></span>
-            <div><h2 id="admin-quickinfo-title">Quick info</h2><p class="helper">These are the main values to configure in your identity provider.</p></div>
-          </div>
-          <div class="quick-info">
-            <div class="info-tile"><span class="info-tile-label">Redirect URL</span><code id="quick-redirect">—</code></div>
-            <div class="info-tile"><span class="info-tile-label">Client ID</span><code id="quick-client-id">—</code></div>
-            <div class="info-tile"><span class="info-tile-label">Required scopes</span><code>openid profile email</code></div>
-          </div>
-        </section>
+              <div class="idp-actions">
+                <button id="idp-remove" class="button button-danger" type="button" hidden>Remove OIDC</button>
+                <div class="idp-actions-right">
+                  <button id="idp-test" class="button button-secondary" type="button"><span aria-hidden="true">▷</span> Test connection</button>
+                  <button id="idp-save" class="button button-primary" type="submit">Save configuration</button>
+                </div>
+              </div>
+            </form>
+          </section>
+
+          <aside class="pa-card idp-status-card">
+            <header class="pa-card-head">
+              <span class="pa-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 19V5M4 19h16"/><path d="M7 15v-3M11 15V8M15 15v-5M19 15V6"/></svg></span>
+              <div><h2>Provider status</h2><p class="helper">Current status and connectivity checks.</p></div>
+            </header>
+            <div class="idp-status-list">
+              <div class="idp-status-row"><span class="idp-status-label">Status</span><span id="idp-status-value" class="idp-pill neutral">Local only</span></div>
+              <div class="idp-status-row"><span class="idp-status-label">Last verified</span><span id="idp-last-verified" class="idp-status-value">—</span></div>
+              <div class="idp-status-row"><span class="idp-status-label">Discovery endpoint</span><span id="idp-discovery" class="idp-pill neutral">Unknown</span></div>
+              <div class="idp-status-row"><span class="idp-status-label">Login flow test</span><span id="idp-login-test" class="idp-pill neutral">Not run</span></div>
+            </div>
+          </aside>
+
+          <section class="pa-card idp-quick-card" aria-labelledby="admin-quickinfo-title">
+            <header class="pa-card-head">
+              <span class="pa-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.5"/></svg></span>
+              <div><h2 id="admin-quickinfo-title">Quick info</h2><p class="helper">These are the main values to configure in your identity provider.</p></div>
+            </header>
+            <div class="quick-info">
+              <div class="info-tile"><span class="info-tile-label">Redirect URL</span><code id="quick-redirect">—</code><button class="idp-copy" type="button" data-copy-from="quick-redirect" aria-label="Copy redirect URL"><svg viewBox="0 0 20 20" aria-hidden="true"><rect x="7" y="7" width="9" height="9" rx="1.5"/><path d="M13 7V5a1.5 1.5 0 0 0-1.5-1.5H5A1.5 1.5 0 0 0 3.5 5v6.5A1.5 1.5 0 0 0 5 13h2"/></svg></button></div>
+              <div class="info-tile"><span class="info-tile-label">Client ID</span><code id="quick-client-id">—</code><button class="idp-copy" type="button" data-copy-from="quick-client-id" aria-label="Copy client ID"><svg viewBox="0 0 20 20" aria-hidden="true"><rect x="7" y="7" width="9" height="9" rx="1.5"/><path d="M13 7V5a1.5 1.5 0 0 0-1.5-1.5H5A1.5 1.5 0 0 0 3.5 5v6.5A1.5 1.5 0 0 0 5 13h2"/></svg></button></div>
+              <div class="info-tile"><span class="info-tile-label">Required scopes</span><code id="quick-scopes">openid profile email</code><button class="idp-copy" type="button" data-copy-from="quick-scopes" aria-label="Copy required scopes"><svg viewBox="0 0 20 20" aria-hidden="true"><rect x="7" y="7" width="9" height="9" rx="1.5"/><path d="M13 7V5a1.5 1.5 0 0 0-1.5-1.5H5A1.5 1.5 0 0 0 3.5 5v6.5A1.5 1.5 0 0 0 5 13h2"/></svg></button></div>
+            </div>
+          </section>
+        </div>
 
         <footer>Management namespace: <code>idp-system</code></footer>
       </main>

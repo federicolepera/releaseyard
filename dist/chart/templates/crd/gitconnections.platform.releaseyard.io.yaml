@@ -1,0 +1,98 @@
+{{- if .Values.crd.enabled }}
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.22.0
+  name: gitconnections.platform.releaseyard.io
+spec:
+  group: platform.releaseyard.io
+  names:
+    kind: GitConnection
+    listKind: GitConnectionList
+    plural: gitconnections
+    shortNames:
+    - gitconn
+    singular: gitconnection
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: GitConnection is the Schema for the gitconnections API.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: spec defines the desired state of GitConnection
+            properties:
+              github:
+                description: github configures the GitHub provider. It is required
+                  when provider is github.
+                properties:
+                  organization:
+                    description: organization is the GitHub user or organization that
+                      owns created repositories.
+                    maxLength: 39
+                    minLength: 1
+                    pattern: ^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$
+                    type: string
+                required:
+                - organization
+                type: object
+                x-kubernetes-validations:
+                - message: github configuration is immutable
+                  rule: self == oldSelf
+              provider:
+                description: provider selects the Git provider implementation.
+                enum:
+                - github
+                type: string
+                x-kubernetes-validations:
+                - message: provider is immutable
+                  rule: self == oldSelf
+              tokenSecretRef:
+                description: tokenSecretRef names the Secret containing the provider
+                  token in key `token`.
+                properties:
+                  name:
+                    description: name is the name of the Secret containing key `token`.
+                    maxLength: 253
+                    minLength: 1
+                    pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$
+                    type: string
+                required:
+                - name
+                type: object
+                x-kubernetes-validations:
+                - message: token secret reference is immutable
+                  rule: self == oldSelf
+            required:
+            - provider
+            - tokenSecretRef
+            type: object
+            x-kubernetes-validations:
+            - message: github configuration is required when provider is github
+              rule: self.provider != 'github' || has(self.github)
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+{{- end }}

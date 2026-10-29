@@ -90,6 +90,10 @@ spec:
         {{- if .Values.manager.teamNamespacePrefix }}
         - --team-namespace-prefix={{ .Values.manager.teamNamespacePrefix }}
         {{- end }}
+        {{- with .Values.manager.argocd }}
+        - --argocd-namespace={{ .namespace | default "argocd" }}
+        - --argocd-destination-namespace={{ .destinationNamespace | default "releaseyard-team-platform" }}
+        {{- end }}
         {{- range .Values.manager.args }}
         - {{ tpl . $ }}
         {{- end }}

@@ -27,10 +27,9 @@ manager:
   args:
     - --leader-elect
 
-  ## Comma-separated chart repository hosts the manager may fetch from.
-  ## When empty the binary default (127.0.0.1:18080) is used. For an in-cluster
-  ## ChartMuseum, set this to its Service authority, for example
-  ## chartmuseum.chartmuseum.svc.cluster.local:8080.
+  ## Comma-separated HTTP(S) or OCI Helm repository hosts the manager may fetch
+  ## from. When empty the binary default (127.0.0.1:18080) is used. For GHCR set
+  ## this to ghcr.io.
   ##
   allowedChartHosts: ""
 
@@ -38,6 +37,16 @@ manager:
   ## token, used to build collision-free workload Helm release names.
   ##
   teamNamespacePrefix: "releaseyard-team-"
+
+  ## Argo CD integration for GitOps Projects. ReleaseYard creates one
+  ## Application per Project pointing at the Project repository `apps` path and
+  ## Project.spec.namespace. The destination namespace below is only a legacy
+  ## fallback for Projects that do not set spec.namespace.
+  ## Sync policy is intentionally left manual; enable automated sync in Argo CD.
+  ##
+  argocd:
+    namespace: argocd
+    destinationNamespace: releaseyard-team-platform
 
   ## Health probes.
   ## The manager serves the liveness (/healthz) and readiness (/readyz) endpoints on this port.
@@ -148,7 +157,9 @@ rbac:
   ## Helper roles for CRD management (admin/editor/viewer)
   ##
   helpers:
-    ## Install convenience admin/editor/viewer roles for CRDs
+    ## Install convenience admin/editor/viewer roles for CRDs. When the
+    ## dashboard is enabled this also installs the Project viewer/developer/
+    ## requester/admin roles used by Project access.
     ##
     enabled: false
 
@@ -294,12 +305,6 @@ dashboard:
     ## Create the local administrator Secret on install and upgrade when the
     ## dashboard is enabled. The Secret is never overwritten once it exists.
     enabled: true
-
-  ## Kubernetes groups allowed to use the Administration area (Identity provider,
-  ## Access definitions, Cluster access, Access applications) with OIDC login.
-  ## Each group is bound to the shipped dashboard admin ClusterRole. Requires
-  ## rbac.helpers.enabled=true. The local administrator is always allowed.
-  adminGroups: []
 
   ## Development-only reachability to an identity provider that is exposed only
   ## on a localhost hostname (for example Keycloak behind a local Traefik).

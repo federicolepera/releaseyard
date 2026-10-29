@@ -62,4 +62,28 @@ resources:
   kind: Resource
   path: github.com/federicolepera/idp/api/v1alpha1
   version: v1alpha1
+- api:
+    crdVersion: v1
+  controller: true
+  domain: releaseyard.io
+  group: platform
+  kind: Project
+  path: github.com/federicolepera/idp/api/v1alpha1
+  version: v1alpha1
+- api:
+    crdVersion: v1
+    namespaced: true
+  domain: releaseyard.io
+  group: platform
+  kind: GitConnection
+  path: github.com/federicolepera/idp/api/v1alpha1
+  version: v1alpha1
+- api:
+    crdVersion: v1
+    namespaced: true
+  domain: releaseyard.io
+  group: platform
+  kind: ApplicationRequest
+  path: github.com/federicolepera/idp/api/v1alpha1
+  version: v1alpha1
 version: "3"

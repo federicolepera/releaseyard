@@ -25,6 +25,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/validation"
@@ -50,6 +51,8 @@ const (
 	resourceClusters     = "clusters"
 	resourceResources    = "resources"
 	verbGet              = "get"
+	verbCreate           = "create"
+	projectVerifyError   = "Could not verify Project"
 	schemeHTTP           = "http"
 	schemeHTTPS          = "https"
 	authCallbackPath     = "/auth/callback"
@@ -59,6 +62,8 @@ const (
 	statusRunning        = "Running"
 	statusPending        = "Pending"
 	statusHealthy        = "Healthy"
+	deliveryDirect       = "direct"
+	deliveryGitOps       = "gitops"
 	toneGood             = "good"
 	toneMuted            = "muted"
 )
@@ -85,6 +90,7 @@ func NewHandler(k8s client.Client, namespace string) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", s.health)
 	mux.HandleFunc("GET /api/applicationdefinitions", s.listDefinitions)
+	mux.HandleFunc("GET /api/projects", s.listProjects)
 	mux.HandleFunc("GET /api/applications", s.listApplications)
 	mux.HandleFunc("GET /api/activity", s.listActivity)
 	mux.HandleFunc("GET /api/clusters", s.listClusters)
@@ -136,12 +142,90 @@ func (s *server) health(w http.ResponseWriter, _ *http.Request) {
 	_, _ = w.Write([]byte("ok\n"))
 }
 
+func (s *server) listProjects(w http.ResponseWriter, r *http.Request) {
+	items := &platformv1alpha1.ProjectList{}
+	if err := s.client.List(r.Context(), items); err != nil {
+		writeError(w, http.StatusInternalServerError, "Could not load projects")
+		return
+	}
+	if _, ok := writeClientFromRequest(r); ok {
+		allowed := make(map[string]struct{})
+		for _, namespace := range s.appNamespaces(r) {
+			allowed[namespace] = struct{}{}
+		}
+		kept := items.Items[:0]
+		for i := range items.Items {
+			if _, ok := allowed[items.Items[i].Spec.Namespace]; ok {
+				kept = append(kept, items.Items[i])
+			}
+		}
+		items.Items = kept
+	}
+	if items.Items == nil {
+		items.Items = []platformv1alpha1.Project{}
+	}
+	writeJSON(w, http.StatusOK, items)
+}
+
+// projectFromQuery resolves the Project catalog selected by the dashboard. It
+// returns nil when no project parameter is present. Access follows the same
+// Project namespace visibility as Applications.
+func (s *server) projectFromQuery(r *http.Request) (*platformv1alpha1.Project, int, string) {
+	name := strings.TrimSpace(r.URL.Query().Get("project"))
+	if name == "" {
+		return nil, 0, ""
+	}
+	project := &platformv1alpha1.Project{}
+	if err := s.client.Get(r.Context(), types.NamespacedName{Name: name}, project); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil, http.StatusNotFound, "Selected Project does not exist"
+		}
+		return nil, http.StatusInternalServerError, projectVerifyError
+	}
+	if project.Spec.Namespace == "" || !slices.Contains(s.appNamespaces(r), project.Spec.Namespace) {
+		return nil, http.StatusForbidden, "You do not have access to this Project catalog"
+	}
+	return project, 0, ""
+}
+
+func filterCatalogDefinitions(items []platformv1alpha1.ApplicationDefinition, project *platformv1alpha1.Project) []platformv1alpha1.ApplicationDefinition {
+	if project == nil {
+		return items
+	}
+	kept := make([]platformv1alpha1.ApplicationDefinition, 0, len(items))
+	for i := range items {
+		if project.Spec.Catalog.AllowsApplicationDefinition(items[i].Name) {
+			kept = append(kept, items[i])
+		}
+	}
+	return kept
+}
+
+func filterCatalogClusters(items []platformv1alpha1.Cluster, project *platformv1alpha1.Project) []platformv1alpha1.Cluster {
+	if project == nil {
+		return items
+	}
+	kept := make([]platformv1alpha1.Cluster, 0, len(items))
+	for i := range items {
+		if project.Spec.Catalog.AllowsCluster(items[i].Name) {
+			kept = append(kept, items[i])
+		}
+	}
+	return kept
+}
+
 func (s *server) listDefinitions(w http.ResponseWriter, r *http.Request) {
 	items := &platformv1alpha1.ApplicationDefinitionList{}
 	if err := s.client.List(r.Context(), items); err != nil {
 		writeError(w, http.StatusInternalServerError, "Could not load application definitions")
 		return
 	}
+	project, status, message := s.projectFromQuery(r)
+	if status != 0 {
+		writeError(w, status, message)
+		return
+	}
+	items.Items = filterCatalogDefinitions(items.Items, project)
 	items.Items = filterReadable(r, platformAPIGroup, "applicationdefinitions", "", items.Items, func(item platformv1alpha1.ApplicationDefinition) string { return item.Name })
 	if items.Items == nil {
 		items.Items = []platformv1alpha1.ApplicationDefinition{}
@@ -208,23 +292,58 @@ func ruleIncludes(values []string, want string) bool {
 }
 
 // appNamespaces returns the namespaces the caller may use for Applications. The
-// local administrator (no OIDC session) uses the fixed management namespace.
-// An OIDC session uses its team namespaces, optionally narrowed to a single
-// team selected through the authorized ?namespace= query parameter.
+// local administrator (no OIDC session) can read every Project namespace, plus
+// the management namespace for legacy Applications. An OIDC session uses its
+// team namespaces and the Project namespaces where the management cluster lets
+// it list Applications, optionally narrowed to one namespace through the
+// authorized ?namespace= query parameter.
 func (s *server) appNamespaces(r *http.Request) []string {
 	session, ok := sessionFromContext(r.Context())
 	if !ok || session.authMethod == authMethodLocal {
-		return []string{s.namespace}
+		return s.localAdminAppNamespaces(r.Context())
 	}
-	teams := teamsFromContext(r.Context())
+	namespaces := append([]string(nil), teamsFromContext(r.Context())...)
+	if impersonated, ok := writeClientFromRequest(r); ok {
+		projects := &platformv1alpha1.ProjectList{}
+		if err := s.client.List(r.Context(), projects); err == nil {
+			for i := range projects.Items {
+				namespace := projects.Items[i].Spec.Namespace
+				if namespace == "" || slices.Contains(namespaces, namespace) {
+					continue
+				}
+				attributes := authorizationv1.ResourceAttributes{
+					Namespace: namespace, Group: platformAPIGroup, Resource: resourceApplications, Verb: "list",
+				}
+				if selfSubjectAccessAllowed(r.Context(), impersonated, attributes) {
+					namespaces = append(namespaces, namespace)
+				}
+			}
+		}
+	}
 	selected := strings.TrimSpace(r.URL.Query().Get("namespace"))
 	if selected == "" {
-		return teams
+		return namespaces
 	}
-	if slices.Contains(teams, selected) {
+	if slices.Contains(namespaces, selected) {
 		return []string{selected}
 	}
 	return nil
+}
+
+func (s *server) localAdminAppNamespaces(ctx context.Context) []string {
+	namespaces := []string{s.namespace}
+	projects := &platformv1alpha1.ProjectList{}
+	if err := s.client.List(ctx, projects); err != nil {
+		return namespaces
+	}
+	for i := range projects.Items {
+		namespace := projects.Items[i].Spec.Namespace
+		if namespace == "" || slices.Contains(namespaces, namespace) {
+			continue
+		}
+		namespaces = append(namespaces, namespace)
+	}
+	return namespaces
 }
 
 // createNamespace resolves the namespace for a new Application. The local
@@ -312,9 +431,9 @@ func (s *server) listActivity(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "Activity name is required")
 		return
 	}
-	// The local administrator (no impersonating client) reads activity in the
-	// fixed management namespace. OIDC sessions must be allowed to read the
-	// application, and the activity is scoped to the team namespace that owns it.
+	// OIDC sessions must be allowed to read the application, and the activity is
+	// scoped to the namespace that owns it. The local administrator is allowed to
+	// read every Project namespace.
 	namespace := s.namespace
 	if impersonated, ok := writeClientFromRequest(r); ok {
 		allowed, found := false, false
@@ -338,6 +457,14 @@ func (s *server) listActivity(w http.ResponseWriter, r *http.Request) {
 		if !found {
 			writeError(w, http.StatusNotFound, "Application does not exist")
 			return
+		}
+	} else {
+		for _, candidate := range s.appNamespaces(r) {
+			app := &platformv1alpha1.Application{}
+			if err := s.client.Get(r.Context(), types.NamespacedName{Namespace: candidate, Name: name}, app); err == nil {
+				namespace = candidate
+				break
+			}
 		}
 	}
 	events := &corev1.EventList{}
@@ -374,6 +501,12 @@ func (s *server) listClusters(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "Could not load clusters")
 		return
 	}
+	project, status, message := s.projectFromQuery(r)
+	if status != 0 {
+		writeError(w, status, message)
+		return
+	}
+	items.Items = filterCatalogClusters(items.Items, project)
 	items.Items = filterReadable(r, platformAPIGroup, resourceClusters, "", items.Items, func(item platformv1alpha1.Cluster) string { return item.Name })
 	if items.Items == nil {
 		items.Items = []platformv1alpha1.Cluster{}
@@ -837,6 +970,8 @@ type createApplicationRequest struct {
 	PreviewDigest    string                    `json:"previewDigest"`
 	ReleaseNamespace string                    `json:"releaseNamespace"`
 	Values           json.RawMessage           `json:"values"`
+	ProjectName      string                    `json:"projectName"`
+	Delivery         string                    `json:"delivery"`
 }
 
 type applicationClusterInput struct {
@@ -946,11 +1081,16 @@ func (s *server) createApplication(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	namespace, ok := s.createNamespace(r, input.Namespace)
-	if !ok {
-		writeError(w, http.StatusForbidden, "Select a team you belong to")
+	delivery, project, status, message := s.resolveDelivery(r.Context(), input.ProjectName, input.Delivery)
+	if status != 0 {
+		writeError(w, status, message)
 		return
 	}
+	if project == nil || project.Spec.Namespace == "" {
+		writeError(w, http.StatusUnprocessableEntity, "Select a Project with a configured namespace")
+		return
+	}
+	namespace := project.Spec.Namespace
 	definition := &platformv1alpha1.ApplicationDefinition{}
 	if err := s.client.Get(r.Context(), types.NamespacedName{Name: input.DefinitionName}, definition); err != nil {
 		if apierrors.IsNotFound(err) {
@@ -1007,7 +1147,38 @@ func (s *server) createApplication(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnprocessableEntity, "Values do not meet the application definition's requirements")
 		return
 	}
+	if project != nil {
+		if message := projectCatalogDenial(project, app.Spec); message != "" {
+			writeError(w, http.StatusUnprocessableEntity, message)
+			return
+		}
+	}
 	session, _ := sessionFromContext(r.Context())
+	if delivery == deliveryGitOps {
+		request := &platformv1alpha1.ApplicationRequest{
+			ObjectMeta: metav1.ObjectMeta{Name: app.Name, Namespace: namespace},
+			Spec: platformv1alpha1.ApplicationRequestSpec{
+				ProjectRef:           platformv1alpha1.ProjectRequestReference{Name: project.Name},
+				ApplicationName:      app.Name,
+				ApplicationNamespace: namespace,
+				RequestedBy:          session.username,
+				IdempotencyKey:       applicationRequestKey(app),
+				Application:          app.Spec,
+			},
+		}
+		if err := s.writeClient(r).Create(r.Context(), request); err != nil {
+			if apierrors.IsAlreadyExists(err) {
+				writeError(w, http.StatusConflict, "A GitOps request with this application name already exists")
+			} else if apierrors.IsForbidden(err) {
+				writeError(w, http.StatusForbidden, "You do not have permission to create GitOps requests")
+			} else {
+				writeError(w, http.StatusInternalServerError, "Could not create GitOps request")
+			}
+			return
+		}
+		writeJSON(w, http.StatusAccepted, request)
+		return
+	}
 	recordChangeHistory(app, session.username, "Initial configuration")
 	if err := s.writeClient(r).Create(r.Context(), app); err != nil {
 		if apierrors.IsAlreadyExists(err) {
@@ -1022,6 +1193,54 @@ func (s *server) createApplication(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, app)
+}
+
+func (s *server) resolveDelivery(ctx context.Context, projectName, requested string) (string, *platformv1alpha1.Project, int, string) {
+	delivery := requested
+	if delivery == "" {
+		delivery = deliveryDirect
+	}
+	if delivery != deliveryDirect && delivery != deliveryGitOps {
+		return "", nil, http.StatusBadRequest, "Delivery must be direct or gitops"
+	}
+	if projectName == "" {
+		return "", nil, http.StatusUnprocessableEntity, "Select a Project for application delivery"
+	}
+	project := &platformv1alpha1.Project{}
+	if err := s.client.Get(ctx, types.NamespacedName{Name: projectName}, project); err != nil {
+		if apierrors.IsNotFound(err) {
+			return "", nil, http.StatusNotFound, "Selected Project does not exist"
+		}
+		return "", nil, http.StatusInternalServerError, projectVerifyError
+	}
+	mode := project.Spec.Delivery.Mode
+	if mode == "" {
+		mode = platformv1alpha1.DeliveryModeDirect
+	}
+	if mode == platformv1alpha1.DeliveryModeDirect && delivery == deliveryGitOps {
+		return "", nil, http.StatusUnprocessableEntity, "GitOps is disabled for this Project"
+	}
+	if mode == platformv1alpha1.DeliveryModeGitOps && delivery == deliveryDirect {
+		return "", nil, http.StatusUnprocessableEntity, "This Project requires GitOps delivery"
+	}
+	if delivery == deliveryGitOps {
+		if project.Spec.Namespace == "" {
+			return "", nil, http.StatusUnprocessableEntity, "Project namespace is not configured"
+		}
+		if !meta.IsStatusConditionTrue(project.Status.Conditions, platformv1alpha1.ProjectConditionNamespaceReady) {
+			return "", nil, http.StatusUnprocessableEntity, "Project namespace is not ready"
+		}
+		if project.Status.Repository == nil || !meta.IsStatusConditionTrue(project.Status.Conditions, platformv1alpha1.ProjectConditionRepositoryReady) {
+			return "", nil, http.StatusUnprocessableEntity, "Project repository is not ready for GitOps"
+		}
+	}
+	return delivery, project, 0, ""
+}
+
+func applicationRequestKey(app *platformv1alpha1.Application) string {
+	payload, _ := json.Marshal(app.Spec)
+	sum := sha256.Sum256([]byte(app.Namespace + "\x00" + app.Name + "\x00" + string(payload)))
+	return hex.EncodeToString(sum[:])
 }
 
 // isCurrentValidatedDefinition deliberately requires the condition itself and
@@ -1055,4 +1274,26 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(value)
+}
+
+func projectCatalogDenial(project *platformv1alpha1.Project, application platformv1alpha1.ApplicationSpec) string {
+	if !project.Spec.Catalog.AllowsApplicationDefinition(application.ApplicationDefinitionRef.Name) {
+		return "Application definition is not in the Project catalog"
+	}
+	if application.ClusterRef != nil && !project.Spec.Catalog.AllowsCluster(application.ClusterRef.Name) {
+		return "Target cluster is not in the Project catalog"
+	}
+	for _, target := range application.Clusters {
+		if !project.Spec.Catalog.AllowsCluster(target.Name) {
+			return "Target cluster is not in the Project catalog"
+		}
+	}
+	if application.Environment != nil {
+		for _, target := range application.Environment.Targets {
+			if !project.Spec.Catalog.AllowsCluster(target.Name) {
+				return "Environment target is not in the Project catalog"
+			}
+		}
+	}
+	return ""
 }

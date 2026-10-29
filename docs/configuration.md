@@ -9,7 +9,7 @@ examples are in [`config/samples/`](../config/samples/) and
 | Field | Required | Notes |
 |-------|----------|-------|
 | `spec.description` | no | Shown in the catalog. Max 280 characters. |
-| `spec.chart.repository` | yes | HTTP(S) ChartMuseum-compatible repository. Host must be allowed. |
+| `spec.chart.repository` | yes | HTTP(S) or OCI Helm repository. Host must be allowed. |
 | `spec.chart.name` | yes | Chart name. |
 | `spec.chart.version` | yes | Pinned semantic version; no floating tags. |
 | `spec.release.namespace` | yes | Existing namespace on the target cluster. Immutable. |
@@ -40,6 +40,75 @@ examples are in [`config/samples/`](../config/samples/) and
 | `spec.values` | no | Only paths declared by the definition. |
 
 Exactly one of `clusterRef`, `clusters`, or `environment` must be set.
+
+## Project
+
+| Field | Required | Notes |
+|-------|----------|-------|
+| `spec.namespace` | yes | Namespace that owns this Project's Applications, Requests, Resources and RBAC. Unique and immutable. |
+| `spec.repository.connectionRef.name` | yes | Namespaced `GitConnection`. Immutable. |
+| `spec.repository.connectionRef.namespace` | no | Defaults to the manager credentials namespace. Immutable with the reference. |
+| `spec.repository.name` | no | GitHub repository name. Defaults to the Project name. Immutable. |
+| `spec.description` | no | Applied to the repository; max 280 characters. |
+| `spec.delivery.mode` | no | `direct`, `gitops`, or `both`. Default `direct`. |
+| `spec.catalog.applicationDefinitions` | no | ApplicationDefinition names visible to the Project. Empty means none. |
+| `spec.catalog.clusters` | no | Cluster names visible to the Project. Empty means none. |
+| `spec.catalog.cloudTargets` | no | CloudTarget names visible to the Project. Empty means none. |
+| `spec.catalog.resourceDefinitions` | no | ResourceDefinition names visible to the Project. Empty means none. |
+
+`Project` is cluster-scoped. The controller creates or adopts `spec.namespace`,
+labels it with `platform.releaseyard.io/project`, `platform.releaseyard.io/delivery`
+and `app.kubernetes.io/managed-by=releaseyard`, and exposes the `NamespaceReady`
+condition. `status.repository` contains the web URL, HTTPS clone URL, SSH URL,
+default branch and provider ID. Project creation also seeds a minimal Kustomize
+structure (`README.md`, `kustomization.yaml`, `apps/kustomization.yaml`).
+
+## ApplicationRequest
+
+| Field | Required | Notes |
+|-------|----------|-------|
+| `spec.projectRef.name` | yes | Project that owns the target repository. |
+| `spec.applicationName` | yes | Requested Application name. |
+| `spec.applicationNamespace` | yes | Must equal the owning Project's `spec.namespace`. |
+| `spec.requestedBy` | yes | Authenticated dashboard user. |
+| `spec.idempotencyKey` | yes | Stable key for repeated submissions. |
+| `spec.application` | yes | Application spec to write to the Project repository. |
+| `status.phase` | no | `Accepted`, `Processing`, `BranchPushed`, `ChangeRequestOpen`, `Conflict`, or `Rejected`. |
+| `status.branch` | no | Branch created by the bridge. |
+| `status.commitSHA` | no | Commit written to the request branch. |
+| `status.changeRequestURL` | no | Pull request URL. |
+
+## Argo CD integration
+
+| Value | Default | Notes |
+|-------|---------|-------|
+| `manager.argocd.namespace` | `argocd` | Namespace of managed Argo CD Applications. |
+| `manager.argocd.destinationNamespace` | `releaseyard-team-platform` | Legacy fallback. Argo destination is `Project.spec.namespace`. |
+
+The `Project` controller creates one Argo CD `Application` per GitOps Project,
+pointed at the Project repository's `apps` path and the Project's
+`spec.namespace`. `spec.syncPolicy.automated` is left unset so sync remains
+manual until enabled in Argo CD.
+
+`ApplicationRequest` is namespaced in the Project's `spec.namespace`. The bridge
+rejects a request whose namespace or `spec.applicationNamespace` differs from the
+Project namespace. It writes `apps/<app>/application.yaml` and
+`apps/<app>/kustomization.yaml`, updates `apps/kustomization.yaml`, creates a
+branch and opens a pull request.
+
+## GitConnection
+
+| Field | Required | Notes |
+|-------|----------|-------|
+| `spec.provider` | yes | Currently `github`. Immutable. |
+| `spec.tokenSecretRef.name` | yes | Secret with key `token` in the same namespace. Immutable. |
+| `spec.github.organization` | yes when provider is `github` | User or organization that owns created repositories. Immutable. |
+
+`GitConnection` is namespaced. The token Secret must be in the same namespace as the
+connection. If `spec.repository.connectionRef.namespace` differs from the manager
+credentials namespace, the manager ServiceAccount needs `get` on the token Secret in that
+namespace. GitHub is the only provider implemented today; `Project` references a generic
+`GitConnection` so additional providers can be added without changing `Project`.
 
 ## CloudTarget
 
@@ -81,7 +150,7 @@ Exactly one of `clusterRef`, `clusters`, or `environment` must be set.
 | `manager.replicas` | `1` | Use leader election for more replicas. |
 | `manager.image.repository` | `controller` | Controller image. |
 | `manager.image.tag` | chart appVersion | Image tag. |
-| `manager.allowedChartHosts` | `""` | Comma-separated chart hosts. Empty uses the binary default `127.0.0.1:18080`. |
+| `manager.allowedChartHosts` | `""` | Comma-separated HTTP(S) or OCI chart hosts. Empty uses the binary default `127.0.0.1:18080`. |
 | `manager.teamNamespacePrefix` | `releaseyard-team-` | Prefix used for team namespace and release-name derivation. |
 | `manager.args` | `["--leader-elect"]` | Extra manager arguments. |
 | `manager.healthProbe.port` | `8081` | Liveness/readiness port. |
@@ -112,7 +181,6 @@ Exactly one of `clusterRef`, `clusters`, or `environment` must be set.
 | `dashboard.sessionStore.redis.tls.enabled` | `false` | Use TLS for the Redis connection. |
 | `dashboard.sessionStore.redis.keyPrefix` | `releaseyard:dashboard:` | Key namespace in Redis. |
 | `dashboard.teamNamespacePrefix` | `releaseyard-team-` | Team namespace prefix. |
-| `dashboard.adminGroups` | `[]` | OIDC groups allowed in Administration. |
 | `dashboard.bootstrap.enabled` | `true` | Create the local administrator Secret. |
 | `dashboard.ingress.enabled` | `false` | Optional Ingress. Requires class, host, TLS. |
 | `dashboard.oidcLoopback.enabled` | `false` | Development-only loopback aid. |
@@ -156,6 +224,8 @@ after installation.
 kubectl apply -f config/samples/platform_v1alpha1_cluster.yaml
 kubectl apply -f config/samples/platform_v1alpha1_applicationdefinition.yaml
 kubectl apply -f config/samples/platform_v1alpha1_application.yaml
+kubectl apply -f config/samples/platform_v1alpha1_gitconnection.yaml
+kubectl apply -f config/samples/platform_v1alpha1_project.yaml
 ```
 
 For cloud resources, see [Cloud resources](cloud-resources.md).

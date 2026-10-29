@@ -1,3 +1,6 @@
+{{- if .Values.rbac.namespaced }}
+{{- fail "rbac.namespaced=true is not supported: the Project controller requires cluster-scoped permissions" }}
+{{- end }}
 apiVersion: rbac.authorization.k8s.io/v1
 {{- if .Values.rbac.namespaced }}
 kind: Role
@@ -11,6 +14,17 @@ metadata:
   name: {{ include "idp.resourceName" (dict "suffix" "manager-role" "context" $) }}
 rules:
 - apiGroups:
+  - argoproj.io
+  resources:
+  - applications
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+- apiGroups:
   - ""
   resources:
   - events
@@ -18,9 +32,21 @@ rules:
   - create
   - patch
 - apiGroups:
+  - ""
+  resources:
+  - namespaces
+  verbs:
+  - get
+  - list
+  - watch
+  - create
+  - update
+  - patch
+- apiGroups:
   - platform.releaseyard.io
   resources:
   - applicationdefinitions
+  - applicationrequests
   - cloudtargets
   - clusters
   - resourcedefinitions
@@ -31,9 +57,25 @@ rules:
 - apiGroups:
   - platform.releaseyard.io
   resources:
+  - projects
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - platform.releaseyard.io
+  resources:
+  - gitconnections
+  verbs:
+  - get
+- apiGroups:
+  - platform.releaseyard.io
+  resources:
   - applicationdefinitions/status
+  - applicationrequests/status
   - applications/status
   - clusters/status
+  - projects/status
   - resources/status
   verbs:
   - get

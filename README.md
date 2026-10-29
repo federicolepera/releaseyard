@@ -109,9 +109,9 @@ The dashboard is the front door for platform admins and teams:
   definitions, and create or delete `Resource` requests.
 - **Application detail**: Overview, Resources, Configuration, Observability, and
   Activity tabs, including live resource YAML, Pod logs, and CPU/memory.
-- **Administration**: Identity provider, Access definitions, Cluster access, and
-  Access applications. The panel materializes Kubernetes RBAC; it does not keep
-  a separate permission model.
+- **Administration**: Identity provider, Project access, and Platform admins.
+  The panel materializes Kubernetes RBAC; it does not keep a separate permission
+  model.
 
 A fresh installation starts with **local administrator authentication only**.
 OIDC can be configured later from the Administration page, without a restart.
@@ -174,12 +174,16 @@ Requirements: Docker, `kubectl`, Kind, Go, Helm, and Python 3.
 
 ### Local Kind demo
 
-Create the management cluster (`releaseyard-a`), two workload clusters
-(`releaseyard-managed-a/b`), install ChartMuseum, and publish the demo chart:
+Create the management cluster (`releaseyard-a`) and two workload clusters
+(`releaseyard-managed-a/b`):
 
 ```bash
 bash hack/setup-kind-workloads.sh
 ```
+
+This repository does not provision a chart repository. The demo chart is
+published as a public OCI artifact under
+`oci://ghcr.io/federicolepera/helm-charts/releaseyard-demo`.
 
 Build and load the controller and dashboard images:
 
@@ -197,7 +201,7 @@ helm upgrade --install idp dist/chart \
   -n idp-system --create-namespace \
   --set manager.image.repository=releaseyard-controller \
   --set manager.image.tag=dev \
-  --set manager.allowedChartHosts=chartmuseum.chartmuseum.svc.cluster.local:8080
+  --set manager.allowedChartHosts=ghcr.io
 ```
 
 Deploy the dashboard with the local kustomization:
@@ -215,7 +219,7 @@ kubectl --context kind-releaseyard-a -n idp-system create secret generic release
   --from-file=kubeconfig=.local/kubeconfigs/releaseyard-managed-b.kubeconfig
 ```
 
-Apply the samples:
+Apply the samples. The sample definition uses the public GHCR OCI chart:
 
 ```bash
 kubectl --context kind-releaseyard-a apply -f config/samples/platform_v1alpha1_cluster.yaml
@@ -302,7 +306,9 @@ Examples are in [`config/samples/`](config/samples/). Full details are in
   management cluster's Kubernetes RBAC is the source of truth. Any user may read
   the catalog; writes require the corresponding RBAC permission.
 - **Administration** — available to the local administrator and to OIDC groups
-  listed in `dashboard.adminGroups` (requires `rbac.helpers.enabled=true`).
+  assigned from **Administration → Platform admins** (requires
+  `rbac.helpers.enabled=true`). A fresh install has no OIDC platform admin; the
+  local administrator assigns the first one.
 - **Helper roles** — the chart can install admin/editor/viewer roles for
   Applications, Application Definitions, and Clusters when
   `rbac.helpers.enabled=true`.

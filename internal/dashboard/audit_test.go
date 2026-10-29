@@ -166,9 +166,8 @@ func TestAuditEventForRequest(t *testing.T) {
 	}{
 		{http.MethodPut, "/api/administration/identity-provider", "admin.identity_provider.update"},
 		{http.MethodDelete, "/api/administration/identity-provider", "admin.identity_provider.delete"},
-		{http.MethodPut, "/api/administration/definition-access", "admin.definition_access.update"},
-		{http.MethodDelete, "/api/administration/cluster-access", "admin.cluster_access.delete"},
-		{http.MethodPut, "/api/administration/application-access", "admin.application_access.update"},
+		{http.MethodPut, "/api/administration/project-access", "admin.project_access.update"},
+		{http.MethodPut, "/api/administration/platform-access", "admin.platform_access.update"},
 		{http.MethodPost, "/api/applications", "api.write"},
 	} {
 		if got := auditEventForRequest(test.method, test.path); got != test.want {

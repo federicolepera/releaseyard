@@ -9,7 +9,7 @@ metadata:
 spec:
   description: Sample application definition
   chart:
-    repository: http://chartmuseum.chartmuseum.svc.cluster.local:8080
+    repository: oci://ghcr.io/federicolepera/helm-charts
     name: releaseyard-demo
     version: 0.2.0
   release:

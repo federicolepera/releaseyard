@@ -35,9 +35,10 @@
       try { localStorage.setItem('idp-sidebar', next ? 'collapsed' : 'open'); } catch (_) { /* Storage can be unavailable. */ }
     });
   }
-  const state = { definitions: [], applications: [], clusters: [], clusterQuery: '', clusterStatus: '', selectedApplication: null, selectedCluster: null, selectedInstanceUID: '', detailTab: 'overview', deleting: false, deletionPending: new Set(), editingValues: false, valuesDraft: Object.create(null), savingValues: false, editingPlacement: false, placementDraft: new Map(), savingPlacement: false, definitionQuery: '', definitionSort: 'name', definitionType: '', definitionView: 'grid', destinationMode: 'cluster', selectedClusters: new Map(), preview: null, previewController: null, previewSequence: 0, previewLoading: false, savingEnvironment: false, creating: false, teams: [], team: '', resourcesQuery: '', resourcesKind: '', resourcesStatus: '', resourcesExpanded: new Set(), resourcesLive: null, resourcesLiveKey: '', selectedResourceUID: '', resourcePanelTab: 'overview', activityRange: '24h', activityType: '', activitySource: '', activityQuery: '', applicationQuery: '', applicationCluster: '', applicationNamespace: '', applicationStatus: '', applicationSort: { key: 'name', direction: 'asc' }, cloudTargets: [], cloudDefinitions: [], cloudResources: [], selectedCloudResource: null, cloudDetailTab: 'overview', cloudCreating: false, cloudSaving: false, cloudDeleting: false, cloudResourcesError: '', cloudSearch: '', cloudStatusFilter: '', cloudTargetFilter: '', cloudDefinitionFilter: '', cloudSort: { key: 'name', direction: 'asc' }, cloudDefinitionsExpanded: false, cloudTargetsExpanded: false, cloudActivityExpanded: false };
+  const state = { definitions: [], applications: [], clusters: [], projects: [], catalogProject: '', projectName: '', projectReady: false, delivery: 'direct', clusterQuery: '', clusterStatus: '', selectedApplication: null, selectedCluster: null, selectedInstanceUID: '', detailTab: 'overview', deleting: false, deletionPending: new Set(), editingValues: false, valuesDraft: Object.create(null), savingValues: false, editingPlacement: false, placementDraft: new Map(), savingPlacement: false, definitionQuery: '', definitionSort: 'name', definitionType: '', definitionView: 'grid', destinationMode: 'cluster', selectedClusters: new Map(), preview: null, previewController: null, previewSequence: 0, previewLoading: false, savingEnvironment: false, creating: false, teams: [], team: '', resourcesQuery: '', resourcesKind: '', resourcesStatus: '', resourcesExpanded: new Set(), resourcesLive: null, resourcesLiveKey: '', selectedResourceUID: '', resourcePanelTab: 'overview', activityRange: '24h', activityType: '', activitySource: '', activityQuery: '', applicationQuery: '', applicationCluster: '', applicationNamespace: '', applicationStatus: '', applicationSort: { key: 'name', direction: 'asc' }, cloudTargets: [], cloudDefinitions: [], cloudResources: [], selectedCloudResource: null, cloudDetailTab: 'overview', cloudCreating: false, cloudSaving: false, cloudDeleting: false, cloudResourcesError: '', cloudSearch: '', cloudStatusFilter: '', cloudTargetFilter: '', cloudDefinitionFilter: '', cloudSort: { key: 'name', direction: 'asc' }, cloudDefinitionsExpanded: false, cloudTargetsExpanded: false, cloudActivityExpanded: false };
   const maxClusterTargets = 32;
   state.selectedDefinition = null;
+  state.canAdminister = false;
   state.canCreateApps = false;
   state.canDeleteApps = false;
   state.canUpdateApps = false;
@@ -80,6 +81,7 @@
         const session = await response.json();
         if (typeof session?.csrfToken !== 'string' || !session.csrfToken) throw new Error('The server returned an invalid session.');
         csrfToken = session.csrfToken;
+        state.canAdminister = session.canAdminister === true;
         state.canCreateApps = session.canCreateApps === true;
         state.canDeleteApps = session.canDeleteApps === true;
         state.canUpdateApps = session.canUpdateApps === true;
@@ -93,7 +95,14 @@
         if (state.selectedApplication) renderApplicationDetail();
         if (state.selectedCluster) renderClusterDetail();
         const adminNav = $('#admin-nav');
-        if (adminNav && session.canAdminister === true) adminNav.removeAttribute('hidden');
+        if (adminNav && (session.canAdminister === true || session.canManageProjectAccess === true)) {
+          adminNav.removeAttribute('hidden');
+          if (session.canAdminister !== true) {
+            adminNav.querySelectorAll('a.side-link').forEach((link) => {
+              if (!(link.getAttribute('href') || '').includes('access-applications.html')) link.hidden = true;
+            });
+          }
+        }
         const userChip = $('#user-chip');
         if (userChip && typeof session.username === 'string' && session.username) {
           const name = $('#user-name');
@@ -154,6 +163,16 @@
 
   function withTeam(path) {
     const query = teamQuery();
+    if (!query) return path;
+    return `${path}${path.includes('?') ? '&' : '?'}${query}`;
+  }
+
+  function projectQuery() {
+    return state.catalogProject ? `project=${encodeURIComponent(state.catalogProject)}` : '';
+  }
+
+  function withProject(path) {
+    const query = projectQuery();
     if (!query) return path;
     return `${path}${path.includes('?') ? '&' : '?'}${query}`;
   }
@@ -900,6 +919,7 @@
     cluster: 'M4 4h16v6H4zM4 14h16v6H4zM7.5 7h.01M7.5 17h.01',
     definition: 'M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8zM14 3v5h5',
     cloud: 'M6 15h8a3 3 0 0 0 .4-6A4.5 4.5 0 0 0 6 10a2.5 2.5 0 0 0 0 5z',
+    user: 'M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM4 21c0-4 3.6-6 8-6s8 2 8 6',
   };
 
   function metaIcon(kind) {
@@ -2863,6 +2883,10 @@
   function openDefinition(def) {
     if (!definitionReadiness(def).ready) return;
     state.selectedDefinition = def;
+    if (state.catalogProject && $('#project')) {
+      $('#project').value = state.catalogProject;
+      updateProjectDelivery();
+    }
     $('#catalog-view').hidden = true;
     $('#create-view').hidden = false;
     renderCreateBreadcrumb(def);
@@ -2876,6 +2900,11 @@
     renderCreateBreadcrumb(null);
     $('#create-form').reset();
     state.destinationMode = 'cluster'; state.selectedClusters.clear(); state.preview = null; state.previewLoading = false;
+    state.projectName = state.catalogProject || ''; state.projectReady = false; state.delivery = 'direct';
+    if ($('#project')) $('#project').value = state.projectName;
+    if ($('#delivery')) $('#delivery').value = 'direct';
+    if ($('#delivery-field')) $('#delivery-field').hidden = true;
+    updateProjectDelivery();
     if (state.previewController) state.previewController.abort();
     const clusterMode = document.querySelector('input[name="destination-mode"][value="cluster"]');
     if (clusterMode) clusterMode.checked = true;
@@ -2967,6 +2996,84 @@
     }
     renderClusterChecklist();
     updateDestinationControls();
+  }
+
+  function projectDeliveryMode(project) {
+    return project?.spec?.delivery?.mode || 'direct';
+  }
+
+  function projectRepositoryReady(project) {
+    return condition(project, 'RepositoryReady')?.status === 'True' && Boolean(project.status?.repository);
+  }
+
+  function renderProjects() {
+    const select = $('#project');
+    const projects = [...state.projects].sort((a, b) => (a.metadata?.name || '').localeCompare(b.metadata?.name || '', 'en'));
+    const catalogSelect = $('#catalog-project');
+    if (catalogSelect) {
+      const prior = state.catalogProject;
+      catalogSelect.replaceChildren(new Option(projects.length ? 'Select a Project' : 'No Projects', ''));
+      projects.forEach((project) => catalogSelect.add(new Option(project.metadata?.name || '', project.metadata?.name || '')));
+      if (projects.some((project) => project.metadata?.name === prior)) catalogSelect.value = prior;
+      else if (projects.length) { state.catalogProject = projects[0].metadata?.name || ''; catalogSelect.value = state.catalogProject; }
+      else state.catalogProject = '';
+    }
+    if (!select) return;
+    const prior = state.projectName || select.value;
+    select.replaceChildren(new Option('Select a Project', ''));
+    projects.forEach((project) => {
+      const name = project.metadata?.name || '';
+      const mode = projectDeliveryMode(project);
+      const ready = projectRepositoryReady(project);
+      const modeLabel = mode === 'gitops' ? 'GitOps' : mode === 'both' ? 'Direct or GitOps' : 'Direct';
+      select.add(new Option(`${name} · ${modeLabel}${mode !== 'direct' && !ready ? ' · repo not ready' : ''}`, name));
+    });
+    if ([...select.options].some((option) => option.value === prior)) select.value = prior;
+    else select.value = '';
+    updateProjectDelivery();
+  }
+
+  function updateProjectDelivery() {
+    const select = $('#project');
+    const field = $('#delivery-field');
+    const delivery = $('#delivery');
+    if (!select || !field || !delivery) return;
+    state.projectName = select.value;
+    const project = state.projects.find((item) => item.metadata?.name === state.projectName);
+    const hint = $('#project-hint');
+    const deliveryHint = $('#delivery-hint');
+    if (!project) {
+      state.delivery = 'direct';
+      state.projectReady = false;
+      field.hidden = true;
+      delivery.value = 'direct';
+      if (hint) hint.textContent = 'Select a Project before creating an application.';
+      updateSubmit();
+      return;
+    }
+    const mode = projectDeliveryMode(project);
+    const ready = projectRepositoryReady(project);
+    state.projectReady = ready;
+    if (hint) hint.textContent = ready ? `${state.projectName} repository is ready.` : `${state.projectName} repository is not ready yet.`;
+    if (mode === 'direct') {
+      state.delivery = 'direct';
+      field.hidden = true;
+      delivery.value = 'direct';
+      if (deliveryHint) deliveryHint.textContent = 'This Project allows direct creation only.';
+    } else if (mode === 'gitops') {
+      state.delivery = 'gitops';
+      field.hidden = true;
+      delivery.value = 'gitops';
+      if (deliveryHint) deliveryHint.textContent = ready ? 'This Project requires GitOps delivery.' : 'GitOps is unavailable until the Project repository is ready.';
+    } else {
+      field.hidden = false;
+      const gitopsOption = delivery.querySelector('option[value="gitops"]');
+      if (gitopsOption) gitopsOption.disabled = !ready;
+      if (state.delivery === 'gitops' && !ready) state.delivery = 'direct';
+      delivery.value = state.delivery;
+      if (deliveryHint) deliveryHint.textContent = ready ? 'Choose direct creation or a GitOps PR request.' : 'GitOps is unavailable until the Project repository is ready.';
+    }
+    updateSubmit();
   }
 
   function updateDestinationControls() {
@@ -3208,6 +3315,7 @@
     const configured = [...$('#dynamic-fields').querySelectorAll('input, select')].filter((input) => input.value !== '').length;
     $('#review-name').textContent = name;
     $('#review-destination').textContent = destination;
+    $('#review-delivery').textContent = state.projectName ? `${state.projectName} · ${state.delivery === 'gitops' ? 'GitOps request' : 'Direct'}` : 'Direct';
     $('#review-values').textContent = configured ? `${configured} configured value${configured === 1 ? '' : 's'}` : 'Template defaults';
   }
 
@@ -3219,11 +3327,15 @@
       : state.destinationMode === 'clusters'
         ? selectedClusterTargets().length > 0
         : Boolean($('#environment-select').value && !state.previewLoading && state.preview && state.preview.environment === $('#environment-select').value);
+    const projectReady = Boolean(state.projectName);
+    const deliveryReady = state.delivery !== 'gitops' || state.projectReady;
     $('#submit').disabled =
     !state.canCreateApps ||
     state.creating ||
     !def ||
+    !projectReady ||
     !destinationReady ||
+    !deliveryReady ||
     !form.elements.name.value.trim() ||
     blocked;
     updateReview();
@@ -3238,55 +3350,109 @@
 
   async function initIdentityProviderAdmin() {
     const form = $('#identity-provider-form');
+    if (!form) return;
     const banner = $('#idp-notice');
+    const bannerTitle = $('#idp-notice-title');
+    const bannerText = $('#idp-notice-text');
+    const bannerClose = $('#idp-notice-close');
     const issuer = $('#idp-issuer-url');
     const clientId = $('#idp-client-id');
     const clientSecret = $('#idp-client-secret');
     const redirect = $('#idp-redirect-url');
     const save = $('#idp-save');
+    const test = $('#idp-test');
     const remove = $('#idp-remove');
+    const reveal = $('#idp-reveal-secret');
+    const replaceSecret = $('#idp-replace-secret');
+    const secretConfigured = $('#idp-secret-configured');
     const stateBadge = $('#idp-state');
+    const stateSummary = $('#idp-last-verified-summary');
+    const statusValue = $('#idp-status-value');
+    const lastVerified = $('#idp-last-verified');
+    const discovery = $('#idp-discovery');
+    const loginTest = $('#idp-login-test');
+    let currentStatus = { enabled: false };
 
-    const showMessage = (message, kind) => {
+    const showMessage = (title, text, kind = 'success') => {
       if (!banner) return;
-      banner.textContent = message;
-      banner.className = `notice notice-${kind}`;
+      banner.className = `idp-banner idp-banner-${kind}`;
+      if (bannerTitle) bannerTitle.textContent = title;
+      if (bannerText) bannerText.textContent = text;
       banner.hidden = false;
     };
     const clearMessage = () => { if (banner) banner.hidden = true; };
+    const setPill = (node, label, tone = 'neutral') => {
+      if (!node) return;
+      node.textContent = label;
+      node.className = `idp-pill ${tone}`;
+    };
+    const setSecretState = (configured) => {
+      if (!secretConfigured) return;
+      secretConfigured.classList.toggle('is-missing', !configured);
+      secretConfigured.innerHTML = `<span class="idp-dot-check">${configured ? '✓' : '!'}</span> ${configured ? 'Configured' : 'Not configured'}`;
+    };
 
     function render(status) {
+      currentStatus = status || {};
+      const enabled = status.enabled === true;
       if (redirect) redirect.value = status.redirectURL || '';
+      if (issuer) issuer.value = status.issuerURL || '';
+      if (clientId) clientId.value = status.clientID || '';
+      if (clientSecret) {
+        clientSecret.value = '';
+        clientSecret.placeholder = status.hasClientSecret ? '••••••••••••••••••••' : 'Enter client secret';
+      }
+      if (stateBadge) stateBadge.textContent = enabled ? 'Enabled' : 'Local only';
+      if (stateSummary) stateSummary.textContent = enabled ? `Last verified ${status.lastVerified ? relativeTimeAgo(status.lastVerified) : 'just now'}` : 'No OIDC provider configured';
+      setPill(statusValue, enabled ? 'Enabled' : 'Local only', enabled ? 'good' : 'neutral');
+      if (lastVerified) lastVerified.textContent = status.lastVerified ? relativeTimeAgo(status.lastVerified) : '—';
+      setPill(discovery, enabled ? (status.discoveryReachable ? 'Reachable' : 'Unreachable') : 'Unknown', enabled ? (status.discoveryReachable ? 'good' : 'bad') : 'neutral');
+      setPill(loginTest, enabled ? (status.loginTestPassed ? 'Passed' : 'Not run') : 'Not run', enabled && status.loginTestPassed ? 'good' : 'neutral');
+      setSecretState(status.hasClientSecret === true);
+      if (remove) remove.hidden = !enabled;
+      if (test) test.disabled = !enabled;
       const quickRedirect = $('#quick-redirect');
       const quickClientId = $('#quick-client-id');
       if (quickRedirect) quickRedirect.textContent = status.redirectURL || '—';
       if (quickClientId) quickClientId.textContent = status.clientID || '—';
-      if (stateBadge) stateBadge.className = `badge${status.enabled ? ' badge-good' : ''}`;
-      if (status.enabled) {
-        if (issuer) issuer.value = status.issuerURL || '';
-        if (clientId) clientId.value = status.clientID || '';
-        if (clientSecret) { clientSecret.value = ''; clientSecret.placeholder = 'Leave blank to keep the stored secret'; }
-        if (stateBadge) stateBadge.textContent = 'Enabled';
-        if (remove) remove.hidden = false;
-      } else {
-        if (stateBadge) stateBadge.textContent = 'Local only';
-        if (remove) remove.hidden = true;
+    }
+
+    async function refresh(showLoadedBanner = false) {
+      const response = await apiFetch('/api/administration/identity-provider', { headers: { Accept: 'application/json' } });
+      if (!response.ok) throw new Error(`Load failed (${response.status})`);
+      const status = await response.json();
+      render(status);
+      if (showLoadedBanner && status.enabled) {
+        showMessage('OIDC metadata loaded successfully', 'The provider configuration was fetched and validated.', 'success');
       }
     }
 
     try {
-      const response = await apiFetch('/api/administration/identity-provider', { headers: { Accept: 'application/json' } });
-      if (!response.ok) throw new Error(`Load failed (${response.status})`);
-      render(await response.json());
+      await refresh(true);
     } catch (error) {
-      showMessage(error.message || 'Could not load the identity provider configuration.', 'error');
+      showMessage('Could not load the identity provider configuration', error.message || 'The request failed.', 'error');
     }
+
+    if (bannerClose) bannerClose.addEventListener('click', clearMessage);
+    if (reveal) reveal.addEventListener('click', () => {
+      const showing = clientSecret.type === 'text';
+      clientSecret.type = showing ? 'password' : 'text';
+      reveal.setAttribute('aria-label', showing ? 'Show client secret' : 'Hide client secret');
+      reveal.title = showing ? 'Show client secret' : 'Hide client secret';
+    });
+    if (replaceSecret) replaceSecret.addEventListener('click', () => {
+      clientSecret.value = '';
+      clientSecret.placeholder = 'Enter new client secret';
+      clientSecret.type = 'password';
+      clientSecret.focus();
+      clearMessage();
+    });
 
     form.addEventListener('submit', async (event) => {
       event.preventDefault();
       clearMessage();
       const payload = { issuerURL: issuer.value.trim(), clientID: clientId.value.trim(), clientSecret: clientSecret.value };
-      if (!payload.issuerURL || !payload.clientID) { showMessage('Issuer URL and client ID are required.', 'error'); return; }
+      if (!payload.issuerURL || !payload.clientID) { showMessage('Configuration incomplete', 'Issuer URL and client ID are required.', 'error'); return; }
       save.disabled = true; save.textContent = 'Saving…';
       try {
         const response = await apiFetch('/api/administration/identity-provider', {
@@ -3295,10 +3461,29 @@
         const body = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(body.error || `Save failed (${response.status})`);
         render(body);
-        showMessage('Identity provider configuration saved and active.', 'success');
+        showMessage('OIDC metadata loaded successfully', 'The provider configuration was fetched and validated.', 'success');
       } catch (error) {
-        showMessage(error.message || 'Could not save the configuration.', 'error');
+        showMessage('Could not save the configuration', error.message || 'The request failed.', 'error');
       } finally { save.disabled = false; save.textContent = 'Save configuration'; }
+    });
+
+    if (test) test.addEventListener('click', async () => {
+      clearMessage();
+      test.disabled = true;
+      const original = test.innerHTML;
+      test.textContent = 'Testing…';
+      try {
+        const response = await apiFetch('/api/administration/identity-provider/test', { method: 'POST', headers: { Accept: 'application/json' } });
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(body.error || `Test failed (${response.status})`);
+        render(body);
+        showMessage('Connection successful', 'The OIDC discovery endpoint was reached and the configuration is valid.', 'success');
+      } catch (error) {
+        showMessage('Connection failed', error.message || 'The OIDC provider could not be reached.', 'error');
+      } finally {
+        test.disabled = currentStatus.enabled !== true;
+        test.innerHTML = original;
+      }
     });
 
     if (remove) remove.addEventListener('click', async () => {
@@ -3310,415 +3495,299 @@
         if (!response.ok && response.status !== 204) throw new Error(`Remove failed (${response.status})`);
         issuer.value = ''; clientId.value = ''; clientSecret.value = '';
         render({ enabled: false, redirectURL: redirect ? redirect.value : '' });
-        showMessage('OIDC configuration removed. Only the local administrator remains.', 'info');
+        showMessage('OIDC configuration removed', 'Only the local administrator remains available.', 'success');
       } catch (error) {
-        showMessage(error.message || 'Could not remove the configuration.', 'error');
+        showMessage('Could not remove the configuration', error.message || 'The request failed.', 'error');
       } finally { remove.disabled = false; }
     });
-  }
 
-  async function initDefinitionAccessAdmin() {
-    const form = $('#definition-access-form');
-    if (!form) return;
-    const groupInput = $('#defaccess-group');
-    const search = $('#defaccess-search');
-    const rowsBox = $('#defaccess-rows');
-    const selectedBox = $('#defaccess-selected');
-    const selectedCount = $('#defaccess-selected-count');
-    const list = $('#defaccess-list');
-    const save = $('#defaccess-save');
-    const cancel = $('#defaccess-cancel');
-    const banner = $('#defaccess-notice');
-    const sortButton = $('#defaccess-sort-name');
-    let definitions = [];
-    let rules = [];
-    let selected = new Set();
-    let filter = '';
-    let sortDir = 'asc';
-    let loadedGroup = '';
-
-    const showMessage = (message, kind) => { banner.textContent = message; banner.className = `notice notice-${kind} ad-notice`; banner.hidden = false; };
-    const clearMessage = () => { banner.hidden = true; };
-    const descriptionFor = (name) => (definitions.find((definition) => definition.name === name) || {}).description || '';
-    const ruleFor = (group) => { const key = group.trim().toLowerCase(); return key ? rules.find((rule) => (rule.group || '').trim().toLowerCase() === key) || null : null; };
-
-    function renderRows() {
-      rowsBox.replaceChildren();
-      const term = filter.trim().toLowerCase();
-      const items = definitions
-        .filter((definition) => !term || definition.name.toLowerCase().includes(term) || (definition.description || '').toLowerCase().includes(term))
-        .sort((a, b) => { const order = a.name.localeCompare(b.name); return sortDir === 'asc' ? order : -order; });
-      if (!items.length) { rowsBox.append(element('p', 'helper ad-empty', definitions.length ? 'No definitions match your search.' : 'No definitions exist yet.')); return; }
-      for (const definition of items) {
-        const row = element('label', `ad-row${selected.has(definition.name) ? ' is-selected' : ''}`);
-        const check = element('span', 'ad-checkcol');
-        const box = document.createElement('input');
-        box.type = 'checkbox'; box.value = definition.name; box.checked = selected.has(definition.name);
-        box.addEventListener('change', () => { if (box.checked) selected.add(definition.name); else selected.delete(definition.name); sync(); });
-        check.append(box);
-        row.append(check, element('span', 'ad-row-name', definition.name), element('span', 'ad-row-desc', definition.description || '—'));
-        rowsBox.append(row);
-      }
-    }
-
-    function renderSelected() {
-      selectedBox.replaceChildren();
-      const names = [...selected].sort((a, b) => a.localeCompare(b));
-      selectedCount.textContent = `${names.length} selected`;
-      if (!names.length) { selectedBox.append(element('p', 'helper', 'No definitions selected yet.')); return; }
-      for (const name of names) {
-        const item = element('div', 'ad-sel-item');
-        const body = element('div', 'ad-sel-body');
-        body.append(element('strong', 'ad-sel-name', name));
-        body.append(element('small', 'ad-sel-desc', descriptionFor(name) || 'No description'));
-        const remove = element('button', 'ad-sel-remove', '×');
-        remove.type = 'button'; remove.setAttribute('aria-label', `Remove ${name}`);
-        remove.addEventListener('click', () => { selected.delete(name); sync(); });
-        item.append(element('span', 'ad-sel-icon'), body, remove);
-        selectedBox.append(item);
-      }
-    }
-
-    function sync() {
-      rowsBox.querySelectorAll('.ad-row').forEach((row) => {
-        const box = row.querySelector('input');
-        if (box) row.classList.toggle('is-selected', selected.has(box.value));
+    form.querySelectorAll('[data-copy-from]').forEach((button) => {
+      button.addEventListener('click', async () => {
+        const source = document.getElementById(button.dataset.copyFrom);
+        if (!source) return;
+        try {
+          await navigator.clipboard.writeText(source.textContent || '');
+          const original = button.innerHTML;
+          button.textContent = '✓';
+          setTimeout(() => { button.innerHTML = original; }, 1200);
+        } catch (_) { /* Clipboard may be unavailable. */ }
       });
-      renderSelected();
-    }
-
-    function renderRules() {
-      list.replaceChildren();
-      if (!rules.length) { list.append(element('p', 'helper', 'No rules yet.')); return; }
-      for (const rule of rules) {
-        const card = element('div', 'ad-rule');
-        const head = element('div', 'ad-rule-head');
-        head.append(element('span', 'ad-rule-group', rule.group));
-        const actions = element('div', 'ad-rule-actions');
-        const edit = element('button', 'button button-secondary', 'Edit'); edit.type = 'button';
-        edit.addEventListener('click', () => { groupInput.value = rule.group; loadedGroup = rule.group; selected = new Set(rule.definitions || []); clearMessage(); renderRows(); renderSelected(); groupInput.focus(); });
-        const remove = element('button', 'button button-danger', 'Remove'); remove.type = 'button';
-        remove.addEventListener('click', async () => {
-          if (!window.confirm(`Remove definition access for group “${rule.group}”?`)) return;
-          try {
-            const response = await apiFetch(`/api/administration/definition-access?group=${encodeURIComponent(rule.group)}`, { method: 'DELETE' });
-            if (!response.ok && response.status !== 204) throw new Error(`Remove failed (${response.status})`);
-            await refreshRules();
-            if ((groupInput.value || '').trim().toLowerCase() === (rule.group || '').trim().toLowerCase()) { selected = new Set(); loadedGroup = ''; renderRows(); renderSelected(); }
-            showMessage(`Removed access for ${rule.group}.`, 'info');
-          } catch (error) { showMessage(error.message || 'Could not remove the rule.', 'error'); }
-        });
-        actions.append(edit, remove);
-        head.append(actions);
-        const defs = element('div', 'ad-rule-defs');
-        const names = rule.definitions || [];
-        if (!names.length) defs.append(element('span', 'helper', 'no definitions'));
-        else for (const name of names) defs.append(element('span', 'ad-chip', name));
-        card.append(head, defs);
-        list.append(card);
-      }
-    }
-
-    async function refreshRules() {
-      const response = await apiFetch('/api/administration/definition-access', { headers: { Accept: 'application/json' } });
-      if (!response.ok) throw new Error(`Load failed (${response.status})`);
-      const body = await response.json();
-      rules = Array.isArray(body.rules) ? body.rules : [];
-      renderRules();
-    }
-
-    function applyGroupInput() {
-      const group = groupInput.value.trim();
-      if (group.toLowerCase() === loadedGroup.toLowerCase()) return;
-      const rule = ruleFor(group);
-      if (rule) { loadedGroup = rule.group; selected = new Set(rule.definitions || []); renderRows(); renderSelected(); }
-      else { loadedGroup = ''; }
-    }
-
-    try {
-      const definitionsResponse = await apiFetch('/api/applicationdefinitions', { headers: { Accept: 'application/json' } });
-      if (definitionsResponse.ok) {
-        const data = await definitionsResponse.json();
-        definitions = (data.items || [])
-          .map((item) => ({ name: item.metadata?.name, description: item.spec?.description || '' }))
-          .filter((item) => item.name)
-          .sort((a, b) => a.name.localeCompare(b.name));
-      }
-      renderRows();
-      renderSelected();
-      await refreshRules();
-    } catch (error) {
-      showMessage(error.message || 'Could not load definition access.', 'error');
-    }
-
-    groupInput.addEventListener('input', applyGroupInput);
-    search.addEventListener('input', () => { filter = search.value; renderRows(); });
-    sortButton.addEventListener('click', () => { sortDir = sortDir === 'asc' ? 'desc' : 'asc'; sortButton.setAttribute('aria-sort', sortDir === 'asc' ? 'ascending' : 'descending'); renderRows(); });
-    cancel.addEventListener('click', () => { groupInput.value = ''; selected = new Set(); filter = ''; search.value = ''; loadedGroup = ''; clearMessage(); renderRows(); renderSelected(); });
-
-    form.addEventListener('submit', async (event) => {
-      event.preventDefault();
-      clearMessage();
-      const group = groupInput.value.trim();
-      if (!group) { showMessage('A group name is required.', 'error'); return; }
-      save.disabled = true; save.textContent = 'Saving…';
-      try {
-        const response = await apiFetch('/api/administration/definition-access', {
-          method: 'PUT', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-          body: JSON.stringify({ group, definitions: [...selected].sort() })
-        });
-        const body = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(body.error || `Save failed (${response.status})`);
-        rules = Array.isArray(body.rules) ? body.rules : rules;
-        loadedGroup = group;
-        renderRules();
-        showMessage(`Saved definition access for ${group}.`, 'success');
-      } catch (error) {
-        showMessage(error.message || 'Could not save the rule.', 'error');
-      } finally {
-        save.disabled = false; save.textContent = 'Save rule';
-      }
     });
   }
 
-  async function initClusterAccessAdmin() {
-    const form = $('#cluster-access-form');
+  async function initProjectAccessAdmin() {
+    const form = $('#project-access-form');
     if (!form) return;
-    const groupInput = $('#clusaccess-group');
-    const search = $('#clusaccess-search');
-    const rowsBox = $('#clusaccess-rows');
-    const selectedBox = $('#clusaccess-selected');
-    const selectedCount = $('#clusaccess-selected-count');
-    const list = $('#clusaccess-list');
-    const save = $('#clusaccess-save');
-    const cancel = $('#clusaccess-cancel');
-    const banner = $('#clusaccess-notice');
-    const sortButton = $('#clusaccess-sort-name');
-    let clusters = [];
+    const projectSelect = $('#project-access-project');
+    const namespaceInfo = $('#project-access-namespace');
+    const kindSelect = $('#project-access-subject-kind');
+    const kindButtons = [...form.querySelectorAll('[data-project-subject-kind]')];
+    const subjectInput = $('#project-access-subject');
+    const roleSelect = $('#project-access-role');
+    const list = $('#project-access-list');
+    const count = $('#project-access-count');
+    const previewRole = $('#project-access-preview-role');
+    const previewSubject = $('#project-access-preview-subject');
+    const previewNamespace = $('#project-access-preview-namespace');
+    const save = $('#project-access-save');
+    const cancel = $('#project-access-cancel');
+    const banner = $('#project-access-notice');
+    let projects = [];
+    let roles = [];
     let rules = [];
-    let selected = new Set();
-    let filter = '';
-    let sortDir = 'asc';
-    let loadedGroup = '';
 
-    const showMessage = (message, kind) => { banner.textContent = message; banner.className = `notice notice-${kind} ad-notice`; banner.hidden = false; };
+    const showMessage = (message, kind) => { banner.textContent = message; banner.className = `notice notice-${kind} pa-notice`; banner.hidden = false; };
     const clearMessage = () => { banner.hidden = true; };
-    const environmentFor = (name) => (clusters.find((cluster) => cluster.name === name) || {}).environment || '';
-    const ruleFor = (group) => { const key = group.trim().toLowerCase(); return key ? rules.find((rule) => (rule.group || '').trim().toLowerCase() === key) || null : null; };
-
-    function renderRows() {
-      rowsBox.replaceChildren();
-      const term = filter.trim().toLowerCase();
-      const items = clusters
-        .filter((cluster) => !term || cluster.name.toLowerCase().includes(term) || (cluster.environment || '').toLowerCase().includes(term))
-        .sort((a, b) => { const order = a.name.localeCompare(b.name); return sortDir === 'asc' ? order : -order; });
-      if (!items.length) { rowsBox.append(element('p', 'helper ad-empty', clusters.length ? 'No clusters match your search.' : 'No clusters exist yet.')); return; }
-      for (const cluster of items) {
-        const row = element('label', `ad-row${selected.has(cluster.name) ? ' is-selected' : ''}`);
-        const check = element('span', 'ad-checkcol');
-        const box = document.createElement('input');
-        box.type = 'checkbox'; box.value = cluster.name; box.checked = selected.has(cluster.name);
-        box.addEventListener('change', () => { if (box.checked) selected.add(cluster.name); else selected.delete(cluster.name); sync(); });
-        check.append(box);
-        row.append(check, element('span', 'ad-row-name', cluster.name), element('span', 'ad-row-desc', cluster.environment || '—'));
-        rowsBox.append(row);
-      }
-    }
-
-    function renderSelected() {
-      selectedBox.replaceChildren();
-      const names = [...selected].sort((a, b) => a.localeCompare(b));
-      selectedCount.textContent = `${names.length} selected`;
-      if (!names.length) { selectedBox.append(element('p', 'helper', 'No clusters selected yet.')); return; }
-      for (const name of names) {
-        const item = element('div', 'ad-sel-item');
-        const body = element('div', 'ad-sel-body');
-        body.append(element('strong', 'ad-sel-name', name));
-        body.append(element('small', 'ad-sel-desc', environmentFor(name) || 'No environment'));
-        const remove = element('button', 'ad-sel-remove', '×');
-        remove.type = 'button'; remove.setAttribute('aria-label', `Remove ${name}`);
-        remove.addEventListener('click', () => { selected.delete(name); sync(); });
-        item.append(element('span', 'ad-sel-icon'), body, remove);
-        selectedBox.append(item);
-      }
-    }
-
-    function sync() {
-      rowsBox.querySelectorAll('.ad-row').forEach((row) => {
-        const box = row.querySelector('input');
-        if (box) row.classList.toggle('is-selected', selected.has(box.value));
+    const roleLabel = (key) => roles.find((role) => role.key === key)?.label || key;
+    const projectNamespace = (name) => projects.find((project) => project.name === name)?.namespace || '';
+    const updatePreview = () => {
+      if (previewRole) previewRole.textContent = roleLabel(roleSelect.value || 'viewer');
+      if (previewSubject) previewSubject.textContent = `${kindSelect.value || 'Group'}: ${subjectInput.value.trim() || '—'}`;
+      if (previewNamespace) previewNamespace.textContent = projectNamespace(projectSelect.value) || '—';
+    };
+    const setKind = (kind) => {
+      kindSelect.value = kind;
+      kindButtons.forEach((button) => {
+        const active = button.dataset.projectSubjectKind === kind;
+        button.classList.toggle('is-active', active);
+        button.setAttribute('aria-pressed', String(active));
       });
-      renderSelected();
+      updatePreview();
+    };
+
+    function renderProjects() {
+      const selected = projectSelect.value;
+      projectSelect.replaceChildren(new Option('Select a Project', ''));
+      projects.forEach((project) => projectSelect.add(new Option(`${project.name} · ${project.namespace}`, project.name)));
+      if ([...projectSelect.options].some((option) => option.value === selected)) projectSelect.value = selected;
+      else if (projects.length === 1) projectSelect.value = projects[0].name;
+      updateNamespace();
+    }
+
+    function updateNamespace() {
+      const namespace = projectNamespace(projectSelect.value);
+      namespaceInfo.textContent = namespace ? `RoleBinding namespace: ${namespace}` : 'Select a Project to see its namespace.';
+      updatePreview();
+    }
+
+    function renderRoles() {
+      const selected = roleSelect.value;
+      roleSelect.replaceChildren();
+      roles.forEach((role) => roleSelect.add(new Option(role.label, role.key)));
+      if (!state.canAdminister) {
+        const projectAdmin = roleSelect.querySelector('option[value="project-admin"]');
+        if (projectAdmin) projectAdmin.remove();
+      }
+      if ([...roleSelect.options].some((option) => option.value === selected)) roleSelect.value = selected;
+      updatePreview();
     }
 
     function renderRules() {
+      if (count) count.textContent = String(rules.length);
       list.replaceChildren();
-      if (!rules.length) { list.append(element('p', 'helper', 'No rules yet.')); return; }
+      if (!rules.length) { list.append(element('p', 'helper', 'No Project access rules yet.')); return; }
       for (const rule of rules) {
         const card = element('div', 'ad-rule');
         const head = element('div', 'ad-rule-head');
-        head.append(element('span', 'ad-rule-group', rule.group));
+        head.append(element('span', 'ad-rule-group', `${rule.subject} · ${rule.project}`));
         const actions = element('div', 'ad-rule-actions');
         const edit = element('button', 'button button-secondary', 'Edit'); edit.type = 'button';
-        edit.addEventListener('click', () => { groupInput.value = rule.group; loadedGroup = rule.group; selected = new Set(rule.clusters || []); clearMessage(); renderRows(); renderSelected(); groupInput.focus(); });
+        edit.addEventListener('click', () => {
+          projectSelect.value = rule.project;
+          setKind(rule.subjectKind || 'Group');
+          subjectInput.value = rule.subject;
+          roleSelect.value = rule.role;
+          updateNamespace();
+          subjectInput.focus();
+          clearMessage();
+        });
         const remove = element('button', 'button button-danger', 'Remove'); remove.type = 'button';
         remove.addEventListener('click', async () => {
-          if (!window.confirm(`Remove cluster access for group “${rule.group}”?`)) return;
+          if (!window.confirm(`Revoke ${roleLabel(rule.role)} from ${rule.subject} on ${rule.project}?`)) return;
           try {
-            const response = await apiFetch(`/api/administration/cluster-access?group=${encodeURIComponent(rule.group)}`, { method: 'DELETE' });
-            if (!response.ok && response.status !== 204) throw new Error(`Remove failed (${response.status})`);
-            await refreshRules();
-            if ((groupInput.value || '').trim().toLowerCase() === (rule.group || '').trim().toLowerCase()) { selected = new Set(); loadedGroup = ''; renderRows(); renderSelected(); }
-            showMessage(`Removed cluster access for ${rule.group}.`, 'info');
-          } catch (error) { showMessage(error.message || 'Could not remove the rule.', 'error'); }
-        });
-        actions.append(edit, remove);
-        head.append(actions);
-        const defs = element('div', 'ad-rule-defs');
-        const names = rule.clusters || [];
-        if (!names.length) defs.append(element('span', 'helper', 'no clusters'));
-        else for (const name of names) defs.append(element('span', 'ad-chip', name));
-        card.append(head, defs);
-        list.append(card);
-      }
-    }
-
-    async function refreshRules() {
-      const response = await apiFetch('/api/administration/cluster-access', { headers: { Accept: 'application/json' } });
-      if (!response.ok) throw new Error(`Load failed (${response.status})`);
-      const body = await response.json();
-      rules = Array.isArray(body.rules) ? body.rules : [];
-      renderRules();
-    }
-
-    function applyGroupInput() {
-      const group = groupInput.value.trim();
-      if (group.toLowerCase() === loadedGroup.toLowerCase()) return;
-      const rule = ruleFor(group);
-      if (rule) { loadedGroup = rule.group; selected = new Set(rule.clusters || []); renderRows(); renderSelected(); }
-      else { loadedGroup = ''; }
-    }
-
-    try {
-      const response = await apiFetch('/api/clusters', { headers: { Accept: 'application/json' } });
-      if (response.ok) {
-        const data = await response.json();
-        clusters = (data.items || [])
-          .map((item) => ({ name: item.metadata?.name, environment: item.metadata?.labels?.['platform.releaseyard.io/environment'] || '' }))
-          .filter((item) => item.name)
-          .sort((a, b) => a.name.localeCompare(b.name));
-      }
-      renderRows();
-      renderSelected();
-      await refreshRules();
-    } catch (error) {
-      showMessage(error.message || 'Could not load cluster access.', 'error');
-    }
-
-    groupInput.addEventListener('input', applyGroupInput);
-    search.addEventListener('input', () => { filter = search.value; renderRows(); });
-    sortButton.addEventListener('click', () => { sortDir = sortDir === 'asc' ? 'desc' : 'asc'; sortButton.setAttribute('aria-sort', sortDir === 'asc' ? 'ascending' : 'descending'); renderRows(); });
-    cancel.addEventListener('click', () => { groupInput.value = ''; selected = new Set(); filter = ''; search.value = ''; loadedGroup = ''; clearMessage(); renderRows(); renderSelected(); });
-
-    form.addEventListener('submit', async (event) => {
-      event.preventDefault();
-      clearMessage();
-      const group = groupInput.value.trim();
-      if (!group) { showMessage('A group name is required.', 'error'); return; }
-      save.disabled = true; save.textContent = 'Saving…';
-      try {
-        const response = await apiFetch('/api/administration/cluster-access', {
-          method: 'PUT', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-          body: JSON.stringify({ group, clusters: [...selected].sort() })
-        });
-        const body = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(body.error || `Save failed (${response.status})`);
-        rules = Array.isArray(body.rules) ? body.rules : rules;
-        loadedGroup = group;
-        renderRules();
-        showMessage(`Saved cluster access for ${group}.`, 'success');
-      } catch (error) {
-        showMessage(error.message || 'Could not save the rule.', 'error');
-      } finally {
-        save.disabled = false; save.textContent = 'Save rule';
-      }
-    });
-  }
-
-  async function initApplicationAccessAdmin() {
-    const form = $('#application-access-form');
-    if (!form) return;
-    const groupInput = $('#appaccess-group');
-    const list = $('#appaccess-list');
-    const save = $('#appaccess-save');
-    const cancel = $('#appaccess-cancel');
-    const banner = $('#appaccess-notice');
-    let rules = [];
-
-    const showMessage = (message, kind) => { banner.textContent = message; banner.className = `notice notice-${kind} ad-notice`; banner.hidden = false; };
-    const clearMessage = () => { banner.hidden = true; };
-
-    function renderRules() {
-      list.replaceChildren();
-      if (!rules.length) { list.append(element('p', 'helper', 'No rules yet.')); return; }
-      for (const rule of rules) {
-        const card = element('div', 'ad-rule');
-        const head = element('div', 'ad-rule-head');
-        head.append(element('span', 'ad-rule-group', rule.group));
-        const actions = element('div', 'ad-rule-actions');
-        const edit = element('button', 'button button-secondary', 'Edit'); edit.type = 'button';
-        edit.addEventListener('click', () => { groupInput.value = rule.group; groupInput.focus(); clearMessage(); });
-        const remove = element('button', 'button button-danger', 'Remove'); remove.type = 'button';
-        remove.addEventListener('click', async () => {
-          if (!window.confirm(`Revoke application access for group \u201c${rule.group}\u201d? The namespace and its applications are kept.`)) return;
-          try {
-            const response = await apiFetch(`/api/administration/application-access?group=${encodeURIComponent(rule.group)}`, { method: 'DELETE' });
-            if (!response.ok && response.status !== 204) throw new Error(`Remove failed (${response.status})`);
+            const response = await apiFetch(`/api/administration/project-access?project=${encodeURIComponent(rule.project)}&binding=${encodeURIComponent(rule.binding)}`, { method: 'DELETE' });
+            if (!response.ok && response.status !== 204) {
+              const body = await response.json().catch(() => ({}));
+              throw new Error(body.error || `Remove failed (${response.status})`);
+            }
             await refresh();
-            showMessage(`Revoked application access for ${rule.group}.`, 'info');
-          } catch (error) { showMessage(error.message || 'Could not revoke the rule.', 'error'); }
+            showMessage(`Removed ${roleLabel(rule.role)} from ${rule.subject}.`, 'info');
+          } catch (error) { showMessage(error.message || 'Could not remove the rule.', 'error'); }
         });
         actions.append(edit, remove);
         head.append(actions);
         const defs = element('div', 'ad-rule-defs');
         defs.append(element('span', 'ad-chip', rule.namespace));
+        defs.append(element('span', 'ad-chip', roleLabel(rule.role)));
         card.append(head, defs);
         list.append(card);
       }
     }
 
     async function refresh() {
-      const response = await apiFetch('/api/administration/application-access', { headers: { Accept: 'application/json' } });
-      if (!response.ok) throw new Error(`Load failed (${response.status})`);
-      const body = await response.json();
+      const response = await apiFetch('/api/administration/project-access', { headers: { Accept: 'application/json' } });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.error || `Load failed (${response.status})`);
+      projects = Array.isArray(body.projects) ? body.projects : [];
+      roles = Array.isArray(body.roles) ? body.roles : [];
       rules = Array.isArray(body.rules) ? body.rules : [];
+      renderProjects();
+      renderRoles();
       renderRules();
     }
 
-    try { await refresh(); } catch (error) { showMessage(error.message || 'Could not load application access.', 'error'); }
+    kindButtons.forEach((button) => button.addEventListener('click', () => { setKind(button.dataset.projectSubjectKind); subjectInput.focus(); }));
+    subjectInput.addEventListener('input', updatePreview);
+    roleSelect.addEventListener('change', updatePreview);
+    projectSelect.addEventListener('change', updateNamespace);
+    cancel.addEventListener('click', () => { subjectInput.value = ''; setKind('Group'); clearMessage(); });
 
-    cancel.addEventListener('click', () => { groupInput.value = ''; clearMessage(); });
+    try { await refresh(); } catch (error) { showMessage(error.message || 'Could not load Project access.', 'error'); }
 
     form.addEventListener('submit', async (event) => {
       event.preventDefault();
       clearMessage();
-      const group = groupInput.value.trim();
-      if (!group) { showMessage('A group name is required.', 'error'); return; }
-      save.disabled = true; save.textContent = 'Saving\u2026';
+      const project = projectSelect.value;
+      const subject = subjectInput.value.trim();
+      if (!project) { showMessage('Select a Project.', 'error'); return; }
+      if (!subject) { showMessage('A subject name is required.', 'error'); return; }
+      save.disabled = true; save.textContent = 'Saving…';
       try {
-        const response = await apiFetch('/api/administration/application-access', {
+        const response = await apiFetch('/api/administration/project-access', {
           method: 'PUT', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-          body: JSON.stringify({ group })
+          body: JSON.stringify({ project, role: roleSelect.value, subjectKind: kindSelect.value, subject })
+        });
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(body.error || `Save failed (${response.status})`);
+        projects = Array.isArray(body.projects) ? body.projects : projects;
+        roles = Array.isArray(body.roles) ? body.roles : roles;
+        rules = Array.isArray(body.rules) ? body.rules : rules;
+        renderProjects();
+        renderRoles();
+        renderRules();
+        showMessage(`Assigned ${roleLabel(roleSelect.value)} to ${subject} on ${project}.`, 'success');
+      } catch (error) {
+        showMessage(error.message || 'Could not assign the role.', 'error');
+      } finally {
+        save.disabled = false; save.textContent = 'Assign role';
+      }
+    });
+  }
+
+  async function initPlatformAccessAdmin() {
+    const form = $('#platform-access-form');
+    if (!form) return;
+    const kindInput = $('#platform-access-subject-kind');
+    const kindButtons = [...form.querySelectorAll('[data-subject-kind]')];
+    const subjectInput = $('#platform-access-subject');
+    const list = $('#platform-access-list');
+    const count = $('#platform-access-count');
+    const info = $('#platform-access-info');
+    const save = $('#platform-access-save');
+    const cancel = $('#platform-access-cancel');
+    const banner = $('#platform-access-notice');
+    const previewSubject = $('#platform-access-preview-subject');
+    let rules = [];
+
+    const showMessage = (message, kind) => { banner.textContent = message; banner.className = `notice notice-${kind} pa-notice`; banner.hidden = false; };
+    const clearMessage = () => { banner.hidden = true; };
+    const subjectKind = () => kindInput.value || 'Group';
+    const subjectName = () => subjectInput.value.trim();
+
+    function setKind(kind) {
+      kindInput.value = kind;
+      kindButtons.forEach((button) => {
+        const active = button.dataset.subjectKind === kind;
+        button.classList.toggle('is-active', active);
+        button.setAttribute('aria-pressed', String(active));
+      });
+      updatePreview();
+    }
+
+    function updatePreview() {
+      const subject = subjectName();
+      if (previewSubject) previewSubject.textContent = `${subjectKind()}: ${subject || 'administrators'}`;
+      if (info) info.textContent = subject
+        ? `${subjectKind()} “${subject}” will receive platform-wide administrative permissions through a Kubernetes ClusterRoleBinding.`
+        : 'The selected subject will receive platform-wide administrative permissions through a Kubernetes ClusterRoleBinding.';
+    }
+
+    function renderRules() {
+      if (count) count.textContent = String(rules.length);
+      list.replaceChildren();
+      if (!rules.length) {
+        list.append(element('p', 'helper pa-empty', 'No platform admins yet. Assign the first one on the left.'));
+        return;
+      }
+      for (const rule of rules) {
+        const row = element('div', 'pa-admin-row');
+        const avatar = element('span', 'pa-avatar');
+        avatar.append(metaIcon('user'));
+        const main = element('div', 'pa-admin-main');
+        main.append(element('strong', 'pa-admin-name', rule.subject));
+        const meta = element('div', 'pa-admin-meta');
+        meta.append(element('span', 'pa-kind', rule.subjectKind));
+        if (!rule.managed) meta.append(element('span', 'pa-kind pa-kind-muted', 'bootstrap'));
+        main.append(meta);
+        const added = element('span', 'pa-added', rule.createdAt ? `Added ${formatObservedTime(rule.createdAt)}` : '');
+        const actions = element('div', 'pa-admin-actions');
+        if (rule.managed) {
+          const remove = element('button', 'button button-danger pa-remove', 'Remove'); remove.type = 'button';
+          remove.addEventListener('click', async () => {
+            if (!window.confirm(`Remove platform admin from ${rule.subject}?`)) return;
+            try {
+              const response = await apiFetch(`/api/administration/platform-access?binding=${encodeURIComponent(rule.binding)}`, { method: 'DELETE' });
+              if (!response.ok && response.status !== 204) {
+                const body = await response.json().catch(() => ({}));
+                throw new Error(body.error || `Remove failed (${response.status})`);
+              }
+              await refresh();
+              showMessage(`Removed platform admin from ${rule.subject}.`, 'info');
+            } catch (error) { showMessage(error.message || 'Could not remove platform admin.', 'error'); }
+          });
+          actions.append(remove);
+        } else {
+          actions.append(element('span', 'pa-kind pa-kind-muted', 'install-time'));
+        }
+        row.append(avatar, main, added, actions);
+        list.append(row);
+      }
+    }
+
+    async function refresh() {
+      const response = await apiFetch('/api/administration/platform-access', { headers: { Accept: 'application/json' } });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(body.error || `Load failed (${response.status})`);
+      rules = Array.isArray(body.rules) ? body.rules : [];
+      renderRules();
+    }
+
+    kindButtons.forEach((button) => button.addEventListener('click', () => { setKind(button.dataset.subjectKind); subjectInput.focus(); }));
+    subjectInput.addEventListener('input', updatePreview);
+    cancel.addEventListener('click', () => { subjectInput.value = ''; setKind('Group'); clearMessage(); });
+    try { await refresh(); } catch (error) { showMessage(error.message || 'Could not load platform admins.', 'error'); }
+    setKind(kindInput.value || 'Group');
+
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      clearMessage();
+      const subject = subjectName();
+      if (!subject) { showMessage('A subject name is required.', 'error'); return; }
+      save.disabled = true; save.textContent = 'Saving…';
+      try {
+        const response = await apiFetch('/api/administration/platform-access', {
+          method: 'PUT', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify({ subjectKind: subjectKind(), subject })
         });
         const body = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(body.error || `Save failed (${response.status})`);
         rules = Array.isArray(body.rules) ? body.rules : rules;
         renderRules();
-        showMessage(`Granted application access to ${group}.`, 'success');
+        showMessage(`Assigned platform admin to ${subject}.`, 'success');
       } catch (error) {
-        showMessage(error.message || 'Could not grant access.', 'error');
+        showMessage(error.message || 'Could not assign platform admin.', 'error');
       } finally {
-        save.disabled = false; save.textContent = 'Grant access';
+        save.disabled = false; save.textContent = 'Assign platform admin';
       }
     });
   }
@@ -3775,15 +3844,22 @@
   async function refreshCatalog(options = {}) {
     const refreshButtons = [$('#refresh')].filter(Boolean);
     refreshButtons.forEach((button) => { button.disabled = true; });
-    const results = await Promise.allSettled([
-      getList('/api/applicationdefinitions'), getList('/api/clusters')
-    ]);
     let failures = 0;
+    try {
+      state.projects = await getList('/api/projects');
+    } catch (_) {
+      failures++;
+    }
+    const names = new Set(state.projects.map((project) => project.metadata?.name));
+    if (!names.has(state.catalogProject)) state.catalogProject = state.projects[0]?.metadata?.name || '';
+    const results = await Promise.allSettled([
+      getList(withProject('/api/applicationdefinitions')), getList(withProject('/api/clusters'))
+    ]);
     results.forEach((result, index) => {
       if (result.status === 'fulfilled') state[['definitions', 'clusters'][index]] = result.value;
       else failures++;
     });
-    renderDefinitions(); renderClusters();
+    renderDefinitions(); renderClusters(); renderProjects();
     refreshButtons.forEach((button) => { button.disabled = false; });
     if (failures) showNotice(`Could not load ${failures === 1 ? 'one list' : `${failures} lists`}. Try “Refresh data” again.`, 'error');
     else if (!options.preserveNotice) { notice.hidden = true; }
@@ -3794,7 +3870,7 @@
     const button = $('#refresh-applications');
     button.disabled = true;
     try {
-      const [appsResult, definitionsResult, clustersResult] = await Promise.allSettled([getList(withTeam('/api/applications')), getList('/api/applicationdefinitions'), getList('/api/clusters')]);
+      const [appsResult, definitionsResult, clustersResult] = await Promise.allSettled([getList(withTeam('/api/applications')), getList(withProject('/api/applicationdefinitions')), getList(withProject('/api/clusters'))]);
       if (appsResult.status !== 'fulfilled') throw appsResult.reason;
       state.applications = appsResult.value;
       if (definitionsResult.status === 'fulfilled') state.definitions = definitionsResult.value;
@@ -3871,6 +3947,7 @@
       document: 'M5 3h7l3 3v11H5zM12 3v3h3M7.5 9h5M7.5 12h5',
       target: 'M10 3a7 7 0 1 0 0 14 7 7 0 0 0 0-14zM10 7a3 3 0 1 0 0 6 3 3 0 0 0 0-6z',
       cloud: 'M6 15h8a3 3 0 0 0 .4-6A4.5 4.5 0 0 0 6 10a2.5 2.5 0 0 0 0 5z',
+    user: 'M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM4 21c0-4 3.6-6 8-6s8 2 8 6',
       clock: 'M10 3a7 7 0 1 0 0 14 7 7 0 0 0 0-14zM10 6v4l2.5 1.5'
     };
     path.setAttribute('d', paths[kind] || paths.cloud);
@@ -4189,8 +4266,8 @@
     const button = $('#refresh-cloud');
     if (button) button.disabled = true;
     const results = await Promise.allSettled([
-      getList('/api/cloudtargets'),
-      getList('/api/resourcedefinitions'),
+      getList(withProject('/api/cloudtargets')),
+      getList(withProject('/api/resourcedefinitions')),
       getList(withTeam('/api/resources'))
     ]);
     const [targets, definitions, resources] = results;
@@ -4726,6 +4803,14 @@
 
   if (form) {
   $('#back-to-catalog').addEventListener('click', showCatalog);
+  $('#project')?.addEventListener('change', updateProjectDelivery);
+  $('#catalog-project')?.addEventListener('change', (event) => {
+    state.catalogProject = event.currentTarget.value;
+    if ($('#project')) $('#project').value = state.catalogProject;
+    updateProjectDelivery();
+    refreshCatalog({ preserveNotice: true });
+  });
+  $('#delivery')?.addEventListener('change', () => { state.delivery = $('#delivery').value; updateSubmit(); });
   $('#cluster').addEventListener('change', updateSubmit);
   document.querySelectorAll('input[name="destination-mode"]').forEach((radio) => radio.addEventListener('change', () => {
     if (!radio.checked) return;
@@ -4791,6 +4876,7 @@
       name: submittedName, description: $('#app-description')?.value.trim() || '', definitionName: submittedDefinition,
       ...(submittedMode === 'environment' ? { environmentName: submittedEnvironment } : submittedMode === 'clusters' ? { clusters: submittedClusters } : { clusterName: submittedCluster }), values,
       ...(state.team ? { namespace: state.team } : {}),
+      ...(state.projectName ? { projectName: state.projectName, delivery: state.delivery } : {}),
       ...(submittedReleaseNamespace ? { releaseNamespace: submittedReleaseNamespace } : {})
     };
     state.creating = true;
@@ -4803,6 +4889,14 @@
         body: JSON.stringify(payload)
       });
       const body = await response.json().catch(() => ({}));
+      if (response.status === 202) {
+        const requestName = body.metadata?.name || submittedName;
+        form.reset();
+        showCatalog();
+        await refreshCatalog({ preserveNotice: true });
+        showNotice(`GitOps request “${requestName}” accepted. The bridge will open a pull request shortly.`, 'success');
+        return;
+      }
       if (response.status === 409 && submittedMode === 'environment') {
         state.preview = null;
         await fetchEnvironmentPreview(submittedEnvironment);
@@ -4850,13 +4944,10 @@
   } else if ($('#identity-provider-form')) {
     initIdentityProviderAdmin();
   }
-  if ($('#definition-access-form')) {
-    initDefinitionAccessAdmin();
+  if ($('#project-access-form')) {
+    initProjectAccessAdmin();
   }
-  if ($('#cluster-access-form')) {
-    initClusterAccessAdmin();
-  }
-  if ($('#application-access-form')) {
-    initApplicationAccessAdmin();
+  if ($('#platform-access-form')) {
+    initPlatformAccessAdmin();
   }
 })();

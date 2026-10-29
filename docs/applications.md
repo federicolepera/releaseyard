@@ -18,7 +18,7 @@ metadata:
 spec:
   description: Demo application
   chart:
-    repository: http://chartmuseum.chartmuseum.svc.cluster.local:8080
+    repository: oci://ghcr.io/federicolepera/helm-charts
     name: releaseyard-demo
     version: 0.2.0
   release:
@@ -42,8 +42,9 @@ spec:
 
 Rules:
 
-- `chart.repository` must be HTTP(S) and the host must be allowed by the
-  controller.
+- `chart.repository` must be HTTP(S) or OCI, and the host must be allowed by
+  the controller. For OCI, the chart name is appended when the reference is a
+  repository base.
 - `chart.version` must be a pinned semantic version. Floating tags are rejected.
 - `release.namespace` is the target namespace on the workload cluster. It is
   immutable after creation.
@@ -79,6 +80,28 @@ spec:
 
 Only paths declared in the definition can appear under `spec.values`. The
 controller merges the definition defaults with these overrides.
+
+When an Application belongs to a Project, the dashboard only offers the
+ApplicationDefinitions and Clusters listed in `Project.spec.catalog`, and the
+GitOps bridge rejects references outside that catalog.
+
+Applications can only be created in a Project namespace. The dashboard requires
+selecting a Project, and an admission policy rejects Applications and
+ApplicationRequests created in namespaces without the
+`platform.releaseyard.io/project` label.
+
+## Optional GitOps creation
+
+The dashboard can create an Application directly or, when the selected Project
+allows it, through GitOps. The Application spec is the same in both cases.
+
+GitOps mode creates an `ApplicationRequest`; it does not create the Application
+until the PR bridge opens and merges the pull request. The bridge writes
+`apps/<app>/application.yaml` and `apps/<app>/kustomization.yaml`, updates
+`apps/kustomization.yaml`, creates a branch
+and opens a pull request. The request records the branch, commit and PR URL in
+`status`; inspect it in the Project namespace. See [Projects](projects.md) for
+`Project.spec.delivery.mode`.
 
 ## Placement
 

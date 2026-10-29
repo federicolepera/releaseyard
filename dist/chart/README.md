@@ -163,19 +163,22 @@ roleRef:
 
 ### Administration area
 
-The Administration pages (Identity provider, Access definitions, Cluster access,
-Access applications) are available to the built-in local administrator and to
+The Administration pages (Identity provider, Project access, and Platform admins)
+are available to the built-in local administrator and to
 OIDC users whose RBAC already allows the actions the panel performs (the
 dashboard checks `create` on `clusterrolebindings` as the impersonated user, so
 the panel cannot escalate privileges).
 
-To let an OIDC group administer the dashboard, list it in `dashboard.adminGroups`
+To let an OIDC group administer the dashboard, assign it from
+**Administration → Platform admins** after the fresh install. The legacy
+`dashboard.adminGroups` value is no longer supported; use the local
+administrator to assign the first platform admin.
 (requires `rbac.helpers.enabled=true`). The chart binds the shipped
 `<release>-dashboard-admin-role` to each group:
 
 ```yaml
 dashboard:
-  adminGroups:
+  # removed: use Administration -> Platform admins
     - releaseyard:administrators
 ```
 

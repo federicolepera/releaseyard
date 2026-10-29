@@ -28,9 +28,8 @@
               </details>
               <details class="nav-details" open>
                 <summary class="nav-summary"><svg viewBox="0 0 20 20" aria-hidden="true"><rect x="4" y="9" width="12" height="8" rx="1.6"/><path d="M7 9V7a3 3 0 0 1 6 0v2"/></svg><span>Authorization</span><svg class="nav-chevron" viewBox="0 0 20 20" aria-hidden="true"><path d="m6 8 4 4 4-4"/></svg></summary>
-                <a class="side-link side-sub" href="./access-definitions.html"><span>Access definitions</span></a>
-                <a class="side-link side-sub" href="./cluster-access.html"><span>Cluster access</span></a>
-                <a class="side-link side-sub" href="./access-applications.html"><span>Access applications</span></a>
+                <a class="side-link side-sub" href="./access-applications.html"><span>Project access</span></a>
+                <a class="side-link side-sub" href="./platform-admins.html"><span>Platform admins</span></a>
               </details>
             </div>
           </details>
@@ -64,6 +63,7 @@
     <section id="catalog-view" class="catalog-section" aria-labelledby="page-title">
       <div class="catalog-toolbar" role="search">
         <label class="search-field"><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.8" cy="8.8" r="5.5"/><path d="m13 13 4 4"/></svg><span class="visually-hidden">Search templates</span><input id="definition-search" type="search" placeholder="Search templates..." autocomplete="off" aria-controls="definitions"></label>
+        <label class="type-filter"><select id="catalog-project" aria-label="Project catalog"><option value="">No Project</option></select></label>
         <label class="type-filter"><select id="definition-type" aria-label="Filter templates by type"><option value="">All types</option></select></label>
         <label class="type-filter"><select id="definition-category" aria-label="Filter templates by category"><option value="">All categories</option></select></label>
         <label class="sort-field"><select id="definition-sort" aria-label="Sort templates"><option value="name">Sort by Name</option><option value="chart">Sort by Chart</option></select></label>
@@ -96,6 +96,8 @@
             <div class="form-grid">
               <label class="field"><span>Application name <em class="required-star">*</em></span><input id="app-name" name="name" autocomplete="off" required maxlength="53" pattern="[a-z0-9]([-a-z0-9]*[a-z0-9])?" placeholder="e.g. customer-portal"><small>Lowercase letters, numbers and hyphens. Max 53 characters.</small></label>
               <label class="field"><span>Description</span><input id="app-description" name="description" autocomplete="off" maxlength="280" placeholder="Optional"><small>A short description for this application.</small></label>
+              <label class="field"><span>Project</span><select id="project"><option value="">No project (direct only)</option></select><small id="project-hint">Select a Project to enable GitOps delivery.</small></label>
+              <label id="delivery-field" class="field" hidden><span>Delivery</span><select id="delivery"><option value="direct">Direct</option><option value="gitops">GitOps (PR request)</option></select><small id="delivery-hint"></small></label>
             </div>
           </section>
           <section class="create-step">
@@ -126,6 +128,7 @@
             <div id="review-summary" class="review-summary">
               <div class="review-row"><span>Application</span><strong id="review-name">—</strong></div>
               <div class="review-row"><span>Destination</span><strong id="review-destination">—</strong></div>
+              <div class="review-row"><span>Delivery</span><strong id="review-delivery">—</strong></div>
               <div class="review-row"><span>Values</span><strong id="review-values">—</strong></div>
             </div>
             <div class="form-actions"><p id="form-hint" class="helper">Choose a cluster to get started.</p><button id="submit" class="button button-primary" type="submit" disabled>Create application</button></div>

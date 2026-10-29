@@ -5,4 +5,5 @@ resources:
 - platform_v1alpha1_cloudtarget.yaml
 - platform_v1alpha1_resourcedefinition.yaml
 - platform_v1alpha1_resource.yaml
+- platform_v1alpha1_gitconnection.yaml
 # +kubebuilder:scaffold:manifestskustomizesamples

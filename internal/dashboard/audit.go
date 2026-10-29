@@ -106,32 +106,26 @@ func auditEventForRequest(method, path string) string {
 		switch method {
 		case http.MethodPut:
 			return "admin.identity_provider.update"
+		case http.MethodPost:
+			return "admin.identity_provider.test"
 		case http.MethodDelete:
 			return "admin.identity_provider.delete"
 		}
 	}
-	if strings.HasPrefix(path, "/api/administration/definition-access") {
+	if strings.HasPrefix(path, "/api/administration/project-access") {
 		switch method {
 		case http.MethodPut:
-			return "admin.definition_access.update"
+			return "admin.project_access.update"
 		case http.MethodDelete:
-			return "admin.definition_access.delete"
+			return "admin.project_access.delete"
 		}
 	}
-	if strings.HasPrefix(path, "/api/administration/cluster-access") {
+	if strings.HasPrefix(path, "/api/administration/platform-access") {
 		switch method {
 		case http.MethodPut:
-			return "admin.cluster_access.update"
+			return "admin.platform_access.update"
 		case http.MethodDelete:
-			return "admin.cluster_access.delete"
-		}
-	}
-	if strings.HasPrefix(path, "/api/administration/application-access") {
-		switch method {
-		case http.MethodPut:
-			return "admin.application_access.update"
-		case http.MethodDelete:
-			return "admin.application_access.delete"
+			return "admin.platform_access.delete"
 		}
 	}
 	return auditEventAPIWrite
